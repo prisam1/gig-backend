@@ -16,8 +16,8 @@
     "lint": "eslint .",
     "format": "prettier --write .",
     "db:link": "supabase link --project-ref enkokznzruhyldqdpbwg",
-    "db:migrate": "supabase db push",
-    "db:seed": "supabase db push --include-seed"
+    "db:migrate": "supabase db push --linked",
+    "db:seed": "supabase db push --linked --include-seed"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
