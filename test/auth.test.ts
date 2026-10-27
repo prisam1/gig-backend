@@ -98,6 +98,13 @@ describe('authentication on protected routes', () => {
     expect(res.body.error.message).toBe('Your session has ended. Please log in again.');
   });
 
+  it('marks every API response, errors included, as not cacheable', async () => {
+    const res = await request(app).get('/api/v1/me');
+
+    expect(res.status).toBe(401);
+    expect(res.headers['cache-control']).toBe('no-store');
+  });
+
   it('returns 400 for malformed JSON bodies', async () => {
     signInAs();
 

@@ -158,6 +158,11 @@ export async function updateMe(userId: string, input: z.infer<typeof updateMeSch
           avatarFileId: 'Upload the avatar with purpose AVATAR first',
         });
       }
+      if (!(await filesStorage.exists(file.bucket, file.objectKey))) {
+        throw new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', {
+          avatarFileId: 'File has not been uploaded yet',
+        });
+      }
       avatarFileId = file.id;
     }
 

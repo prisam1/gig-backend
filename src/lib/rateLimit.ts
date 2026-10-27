@@ -15,13 +15,21 @@ export const LIMITS = {
   otpSendPerIp: { name: 'otp-send:ip', max: 20, windowSeconds: 3600 },
   otpSendPerDestination: { name: 'otp-send:dest', max: 5, windowSeconds: 3600 },
   otpVerifyPerIp: { name: 'otp-verify:ip', max: 30, windowSeconds: 900 },
+  // Counted per guess on one email or phone, from any IP, so spreading guesses over many IPs
+  // does not help. A correct code resets the count. 6 digits => at most 20 guesses a day.
+  otpVerifyPerDestinationHour: { name: 'otp-verify:dest:h', max: 10, windowSeconds: 3600 },
+  otpVerifyPerDestinationDay: { name: 'otp-verify:dest:d', max: 20, windowSeconds: 86400 },
   loginPerIp: { name: 'login:ip', max: 20, windowSeconds: 900 },
+  // Counted before the password is checked (so parallel requests cannot slip past it) and reset
+  // on a successful login.
   loginFailuresPerAccount: { name: 'login-fail:id', max: 5, windowSeconds: 900 },
   refreshPerIp: { name: 'refresh:ip', max: 60, windowSeconds: 60 },
   passwordResetPerIp: { name: 'pw-reset:ip', max: 10, windowSeconds: 3600 },
   uploadUrlPerUser: { name: 'upload-url:user', max: 30, windowSeconds: 3600 },
   kycSubmitPerUser: { name: 'kyc-submit:user', max: 5, windowSeconds: 3600 },
   followPerUser: { name: 'follow:user', max: 60, windowSeconds: 60 },
+  // Every API request (health checks excepted). The load balancer's WAF adds its own limit.
+  apiPerIp: { name: 'api:ip', max: 300, windowSeconds: 60 },
 } satisfies Record<string, Limit>;
 
 function key(limit: Limit, subject: string | null): string {
@@ -47,14 +55,6 @@ export async function consume(limit: Limit, subject: string | null, db: Db = sql
   if (row && row.count > limit.max) throw tooMany(row.retryAfter);
 }
 
-// Throws 429 if the limit is already used up, without counting a hit.
-export async function assertNotLimited(limit: Limit, subject: string | null): Promise<void> {
-  const [row] = await sql<{ count: number; retryAfter: number }[]>`
-    select count, extract(epoch from expires_at - now())::float8 as retry_after
-    from app.rate_limits where key = ${key(limit, subject)} and expires_at > now()`;
-  if (row && row.count >= limit.max) throw tooMany(row.retryAfter);
-}
-
-export async function reset(limit: Limit, subject: string | null): Promise<void> {
-  await sql`delete from app.rate_limits where key = ${key(limit, subject)}`;
+export async function reset(limit: Limit, subject: string | null, db: Db = sql): Promise<void> {
+  await db`delete from app.rate_limits where key = ${key(limit, subject)}`;
 }

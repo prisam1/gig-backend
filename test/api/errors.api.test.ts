@@ -63,6 +63,8 @@ describe('API conventions', () => {
     spy.mockRestore();
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL');
+    // The database message never reaches the client outside development.
+    expect(res.body.error.message).toBe('Internal server error');
   });
 
   it('sets security headers', async () => {

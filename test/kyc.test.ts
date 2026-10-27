@@ -1,7 +1,8 @@
 import request from 'supertest';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import postgres from 'postgres';
 import { filesRepository } from '../src/modules/files/files.repository';
+import { filesStorage } from '../src/modules/files/files.storage';
 import { kycRepository } from '../src/modules/kyc/kyc.repository';
 import { KYC_CONSENT_VERSION } from '../src/modules/kyc/kyc.service';
 import { AUTH_HEADER, FILE_ID, app, makeFile, makeUser, signInAs } from './helpers';
@@ -21,6 +22,10 @@ function submitKyc(body: object = validBody) {
 }
 
 describe('POST /kyc/submissions', () => {
+  beforeEach(() => {
+    vi.spyOn(filesStorage, 'exists').mockResolvedValue(true);
+  });
+
   it('submits documents and consent for the requested tier', async () => {
     signInAs(makeUser({ requestedTier: 'PRIVE' }));
     vi.spyOn(filesRepository, 'findOwned').mockResolvedValue([makeFile({ id: '10' })]);
@@ -113,6 +118,19 @@ describe('POST /kyc/submissions', () => {
       'documents.0.fileId',
       'documents.1.fileId',
     ]);
+    expect(submit).not.toHaveBeenCalled();
+  });
+
+  it('rejects a document whose file was never uploaded to Storage', async () => {
+    signInAs(makeUser({ requestedTier: 'PRIVE' }));
+    vi.spyOn(filesRepository, 'findOwned').mockResolvedValue([makeFile()]);
+    vi.spyOn(filesStorage, 'exists').mockResolvedValue(false);
+    const submit = vi.spyOn(kycRepository, 'submit');
+
+    const res = await submitKyc();
+
+    expect(res.status).toBe(400);
+    expect(res.body.error.fields).toEqual({ 'documents.0.fileId': 'File has not been uploaded yet' });
     expect(submit).not.toHaveBeenCalled();
   });
 

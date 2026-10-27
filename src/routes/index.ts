@@ -7,7 +7,7 @@ import { kycRouter } from '../modules/kyc/kyc.routes';
 import { reviewsRouter } from '../modules/reviews/reviews.routes';
 import { lookupsRouter } from '../modules/users/lookups.routes';
 import { meRouter, usersRouter } from '../modules/users/users.routes';
-import { noStore } from '../middleware/requestContext';
+import { apiRateLimit, noStore } from '../middleware/requestContext';
 
 export const router = Router();
 
@@ -29,14 +29,17 @@ router.get('/health/ready', async (_req, res) => {
   }
 });
 
+// Everything below: a per-IP request limit, and no caching of any response by proxies or devices.
+router.use(apiRateLimit, noStore);
+
 // ===== Auth and onboarding (Phase 1) =====
-router.use('/auth', noStore, authRouter);
+router.use('/auth', authRouter);
 
 // ===== Users, profile and KYC (Phase 1) =====
-router.use('/me', noStore, meRouter);
+router.use('/me', meRouter);
 router.use('/users', usersRouter);
-router.use('/files', noStore, filesRouter);
-router.use('/kyc', noStore, kycRouter);
+router.use('/files', filesRouter);
+router.use('/kyc', kycRouter);
 router.use('/lookups', lookupsRouter);
 
 // ---------------------------------------------------------------------------------------------

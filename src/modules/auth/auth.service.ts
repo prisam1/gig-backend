@@ -4,7 +4,7 @@ import { decrypt, encrypt, keyedHash, randomToken, safeEqualHex, sha256 } from '
 import { sql, transaction, type Db } from '../../lib/db';
 import { maskDestination, sendNotice, sendOtp, type Channel, type OtpPurpose } from '../../lib/notifier';
 import { burnPasswordCheck, hashPassword, verifyPassword } from '../../lib/password';
-import { LIMITS, assertNotLimited, consume, reset } from '../../lib/rateLimit';
+import { LIMITS, consume, reset } from '../../lib/rateLimit';
 import type { AuthContext } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import type { ClientContext } from '../../middleware/requestContext';
@@ -125,21 +125,33 @@ export async function startChallenge(purpose: Exclude<OtpPurpose, 'SIGNUP'>, ide
       ? await sql<{ id: string }[]>`select id from app.users where email_hash = ${destinationHash} and status = 'ACTIVE'`
       : await sql<{ id: string }[]>`select id from app.users where phone_hash = ${destinationHash} and status = 'ACTIVE'`;
 
-  const challenge = await transaction((tx) =>
-    createChallenge(tx, {
+  const challenge = await transaction(async (tx) => {
+    // Only the newest code for an address and purpose is valid, so older codes cannot be guessed in parallel.
+    await tx`
+      update app.otp_challenges set expires_at = now()
+      where destination_hash = ${destinationHash} and purpose = ${purpose}
+        and verified_at is null and expires_at > now()`;
+    return createChallenge(tx, {
       purpose,
       channel: identifier.channel,
       destinationHash,
       userId: user?.id ?? null,
       isDecoy: !user,
       ip: ctx.ip,
-    }),
-  );
+    });
+  });
   if (user) sendOtp(identifier.channel, identifier.value, challenge.code, purpose);
   if (purpose === 'PASSWORD_RESET') {
     await audit(ctx, 'auth.password.reset_requested', { userId: user?.id ?? null, metadata: { channel: identifier.channel } });
   }
   return challengeView(challenge.publicId, identifier.channel, maskDestination(identifier.channel, identifier.value));
+}
+
+// POST /auth/password/forgot: limited per IP like /auth/otp/send, so one machine cannot request
+// reset codes for many accounts.
+export async function forgotPassword(identifier: Identifier, ctx: ClientContext) {
+  await consume(LIMITS.otpSendPerIp, ctx.ip);
+  return startChallenge('PASSWORD_RESET', identifier, ctx);
 }
 
 type LockedChallenge = ChallengeRow & { destinationHash: string; expired: boolean; secondsSinceSent: number };
@@ -210,6 +222,9 @@ export async function verifyOtp(input: z.infer<typeof otpVerifySchema>, ctx: Cli
     if (c.attempts >= OTP_MAX_ATTEMPTS) {
       return fail(new AppError(429, 'OTP_ATTEMPTS_EXCEEDED', 'Too many incorrect codes. Request a new one.'));
     }
+    // Per address, across every challenge and IP; throws 429 once used up, even for a correct code.
+    await consume(LIMITS.otpVerifyPerDestinationHour, c.destinationHash, tx);
+    await consume(LIMITS.otpVerifyPerDestinationDay, c.destinationHash, tx);
 
     await tx`update app.otp_challenges set attempts = attempts + 1 where id = ${c.id}`;
     if (!codeMatches(c, input.code)) {
@@ -222,6 +237,8 @@ export async function verifyOtp(input: z.infer<typeof otpVerifySchema>, ctx: Cli
       );
     }
     await tx`update app.otp_challenges set verified_at = now() where id = ${c.id}`;
+    await reset(LIMITS.otpVerifyPerDestinationHour, c.destinationHash, tx);
+    await reset(LIMITS.otpVerifyPerDestinationDay, c.destinationHash, tx);
 
     if (c.purpose === 'SIGNUP') return completeSignupStep(tx, c, input.device, ctx);
     if (c.purpose === 'LOGIN') return completeOtpLogin(tx, c, input.device, ctx);
@@ -331,7 +348,8 @@ async function issueResetToken(tx: Db, c: LockedChallenge) {
 export async function login(input: z.infer<typeof loginSchema>, ctx: ClientContext) {
   await consume(LIMITS.loginPerIp, ctx.ip);
   const idHash = identifierHash(input.identifier);
-  await assertNotLimited(LIMITS.loginFailuresPerAccount, idHash);
+  // Counted before the password check, so parallel guesses cannot all pass; reset on success.
+  await consume(LIMITS.loginFailuresPerAccount, idHash);
 
   const [user] =
     input.identifier.channel === 'EMAIL'
@@ -347,7 +365,6 @@ export async function login(input: z.infer<typeof loginSchema>, ctx: ClientConte
   else await burnPasswordCheck(input.password);
 
   if (!user || !valid) {
-    await consume(LIMITS.loginFailuresPerAccount, idHash);
     await audit(ctx, 'auth.login.failed', { userId: user?.id ?? null, metadata: { channel: input.identifier.channel } });
     throw new AppError(401, 'INVALID_CREDENTIALS', 'Incorrect email/phone or password');
   }

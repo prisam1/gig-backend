@@ -52,7 +52,7 @@ authRouter.post('/logout', requireAuth, async (req, res) => {
 
 authRouter.post('/password/forgot', async (req, res) => {
   const { identifier } = parse(forgotPasswordSchema, req.body);
-  const data = await auth.startChallenge('PASSWORD_RESET', identifier, clientContext(req));
+  const data = await auth.forgotPassword(identifier, clientContext(req));
   res.status(202).json({ data });
 });
 

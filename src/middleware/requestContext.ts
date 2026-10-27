@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { Request, RequestHandler } from 'express';
+import { consume, LIMITS } from '../lib/rateLimit';
 
 export const requestId: RequestHandler = (req, res, next) => {
   req.requestId = randomUUID();
@@ -7,10 +8,15 @@ export const requestId: RequestHandler = (req, res, next) => {
   next();
 };
 
-// Auth responses carry tokens and personal data; never let a proxy or device cache them.
+// Responses carry tokens and personal data; never let a proxy or device cache them.
 export const noStore: RequestHandler = (_req, res, next) => {
   res.set('Cache-Control', 'no-store');
   res.set('Pragma', 'no-cache');
+  next();
+};
+
+export const apiRateLimit: RequestHandler = async (req, _res, next) => {
+  await consume(LIMITS.apiPerIp, req.ip ?? null);
   next();
 };
 

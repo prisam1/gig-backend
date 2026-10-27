@@ -4,6 +4,7 @@ import { consume, LIMITS } from '../../lib/rateLimit';
 import { HttpError, validationError, type FieldErrors } from '../../middleware/errorHandler';
 import type { ClientContext } from '../../middleware/requestContext';
 import { filesRepository } from '../files/files.repository';
+import { filesStorage } from '../files/files.storage';
 import { kycRepository } from './kyc.repository';
 import type { SubmitKycInput } from './kyc.schemas';
 
@@ -25,13 +26,17 @@ async function resolveDocumentFiles(user: Member, documents: SubmitKycInput['doc
   const filesByPublicId = new Map(files.map((file) => [file.publicId, file]));
 
   const fields: FieldErrors = {};
-  const resolved = documents.map((doc, index) => {
-    const file = filesByPublicId.get(doc.fileId);
-    if (!file || file.purpose !== 'KYC_DOCUMENT') {
-      fields[`documents.${index}.fileId`] = 'Upload this file with purpose KYC_DOCUMENT first';
-    }
-    return { fileId: file?.id ?? '', documentType: doc.documentType };
-  });
+  const resolved = await Promise.all(
+    documents.map(async (doc, index) => {
+      const file = filesByPublicId.get(doc.fileId);
+      if (!file || file.purpose !== 'KYC_DOCUMENT') {
+        fields[`documents.${index}.fileId`] = 'Upload this file with purpose KYC_DOCUMENT first';
+      } else if (!(await filesStorage.exists(file.bucket, file.objectKey))) {
+        fields[`documents.${index}.fileId`] = 'File has not been uploaded yet';
+      }
+      return { fileId: file?.id ?? '', documentType: doc.documentType };
+    }),
+  );
 
   if (Object.keys(fields).length > 0) throw validationError(fields);
   return resolved;

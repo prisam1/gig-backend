@@ -85,7 +85,8 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     res.status(500).json({
       error: {
         code: 'INTERNAL',
-        message: env.NODE_ENV === 'production' ? 'Internal server error' : String(err?.message ?? err),
+        // Details (SQL errors, stack messages) only on a developer machine, never on a server.
+        message: env.NODE_ENV === 'development' ? String(err?.message ?? err) : 'Internal server error',
       },
     });
     return;

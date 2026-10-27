@@ -53,6 +53,15 @@ describe('POST /files/upload-url', () => {
     });
   });
 
+  it('rejects fields the endpoint does not take', async () => {
+    const res = await request(app)
+      .post('/api/v1/files/upload-url')
+      .set(AUTH_HEADER)
+      .send({ purpose: 'AVATAR', mimeType: 'image/png', sizeBytes: 100, objectKey: 'someone-else/x.png' });
+
+    expect(res.status).toBe(400);
+  });
+
   it('rejects a PDF avatar', async () => {
     const res = await request(app)
       .post('/api/v1/files/upload-url')
