@@ -1,15 +1,8 @@
 import { createClient } from '@supabase/supabase-js';
 import { env } from '../config/env';
 
-// Server-side admin client: bypasses Row Level Security. Never expose this key to the app.
+// Server-side admin client for Supabase Storage. Bypasses Row Level Security; never expose this key.
+// Database queries go through src/lib/db.ts instead.
 export const supabaseAdmin = createClient(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
   auth: { autoRefreshToken: false, persistSession: false },
 });
-
-// Per-request client that acts as the signed-in user, so RLS policies apply.
-export function supabaseForUser(accessToken: string) {
-  return createClient(env.SUPABASE_URL, env.SUPABASE_ANON_KEY, {
-    auth: { autoRefreshToken: false, persistSession: false },
-    global: { headers: { Authorization: `Bearer ${accessToken}` } },
-  });
-}

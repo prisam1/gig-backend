@@ -1,0 +1,137 @@
+import assert from 'node:assert/strict';
+import { describe, it } from 'node:test';
+import { preferencesSchema, tierSchema, updateMeSchema } from '../users/users.schemas';
+import { identifierSchema, loginSchema, otpSendSchema, otpVerifySchema, registerSchema } from './auth.schemas';
+
+const validRegister = {
+  name: 'Aqsa Khan',
+  email: '  Aqsa.Khan@Example.com ',
+  phone: '9857485965',
+  password: 'Str0ng!Pass',
+  ageConfirmed: true,
+};
+
+function fields(result: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }) {
+  assert.equal(result.success, false);
+  return result.error!.issues.map((i) => i.path.join('.'));
+}
+
+describe('register', () => {
+  it('normalises email and phone and defaults to India', () => {
+    const r = registerSchema.parse(validRegister);
+    assert.equal(r.email, 'aqsa.khan@example.com');
+    assert.equal(r.phone, '+919857485965');
+    assert.equal(r.countryCode, '+91');
+  });
+
+  it('accepts UAE numbers with or without the leading 0', () => {
+    assert.equal(registerSchema.parse({ ...validRegister, countryCode: '+971', phone: '501234567' }).phone, '+971501234567');
+    assert.equal(registerSchema.parse({ ...validRegister, countryCode: '+971', phone: '0501234567' }).phone, '+971501234567');
+  });
+
+  it('rejects bad phone numbers', () => {
+    for (const phone of ['985748596', '98574859651', '1857485965', '98574 85965', '+919857485965', '']) {
+      assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, phone })), ['phone'], phone);
+    }
+    assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, countryCode: '+1' })), ['countryCode']);
+  });
+
+  it('enforces the password policy', () => {
+    for (const password of ['Sh0rt!x', 'alllowercase1!', 'ALLUPPER1!', 'NoDigits!!', 'NoSpecial11', 'a'.repeat(129) + 'A1!']) {
+      assert.ok(fields(registerSchema.safeParse({ ...validRegister, password })).includes('password'), password);
+    }
+    assert.ok(registerSchema.safeParse({ ...validRegister, password: 'short1!A' }).success);
+  });
+
+  it('rejects passwords containing the phone or email name', () => {
+    assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, password: 'Xx!9857485965' })), ['password']);
+    assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, password: 'Aqsa.Khan#2026' })), ['password']);
+  });
+
+  it('requires the 18+ confirmation to be exactly true', () => {
+    for (const ageConfirmed of [false, 'true', 1, undefined]) {
+      assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, ageConfirmed })), ['ageConfirmed']);
+    }
+  });
+
+  it('validates names', () => {
+    for (const name of ['Abc', '    Abc   ', 'Robert<script>', '1234 Name', 'a'.repeat(101)]) {
+      assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, name })), ['name'], name);
+    }
+    assert.ok(registerSchema.safeParse({ ...validRegister, name: "Anne-Marie O'Neil" }).success);
+    assert.ok(registerSchema.safeParse({ ...validRegister, name: 'अक्सा ख़ान' }).success);
+  });
+
+  it('rejects unknown fields such as a self-assigned tier', () => {
+    assert.equal(registerSchema.safeParse({ ...validRegister, tier: 'PRIVE' }).success, false);
+  });
+
+  it('rejects non-object bodies', () => {
+    for (const body of [null, [], 'x', 42]) assert.equal(registerSchema.safeParse(body).success, false);
+  });
+});
+
+describe('identifier', () => {
+  it('parses emails and E.164 phones', () => {
+    assert.deepEqual(identifierSchema.parse(' A@B.co '), { channel: 'EMAIL', value: 'a@b.co' });
+    assert.deepEqual(identifierSchema.parse('+919857485965'), { channel: 'PHONE', value: '+919857485965', countryCode: '+91' });
+    assert.deepEqual(identifierSchema.parse('+971501234567'), { channel: 'PHONE', value: '+971501234567', countryCode: '+971' });
+  });
+
+  it('rejects anything else', () => {
+    for (const v of ['9857485965', '+19857485965', 'a@', '@b.com', '', '   ', "' or 1=1 --"]) {
+      assert.equal(identifierSchema.safeParse(v).success, false, v);
+    }
+  });
+});
+
+describe('login and OTP', () => {
+  it('requires a 6-digit code and a UUID challenge', () => {
+    const challengeId = '7f1c2a4e-1b2c-4d3e-8f90-123456789abc';
+    assert.ok(otpVerifySchema.safeParse({ challengeId, code: '012345' }).success);
+    for (const code of ['1234', '12345a', '1234567', 123456]) {
+      assert.equal(otpVerifySchema.safeParse({ challengeId, code }).success, false, String(code));
+    }
+    assert.equal(otpVerifySchema.safeParse({ challengeId: 'not-a-uuid', code: '123456' }).success, false);
+  });
+
+  it('defaults the device platform and rejects unknown ones', () => {
+    const r = loginSchema.parse({ identifier: 'a@b.co', password: 'x' });
+    assert.deepEqual(r.device, { platform: 'OTHER' });
+    assert.equal(loginSchema.safeParse({ identifier: 'a@b.co', password: 'x', device: { platform: 'TV' } }).success, false);
+  });
+
+  it('does not allow starting a SIGNUP challenge through /otp/send', () => {
+    assert.equal(otpSendSchema.safeParse({ purpose: 'SIGNUP', identifier: 'a@b.co' }).success, false);
+    assert.ok(otpSendSchema.safeParse({ purpose: 'LOGIN', identifier: 'a@b.co' }).success);
+  });
+});
+
+describe('onboarding', () => {
+  it('accepts experience as a number or numeric string', () => {
+    assert.equal(updateMeSchema.parse({ experienceYears: '5' }).experienceYears, 5);
+    assert.equal(updateMeSchema.parse({ experienceYears: 12 }).experienceYears, 12);
+    for (const experienceYears of ['5+', -1, 81, 2.5, '']) {
+      assert.equal(updateMeSchema.safeParse({ experienceYears }).success, false, String(experienceYears));
+    }
+  });
+
+  it('rejects an empty update', () => {
+    assert.equal(updateMeSchema.safeParse({}).success, false);
+  });
+
+  it('enforces preference counts', () => {
+    const base = { focus: ['REAL_ASSETS'], risk: ['LOW_LEVEL'], style: ['ARBITRAGE'], sector: ['FINTECH'] };
+    assert.ok(preferencesSchema.safeParse(base).success);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, focus: ['A', 'B'] })), ['focus']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, risk: [] })), ['risk']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, style: ['A', 'B', 'C', 'D'] })), ['style']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, sector: ['A', 'A'] })), ['sector']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, sector: ['lower'] })), ['sector.0']);
+  });
+
+  it('only accepts known tiers', () => {
+    assert.ok(tierSchema.safeParse({ tier: 'PRIVE' }).success);
+    assert.equal(tierSchema.safeParse({ tier: 'ADMIN' }).success, false);
+  });
+});
