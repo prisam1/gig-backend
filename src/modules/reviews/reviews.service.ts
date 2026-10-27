@@ -1,7 +1,7 @@
-import { createHash } from 'node:crypto';
 import type { PostgrestError } from '@supabase/supabase-js';
 import type { PageMeta } from '../../lib/http';
 import { pageRange } from '../../lib/http';
+import { requestHash } from '../../lib/idempotency';
 import type { Member, Tier } from '../../lib/membership';
 import { supabaseAdmin } from '../../lib/supabase';
 import { assertNoFieldErrors, HttpError } from '../../middleware/errorHandler';
@@ -322,10 +322,6 @@ function sentimentFields(input: SubmitReviewInput) {
       throw new Error(`Unhandled sentiment: ${JSON.stringify(unreachable)}`);
     }
   }
-}
-
-function requestHash(input: SubmitReviewInput): string {
-  return createHash('sha256').update(JSON.stringify(input)).digest('hex');
 }
 
 /**

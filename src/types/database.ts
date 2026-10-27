@@ -231,6 +231,85 @@ export type Database = {
           },
         ];
       };
+      credit_ledger: {
+        Row: {
+          id: number;
+          user_id: string;
+          delta: number;
+          balance_after: number;
+          reason: Database['public']['Enums']['credit_reason'];
+          ref_type: string | null;
+          ref_id: string | null;
+          note: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: never;
+          user_id: string;
+          delta: number;
+          balance_after: number;
+          reason: Database['public']['Enums']['credit_reason'];
+          ref_type?: string | null;
+          ref_id?: string | null;
+          note?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: never;
+          user_id?: string;
+          delta?: number;
+          balance_after?: number;
+          reason?: Database['public']['Enums']['credit_reason'];
+          ref_type?: string | null;
+          ref_id?: string | null;
+          note?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'credit_ledger_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
+      };
+      device_tokens: {
+        Row: {
+          token: string;
+          user_id: string;
+          platform: Database['public']['Enums']['device_platform'];
+          app_version: string | null;
+          created_at: string;
+          last_seen_at: string;
+        };
+        Insert: {
+          token: string;
+          user_id: string;
+          platform: Database['public']['Enums']['device_platform'];
+          app_version?: string | null;
+          created_at?: string;
+          last_seen_at?: string;
+        };
+        Update: {
+          token?: string;
+          user_id?: string;
+          platform?: Database['public']['Enums']['device_platform'];
+          app_version?: string | null;
+          created_at?: string;
+          last_seen_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'device_tokens_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
+      };
       files: {
         Row: {
           bucket: string;
@@ -313,6 +392,24 @@ export type Database = {
             referencedColumns: ['id'];
           },
         ];
+      };
+      fx_rates: {
+        Row: {
+          currency: Database['public']['Enums']['currency_code'];
+          per_usd: number;
+          as_of: string;
+        };
+        Insert: {
+          currency: Database['public']['Enums']['currency_code'];
+          per_usd: number;
+          as_of?: string;
+        };
+        Update: {
+          currency?: Database['public']['Enums']['currency_code'];
+          per_usd?: number;
+          as_of?: string;
+        };
+        Relationships: [];
       };
       issuer_tags: {
         Row: {
@@ -505,6 +602,102 @@ export type Database = {
           },
         ];
       };
+      learn_items: {
+        Row: {
+          id: string;
+          title: string;
+          summary: string | null;
+          format: Database['public']['Enums']['learn_format'];
+          category: string | null;
+          access: Database['public']['Enums']['content_access'];
+          thumbnail_url: string | null;
+          content_url: string | null;
+          duration_seconds: number | null;
+          download_path: string | null;
+          rating_avg: number;
+          rating_count: number;
+          status: Database['public']['Enums']['content_status'];
+          published_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          summary?: string | null;
+          format: Database['public']['Enums']['learn_format'];
+          category?: string | null;
+          access?: Database['public']['Enums']['content_access'];
+          thumbnail_url?: string | null;
+          content_url?: string | null;
+          duration_seconds?: number | null;
+          download_path?: string | null;
+          rating_avg?: number;
+          rating_count?: number;
+          status?: Database['public']['Enums']['content_status'];
+          published_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          title?: string;
+          summary?: string | null;
+          format?: Database['public']['Enums']['learn_format'];
+          category?: string | null;
+          access?: Database['public']['Enums']['content_access'];
+          thumbnail_url?: string | null;
+          content_url?: string | null;
+          duration_seconds?: number | null;
+          download_path?: string | null;
+          rating_avg?: number;
+          rating_count?: number;
+          status?: Database['public']['Enums']['content_status'];
+          published_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      learn_ratings: {
+        Row: {
+          learn_item_id: string;
+          user_id: string;
+          rating: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          learn_item_id: string;
+          user_id: string;
+          rating: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          learn_item_id?: string;
+          user_id?: string;
+          rating?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'learn_ratings_learn_item_id_fkey';
+            columns: ['learn_item_id'];
+            isOneToOne: false;
+            referencedRelation: 'learn_items';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'learn_ratings_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
+      };
       lookup_options: {
         Row: {
           active: boolean;
@@ -528,6 +721,99 @@ export type Database = {
           type?: Database['public']['Enums']['lookup_type'];
         };
         Relationships: [];
+      };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: Database['public']['Enums']['notification_type'];
+          title: string;
+          body: string;
+          data: Json;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          type: Database['public']['Enums']['notification_type'];
+          title: string;
+          body: string;
+          data?: Json;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          type?: Database['public']['Enums']['notification_type'];
+          title?: string;
+          body?: string;
+          data?: Json;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'notifications_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
+      };
+      pool_members: {
+        Row: {
+          roadshow_id: string;
+          user_id: string;
+          capital_interest: number;
+          ledger_entry_id: number;
+          idempotency_key: string;
+          request_hash: string;
+          created_at: string;
+        };
+        Insert: {
+          roadshow_id: string;
+          user_id: string;
+          capital_interest: number;
+          ledger_entry_id: number;
+          idempotency_key: string;
+          request_hash: string;
+          created_at?: string;
+        };
+        Update: {
+          roadshow_id?: string;
+          user_id?: string;
+          capital_interest?: number;
+          ledger_entry_id?: number;
+          idempotency_key?: string;
+          request_hash?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'pool_members_ledger_entry_id_fkey';
+            columns: ['ledger_entry_id'];
+            isOneToOne: false;
+            referencedRelation: 'credit_ledger';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'pool_members_roadshow_id_fkey';
+            columns: ['roadshow_id'];
+            isOneToOne: false;
+            referencedRelation: 'roadshows';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'pool_members_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
       };
       review_attachments: {
         Row: {
@@ -744,6 +1030,373 @@ export type Database = {
           },
         ];
       };
+      roadshow_documents: {
+        Row: {
+          id: string;
+          roadshow_id: string;
+          title: string;
+          doc_type: string;
+          storage_path: string;
+          size_bytes: number | null;
+          sort_order: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          roadshow_id: string;
+          title: string;
+          doc_type: string;
+          storage_path: string;
+          size_bytes?: number | null;
+          sort_order?: number;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          roadshow_id?: string;
+          title?: string;
+          doc_type?: string;
+          storage_path?: string;
+          size_bytes?: number | null;
+          sort_order?: number;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'roadshow_documents_roadshow_id_fkey';
+            columns: ['roadshow_id'];
+            isOneToOne: false;
+            referencedRelation: 'roadshows';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      roadshow_financials: {
+        Row: {
+          roadshow_id: string;
+          fiscal_year: number;
+          revenue: number | null;
+          ebitda: number | null;
+          net_profit: number | null;
+          total_assets: number | null;
+          total_liabilities: number | null;
+          net_worth: number | null;
+          total_debt: number | null;
+          cash_and_equivalents: number | null;
+          operating_cash_flow: number | null;
+          eps: number | null;
+        };
+        Insert: {
+          roadshow_id: string;
+          fiscal_year: number;
+          revenue?: number | null;
+          ebitda?: number | null;
+          net_profit?: number | null;
+          total_assets?: number | null;
+          total_liabilities?: number | null;
+          net_worth?: number | null;
+          total_debt?: number | null;
+          cash_and_equivalents?: number | null;
+          operating_cash_flow?: number | null;
+          eps?: number | null;
+        };
+        Update: {
+          roadshow_id?: string;
+          fiscal_year?: number;
+          revenue?: number | null;
+          ebitda?: number | null;
+          net_profit?: number | null;
+          total_assets?: number | null;
+          total_liabilities?: number | null;
+          net_worth?: number | null;
+          total_debt?: number | null;
+          cash_and_equivalents?: number | null;
+          operating_cash_flow?: number | null;
+          eps?: number | null;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'roadshow_financials_roadshow_id_fkey';
+            columns: ['roadshow_id'];
+            isOneToOne: false;
+            referencedRelation: 'roadshows';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      roadshow_improvement_votes: {
+        Row: {
+          roadshow_id: string;
+          user_id: string;
+          expectation: Database['public']['Enums']['pool_expectation'];
+        };
+        Insert: {
+          roadshow_id: string;
+          user_id: string;
+          expectation: Database['public']['Enums']['pool_expectation'];
+        };
+        Update: {
+          roadshow_id?: string;
+          user_id?: string;
+          expectation?: Database['public']['Enums']['pool_expectation'];
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'roadshow_improvement_votes_roadshow_id_user_id_fkey';
+            columns: ['roadshow_id', 'user_id'];
+            isOneToOne: false;
+            referencedRelation: 'pool_members';
+            referencedColumns: ['roadshow_id', 'user_id'];
+          },
+        ];
+      };
+      roadshow_offers: {
+        Row: {
+          id: string;
+          roadshow_id: string;
+          user_id: string;
+          offer_price: number | null;
+          currency: Database['public']['Enums']['currency_code'];
+          expected_roi: number | null;
+          expected_irr: number | null;
+          entry_load: number | null;
+          exit_load: number | null;
+          lock_in_months: number | null;
+          min_investment: number | null;
+          allotment_terms: string | null;
+          payment_terms: string | null;
+          notes: string | null;
+          status: Database['public']['Enums']['offer_status'];
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          roadshow_id: string;
+          user_id: string;
+          offer_price?: number | null;
+          currency: Database['public']['Enums']['currency_code'];
+          expected_roi?: number | null;
+          expected_irr?: number | null;
+          entry_load?: number | null;
+          exit_load?: number | null;
+          lock_in_months?: number | null;
+          min_investment?: number | null;
+          allotment_terms?: string | null;
+          payment_terms?: string | null;
+          notes?: string | null;
+          status?: Database['public']['Enums']['offer_status'];
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          roadshow_id?: string;
+          user_id?: string;
+          offer_price?: number | null;
+          currency?: Database['public']['Enums']['currency_code'];
+          expected_roi?: number | null;
+          expected_irr?: number | null;
+          entry_load?: number | null;
+          exit_load?: number | null;
+          lock_in_months?: number | null;
+          min_investment?: number | null;
+          allotment_terms?: string | null;
+          payment_terms?: string | null;
+          notes?: string | null;
+          status?: Database['public']['Enums']['offer_status'];
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'roadshow_offers_roadshow_id_fkey';
+            columns: ['roadshow_id'];
+            isOneToOne: false;
+            referencedRelation: 'roadshows';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'roadshow_offers_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
+      };
+      roadshow_questions: {
+        Row: {
+          id: string;
+          roadshow_id: string;
+          user_id: string;
+          category: Database['public']['Enums']['question_category'];
+          question: string;
+          status: Database['public']['Enums']['question_status'];
+          featured: boolean;
+          answer: string | null;
+          answered_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          roadshow_id: string;
+          user_id: string;
+          category?: Database['public']['Enums']['question_category'];
+          question: string;
+          status?: Database['public']['Enums']['question_status'];
+          featured?: boolean;
+          answer?: string | null;
+          answered_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          roadshow_id?: string;
+          user_id?: string;
+          category?: Database['public']['Enums']['question_category'];
+          question?: string;
+          status?: Database['public']['Enums']['question_status'];
+          featured?: boolean;
+          answer?: string | null;
+          answered_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'roadshow_questions_roadshow_id_fkey';
+            columns: ['roadshow_id'];
+            isOneToOne: false;
+            referencedRelation: 'roadshows';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'roadshow_questions_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
+      };
+      roadshows: {
+        Row: {
+          id: string;
+          slug: string;
+          issuer_id: string;
+          title: string;
+          summary: string | null;
+          type_of_issue: string;
+          instruments: string;
+          no_of_instruments: number | null;
+          offer_price: number | null;
+          currency: Database['public']['Enums']['currency_code'];
+          lock_in: string | null;
+          maturity: string | null;
+          convertibility: string | null;
+          callable: boolean;
+          coupon_rate: number | null;
+          risk_factors: string[];
+          opens_at: string | null;
+          closes_at: string;
+          pool_enabled: boolean;
+          status: Database['public']['Enums']['content_status'];
+          published_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          slug: string;
+          issuer_id: string;
+          title: string;
+          summary?: string | null;
+          type_of_issue: string;
+          instruments: string;
+          no_of_instruments?: number | null;
+          offer_price?: number | null;
+          currency?: Database['public']['Enums']['currency_code'];
+          lock_in?: string | null;
+          maturity?: string | null;
+          convertibility?: string | null;
+          callable?: boolean;
+          coupon_rate?: number | null;
+          risk_factors?: string[];
+          opens_at?: string | null;
+          closes_at: string;
+          pool_enabled?: boolean;
+          status?: Database['public']['Enums']['content_status'];
+          published_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          slug?: string;
+          issuer_id?: string;
+          title?: string;
+          summary?: string | null;
+          type_of_issue?: string;
+          instruments?: string;
+          no_of_instruments?: number | null;
+          offer_price?: number | null;
+          currency?: Database['public']['Enums']['currency_code'];
+          lock_in?: string | null;
+          maturity?: string | null;
+          convertibility?: string | null;
+          callable?: boolean;
+          coupon_rate?: number | null;
+          risk_factors?: string[];
+          opens_at?: string | null;
+          closes_at?: string;
+          pool_enabled?: boolean;
+          status?: Database['public']['Enums']['content_status'];
+          published_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'roadshows_issuer_id_fkey';
+            columns: ['issuer_id'];
+            isOneToOne: false;
+            referencedRelation: 'issuers';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      saved_items: {
+        Row: {
+          user_id: string;
+          entity_type: Database['public']['Enums']['saved_entity_type'];
+          entity_id: string;
+          created_at: string;
+        };
+        Insert: {
+          user_id: string;
+          entity_type: Database['public']['Enums']['saved_entity_type'];
+          entity_id: string;
+          created_at?: string;
+        };
+        Update: {
+          user_id?: string;
+          entity_type?: Database['public']['Enums']['saved_entity_type'];
+          entity_id?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'saved_items_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
+      };
       tier_history: {
         Row: {
           created_at: string;
@@ -860,6 +1513,7 @@ export type Database = {
         Row: {
           auth_user_id: string;
           created_at: string;
+          credit_balance: number;
           email: string | null;
           id: number;
           kyc_status: Database['public']['Enums']['kyc_status'];
@@ -873,6 +1527,7 @@ export type Database = {
         Insert: {
           auth_user_id: string;
           created_at?: string;
+          credit_balance?: number;
           email?: string | null;
           id?: never;
           kyc_status?: Database['public']['Enums']['kyc_status'];
@@ -886,6 +1541,7 @@ export type Database = {
         Update: {
           auth_user_id?: string;
           created_at?: string;
+          credit_balance?: number;
           email?: string | null;
           id?: never;
           kyc_status?: Database['public']['Enums']['kyc_status'];
@@ -894,6 +1550,87 @@ export type Database = {
           requested_tier?: Database['public']['Enums']['verified_tier'] | null;
           status?: Database['public']['Enums']['user_status'];
           tier?: Database['public']['Enums']['membership_tier'];
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      webinar_registrations: {
+        Row: {
+          webinar_id: string;
+          user_id: string;
+          created_at: string;
+        };
+        Insert: {
+          webinar_id: string;
+          user_id: string;
+          created_at?: string;
+        };
+        Update: {
+          webinar_id?: string;
+          user_id?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'webinar_registrations_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+          {
+            foreignKeyName: 'webinar_registrations_webinar_id_fkey';
+            columns: ['webinar_id'];
+            isOneToOne: false;
+            referencedRelation: 'webinars';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      webinars: {
+        Row: {
+          id: string;
+          title: string;
+          description: string | null;
+          host_name: string | null;
+          starts_at: string;
+          ends_at: string;
+          access: Database['public']['Enums']['content_access'];
+          join_url: string | null;
+          recording_url: string | null;
+          observer_recording_at: string | null;
+          status: Database['public']['Enums']['content_status'];
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          description?: string | null;
+          host_name?: string | null;
+          starts_at: string;
+          ends_at: string;
+          access?: Database['public']['Enums']['content_access'];
+          join_url?: string | null;
+          recording_url?: string | null;
+          observer_recording_at?: string | null;
+          status?: Database['public']['Enums']['content_status'];
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          title?: string;
+          description?: string | null;
+          host_name?: string | null;
+          starts_at?: string;
+          ends_at?: string;
+          access?: Database['public']['Enums']['content_access'];
+          join_url?: string | null;
+          recording_url?: string | null;
+          observer_recording_at?: string | null;
+          status?: Database['public']['Enums']['content_status'];
+          created_at?: string;
           updated_at?: string;
         };
         Relationships: [];
@@ -978,6 +1715,37 @@ export type Database = {
       };
     };
     Functions: {
+      apply_credit_change: {
+        Args: {
+          p_user_id: string;
+          p_delta: number;
+          p_reason: Database['public']['Enums']['credit_reason'];
+          p_ref_type?: string;
+          p_ref_id?: string;
+          p_note?: string;
+        };
+        Returns: Database['public']['Tables']['credit_ledger']['Row'][];
+        SetofOptions: {
+          from: '*';
+          to: 'credit_ledger';
+          isOneToOne: false;
+          isSetofReturn: true;
+        };
+      };
+      join_roadshow_pool: {
+        Args: {
+          p_user_id: string;
+          p_roadshow_id: string;
+          p_capital_interest: number;
+          p_expectations: Database['public']['Enums']['pool_expectation'][];
+          p_idempotency_key: string;
+          p_request_hash: string;
+        };
+        Returns: {
+          joined_at: string;
+          credits_remaining: number;
+        }[];
+      };
       name_initials: {
         Args: { full_name: string };
         Returns: string;
@@ -993,6 +1761,18 @@ export type Database = {
       replace_user_preferences: {
         Args: { p_preferences: Json; p_user_id: number };
         Returns: undefined;
+      };
+      roadshow_pool_power: {
+        Args: { p_roadshow_id: string };
+        Returns: {
+          band: number;
+          band_min: number;
+          band_max: number;
+          band_members: number;
+          band_capital: number;
+          expectation: Database['public']['Enums']['pool_expectation'];
+          votes: number;
+        }[];
       };
       search_companies: {
         Args: {
@@ -1081,6 +1861,11 @@ export type Database = {
     };
     Enums: {
       asset_class: 'EQ' | 'MF' | 'INS' | 'BND' | 'PMS' | 'BRK' | 'RE' | 'CRY';
+      content_access: 'FREE' | 'PREMIUM';
+      content_status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+      credit_reason: 'ADMIN_GRANT' | 'ADMIN_REVOKE' | 'PURCHASE' | 'REFUND' | 'POOL_JOIN';
+      currency_code: 'INR' | 'USD' | 'EUR' | 'GBP' | 'AED';
+      device_platform: 'IOS' | 'ANDROID' | 'WEB';
       display_mode: 'FULL_NAME' | 'INITIALS' | 'ANONYMOUS';
       file_purpose: 'AVATAR' | 'KYC_DOCUMENT' | 'REVIEW_EVIDENCE';
       file_scan_status: 'PENDING' | 'CLEAN' | 'INFECTED';
@@ -1105,9 +1890,24 @@ export type Database = {
         | 'RATING_FACTOR'
         | 'RISK_FACTOR'
         | 'INVESTOR_TYPE';
+      learn_format: 'VIDEO' | 'ARTICLE' | 'REPORT' | 'PODCAST';
       market_country: 'IN' | 'AE' | 'OTHER';
       membership_tier: 'OBSERVER' | 'PRIVE' | 'INSTITUTIONAL';
+      notification_type:
+        'SYSTEM' | 'CREDITS' | 'POOL' | 'ROADSHOW' | 'WEBINAR' | 'REVIEW' | 'LEARN';
+      offer_status: 'PENDING_REVIEW' | 'PUBLISHED' | 'WITHDRAWN' | 'REJECTED';
+      pool_expectation:
+        | 'BETTER_ROI_IRR'
+        | 'SHORTER_LOCK_IN'
+        | 'LOWER_ENTRY_LOAD'
+        | 'LOWER_EXIT_LOAD'
+        | 'PRIORITY_ALLOTMENT'
+        | 'FLEXIBLE_PAYMENT_TERMS'
+        | 'DISCOUNTED_OFFER_PRICE'
+        | 'REGULAR_DISCLOSURES';
       preference_type: 'FOCUS' | 'RISK' | 'STYLE' | 'SECTOR';
+      question_category: 'GENERAL' | 'EQUITY' | 'DEBT' | 'INSURANCE' | 'CRYPTO' | 'MUTUAL_FUNDS';
+      question_status: 'PENDING_MODERATION' | 'PUBLISHED' | 'REJECTED';
       reinvest_status: 'YES' | 'MAYBE' | 'NO';
       resolution_bucket: 'RESOLVED' | 'IN_PROGRESS' | 'UNRESOLVED' | 'NOT_CONTACTED';
       resolution_status:
@@ -1126,6 +1926,7 @@ export type Database = {
         | 'RESOLUTION_UPDATED';
       review_status:
         'PENDING_MODERATION' | 'PUBLISHED' | 'CHANGES_REQUESTED' | 'REJECTED' | 'REMOVED';
+      saved_entity_type: 'COMPANY' | 'ISSUER' | 'ROADSHOW' | 'LEARN_ITEM';
       sentiment: 'Positive' | 'Neutral' | 'Negative';
       user_status: 'ACTIVE' | 'SUSPENDED';
       verified_tier: 'PRIVE' | 'INSTITUTIONAL';
@@ -1151,6 +1952,11 @@ export const Constants = {
   public: {
     Enums: {
       asset_class: ['EQ', 'MF', 'INS', 'BND', 'PMS', 'BRK', 'RE', 'CRY'],
+      content_access: ['FREE', 'PREMIUM'],
+      content_status: ['DRAFT', 'PUBLISHED', 'ARCHIVED'],
+      credit_reason: ['ADMIN_GRANT', 'ADMIN_REVOKE', 'PURCHASE', 'REFUND', 'POOL_JOIN'],
+      currency_code: ['INR', 'USD', 'EUR', 'GBP', 'AED'],
+      device_platform: ['IOS', 'ANDROID', 'WEB'],
       display_mode: ['FULL_NAME', 'INITIALS', 'ANONYMOUS'],
       file_purpose: ['AVATAR', 'KYC_DOCUMENT', 'REVIEW_EVIDENCE'],
       file_scan_status: ['PENDING', 'CLEAN', 'INFECTED'],
@@ -1164,6 +1970,7 @@ export const Constants = {
       ],
       kyc_status: ['NOT_STARTED', 'PENDING', 'APPROVED', 'REJECTED'],
       kyc_submission_status: ['PENDING', 'APPROVED', 'REJECTED'],
+      learn_format: ['VIDEO', 'ARTICLE', 'REPORT', 'PODCAST'],
       lookup_type: [
         'JOB_PROFILE',
         'FOCUS',
@@ -1179,7 +1986,21 @@ export const Constants = {
       ],
       market_country: ['IN', 'AE', 'OTHER'],
       membership_tier: ['OBSERVER', 'PRIVE', 'INSTITUTIONAL'],
+      notification_type: ['SYSTEM', 'CREDITS', 'POOL', 'ROADSHOW', 'WEBINAR', 'REVIEW', 'LEARN'],
+      offer_status: ['PENDING_REVIEW', 'PUBLISHED', 'WITHDRAWN', 'REJECTED'],
+      pool_expectation: [
+        'BETTER_ROI_IRR',
+        'SHORTER_LOCK_IN',
+        'LOWER_ENTRY_LOAD',
+        'LOWER_EXIT_LOAD',
+        'PRIORITY_ALLOTMENT',
+        'FLEXIBLE_PAYMENT_TERMS',
+        'DISCOUNTED_OFFER_PRICE',
+        'REGULAR_DISCLOSURES',
+      ],
       preference_type: ['FOCUS', 'RISK', 'STYLE', 'SECTOR'],
+      question_category: ['GENERAL', 'EQUITY', 'DEBT', 'INSURANCE', 'CRYPTO', 'MUTUAL_FUNDS'],
+      question_status: ['PENDING_MODERATION', 'PUBLISHED', 'REJECTED'],
       reinvest_status: ['YES', 'MAYBE', 'NO'],
       resolution_bucket: ['RESOLVED', 'IN_PROGRESS', 'UNRESOLVED', 'NOT_CONTACTED'],
       resolution_status: [
@@ -1197,6 +2018,7 @@ export const Constants = {
         'REJECTED',
         'REMOVED',
       ],
+      saved_entity_type: ['COMPANY', 'ISSUER', 'ROADSHOW', 'LEARN_ITEM'],
       sentiment: ['Positive', 'Neutral', 'Negative'],
       user_status: ['ACTIVE', 'SUSPENDED'],
       verified_tier: ['PRIVE', 'INSTITUTIONAL'],

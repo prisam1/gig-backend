@@ -57,6 +57,16 @@ export const requireVerifiedPrive: RequestHandler = (req, _res, next) => {
   next();
 };
 
+/** Institutional membership with approved KYC ("Inst." access). Use after `requireUser`. */
+export const requireInstitutional: RequestHandler = (req, _res, next) => {
+  const user = currentUser(req);
+  if (user.tier !== 'INSTITUTIONAL') throw new HttpError(403, 'Institutional membership required');
+  if (user.kycStatus !== 'APPROVED') {
+    throw new HttpError(403, 'KYC verification required', { code: 'KYC_REQUIRED' });
+  }
+  next();
+};
+
 /** Prive (verified) or Institutional ("Full" access). Use after `requireUser`. */
 export const requireFullAccess: RequestHandler = (req, _res, next) => {
   if (!hasFullAccess(currentUser(req))) {

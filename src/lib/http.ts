@@ -16,7 +16,8 @@ export function sendData<T>(res: Response, data: T, status = 200): void {
   res.status(status).json({ data });
 }
 
-export function sendPage<T>(res: Response, data: T[], meta: PageMeta): void {
+/** A list response. `meta` may carry extra counts, e.g. `unread`. */
+export function sendPage<T, M extends PageMeta>(res: Response, data: T[], meta: M): void {
   res.status(200).json({ data, meta });
 }
 
