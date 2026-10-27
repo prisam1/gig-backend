@@ -1,6 +1,8 @@
 import { Router } from 'express';
 import { sql } from '../lib/db';
 import { authRouter } from '../modules/auth/auth.routes';
+import { companiesRouter } from '../modules/catalog/catalog.routes';
+import { reviewsRouter } from '../modules/reviews/reviews.routes';
 import { lookupsRouter } from '../modules/users/lookups.routes';
 import { meRouter } from '../modules/users/users.routes';
 import { noStore } from '../middleware/requestContext';
@@ -33,4 +35,17 @@ router.use('/auth', noStore, authRouter);
 router.use('/me', noStore, meRouter);
 router.use('/lookups', lookupsRouter);
 
-// Feature routers from src/modules are mounted here, e.g. router.use('/reviews', reviewsRouter).
+// ---------------------------------------------------------------------------------------------
+// Catalog and reviews (Phase 1)
+//   GET   /companies                     list with filters
+//   GET   /companies/compare?ids=a,b     side-by-side metrics
+//   GET   /companies/:id                 header, sentiment split, scorecard
+//   GET   /companies/:id/trends          12M / 24M / ALL trends
+//   GET   /companies/:id/reviews         published reviews
+//   POST  /reviews                       submit the 6-step review
+//   GET   /reviews/me                    my reviews
+//   GET   /reviews/:id                   review receipt
+//   PATCH /reviews/:id/resolution        update resolution status and follow-up note
+// ---------------------------------------------------------------------------------------------
+router.use('/companies', companiesRouter);
+router.use('/reviews', reviewsRouter);

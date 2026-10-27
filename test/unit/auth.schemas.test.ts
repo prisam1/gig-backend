@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
-import { describe, it } from 'node:test';
-import { preferencesSchema, tierSchema, updateMeSchema } from '../users/users.schemas';
-import { identifierSchema, loginSchema, otpSendSchema, otpVerifySchema, registerSchema } from './auth.schemas';
+import { describe, it } from 'vitest';
+import { preferencesSchema, tierSchema, updateMeSchema } from '../../src/modules/users/users.schemas';
+import { identifierSchema, loginSchema, otpSendSchema, otpVerifySchema, registerSchema } from '../../src/modules/auth/auth.schemas';
 
 const validRegister = {
   name: 'Aqsa Khan',

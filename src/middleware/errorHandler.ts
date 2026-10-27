@@ -1,4 +1,5 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
+import { z } from 'zod';
 import { env } from '../config/env';
 
 // Every error response has the shape { error: { code, message, fields? } } so the app can show
@@ -15,6 +16,54 @@ export class AppError extends Error {
   }
 }
 
+// Shared codes from the API spec. Modules add their own where the app needs to tell cases apart
+// (for example INVALID_CREDENTIALS).
+export type ErrorCode =
+  | 'VALIDATION_FAILED'
+  | 'UNAUTHENTICATED'
+  | 'FORBIDDEN'
+  | 'KYC_REQUIRED'
+  | 'NOT_FOUND'
+  | 'CONFLICT'
+  | 'IDEMPOTENCY_CONFLICT'
+  | 'INTERNAL';
+
+const defaultCodes: Record<number, ErrorCode> = {
+  400: 'VALIDATION_FAILED',
+  401: 'UNAUTHENTICATED',
+  403: 'FORBIDDEN',
+  404: 'NOT_FOUND',
+  409: 'CONFLICT',
+};
+
+/** An AppError whose code defaults from the status. */
+export class HttpError extends AppError {
+  constructor(
+    status: number,
+    message: string,
+    options: { code?: ErrorCode; fields?: Record<string, string> } = {},
+  ) {
+    super(status, options.code ?? defaultCodes[status] ?? 'INTERNAL', message, options.fields);
+  }
+}
+
+/** Flattens a zod error into `{ "metrics.transparency": "message" }`, first message per field. */
+export function zodFields(error: z.ZodError): Record<string, string> {
+  const fields: Record<string, string> = {};
+  for (const issue of error.issues) {
+    const key = issue.path.length > 0 ? issue.path.join('.') : '_';
+    fields[key] ??= issue.message;
+  }
+  return fields;
+}
+
+/** Throws a 400 VALIDATION_FAILED when business-rule checks produced any field errors. */
+export function assertNoFieldErrors(fields: Record<string, string>): void {
+  if (Object.keys(fields).length > 0) {
+    throw new HttpError(400, 'Validation failed', { fields });
+  }
+}
+
 export const notFound: RequestHandler = (req, _res, next) => {
   next(new AppError(404, 'NOT_FOUND', `Route not found: ${req.method} ${req.path}`));
 };
@@ -22,7 +71,7 @@ export const notFound: RequestHandler = (req, _res, next) => {
 // Errors raised by express.json() before a route runs.
 function bodyParserError(err: unknown): AppError | undefined {
   const type = (err as { type?: string } | null)?.type;
-  if (type === 'entity.parse.failed') return new AppError(400, 'INVALID_JSON', 'Request body is not valid JSON');
+  if (type === 'entity.parse.failed') return new AppError(400, 'VALIDATION_FAILED', 'Malformed JSON body');
   if (type === 'entity.too.large') return new AppError(413, 'PAYLOAD_TOO_LARGE', 'Request body is too large');
   if (type === 'charset.unsupported' || type === 'encoding.unsupported') {
     return new AppError(415, 'UNSUPPORTED_ENCODING', 'Unsupported request encoding');
@@ -31,7 +80,12 @@ function bodyParserError(err: unknown): AppError | undefined {
 }
 
 export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
-  const known = err instanceof AppError ? err : bodyParserError(err);
+  const known =
+    err instanceof AppError
+      ? err
+      : err instanceof z.ZodError
+        ? new AppError(400, 'VALIDATION_FAILED', 'Validation failed', zodFields(err))
+        : bodyParserError(err);
 
   if (!known) {
     console.error(`[${req.requestId}]`, err);

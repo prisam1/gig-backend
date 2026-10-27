@@ -27,6 +27,6 @@ export function verifyAccessToken(token: string): { userPublicId: string; sessio
     const claims = claimsSchema.parse(payload);
     return { userPublicId: claims.sub, sessionPublicId: claims.sid };
   } catch {
-    throw new AppError(401, 'UNAUTHORIZED', 'Invalid or expired access token');
+    throw new AppError(401, 'UNAUTHENTICATED', 'Invalid or expired access token');
   }
 }

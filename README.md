@@ -2,7 +2,7 @@
 
 REST API for the GIG (Global Investorz Group) mobile app. Node.js + TypeScript + Express, with Supabase (Postgres) as the database.
 
-> **Status:** Phase 1 "Auth and onboarding" is implemented. Other modules are not started.
+> **Status:** Phase 1 "Auth and onboarding" and "Catalog and reviews" are implemented. KYC, ratings, representations, roadshows and admin are not built yet.
 
 ## Getting started
 
@@ -19,16 +19,27 @@ The server refuses to start if any required variable is missing or invalid.
 
 ## Scripts
 
-| Command              | Purpose                                              |
-| -------------------- | ---------------------------------------------------- |
-| `npm run dev`        | Start with hot reload (tsx watch), loads `.env`      |
-| `npm run build`      | Compile to `dist/`                                   |
-| `npm start`          | Run the compiled build                               |
-| `npm run db:migrate` | Apply new SQL files in `supabase/migrations/`        |
-| `npm test`           | Unit tests                                           |
-| `npm run typecheck`  | TypeScript check                                     |
-| `npm run lint`       | ESLint                                               |
-| `npm run format`     | Prettier                                             |
+| Command              | Purpose                                             |
+| -------------------- | --------------------------------------------------- |
+| `npm run dev`        | Start with hot reload (nodemon + tsx), loads `.env` |
+| `npm run build`      | Compile to `dist/`                                  |
+| `npm start`          | Run the compiled build                              |
+| `npm run db:migrate` | Apply new SQL files in `supabase/migrations/`       |
+| `npm run typecheck`  | TypeScript check (source and tests)                 |
+| `npm run lint`       | ESLint                                              |
+| `npm run format`     | Prettier                                            |
+| `npm test`           | Run all tests once (Vitest)                         |
+| `npm run test:watch` | Re-run tests on file changes                        |
+
+## Tests
+
+`npm test` runs the whole suite. It needs no database, no Supabase project and no `.env`: the database tests use PGlite (Postgres in WASM), and the HTTP tests use a fake Supabase client and a fake `loadMember`.
+
+| Folder       | What it tests                                                                                                                                                                                                                       |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `test/unit/` | Request validation: sign-up, login, OTP and onboarding rules; every review rule from the plan (per-sentiment fields, 10-800 chars, metrics 1-5, 6 resolution statuses, 400-char note, declarations), list filters, compare ids, trend ranges |
+| `test/db/`   | The real migrations and seed: constraints, review submission and receipt numbers, one active review per product, evidence checks, stats and weighted score, trends, public feed and name masking, search filters, resolution updates |
+| `test/api/`  | Every catalog and review endpoint through Express: access rules per tier and KYC, response shapes, filters and sorting sent to the database, idempotency keys, evidence errors, 400/401/403/404/409 errors                          |
 
 ## Project structure
 
@@ -38,24 +49,79 @@ src/
   app.ts                  # Express app: request id, security headers, CORS, JSON, routes, errors
   config/env.ts           # environment variables, validated with zod
   db/migrate.ts           # migration runner
-  lib/                    # db, crypto (PII encryption), passwords, JWT, rate limits, audit, OTP delivery
-  middleware/             # errors, auth guard, validation, request context
+  lib/
+    db.ts                 # direct Postgres client for the private "app" schema
+    supabase.ts           # typed supabaseAdmin (service role) for catalog/reviews tables and Storage
+    membership.ts         # the signed-in member: session, tier, KYC status and name
+    http.ts               # response envelope, zod parsing, pagination helpers
+    enums.ts              # zod schemas for the database enums
+    ...                   # crypto (PII encryption), passwords, JWT, rate limits, audit, OTP delivery
+  types/database.ts       # typed Supabase schema (tables, views, functions, enums)
+  middleware/             # errors, auth + tier guards, validation, request context
   routes/index.ts         # /api/v1 router; feature routers are mounted here
-  modules/
+  modules/                # one folder per feature: *.routes.ts, *.schemas.ts, *.service.ts
     auth/                 # register, OTP, login, refresh, sessions, password reset
     users/                # /me profile, preferences, tier; /lookups option lists
-supabase/migrations/      # SQL migrations, applied in name order, never edited once applied
+    catalog/  reviews/    # companies, trends, compare; review submission and receipts
+supabase/
+  migrations/             # SQL migrations, applied in name order, never edited once applied
+  seed.sql                # development data
+test/                     # unit/, db/, api/ and helpers/
 ```
 
 ## Database
 
-All tables live in the private `app` schema. The Supabase Data API roles (`anon`, `authenticated`) have no access to it and RLS is enabled with no policies, so the publishable key cannot read or write anything. The API connects with `DATABASE_URL`.
+Apply the schema with `npm run db:migrate`. It runs each new file in `supabase/migrations/` in name order, inside a transaction, records its checksum in `migrations.applied`, and refuses to run if an applied file was edited. To change the schema, add a new file (for example `20261101090000_kyc.sql`). Use only this runner against a database: `supabase db push` keeps its own separate history and would apply the files a second time.
 
-To change the schema, add a new file to `supabase/migrations/` (for example `20261101090000_kyc.sql`) and run `npm run db:migrate`. The runner records each file's checksum and refuses to run if an applied file was edited.
+`supabase/seed.sql` loads the companies and issuers from the app's mock data:
+
+```sh
+psql "$DATABASE_URL" -f supabase/seed.sql   # optional dev data
+```
+
+The data is split into two schemas:
+
+- **`app`** (auth and onboarding): users, sessions, OTP challenges, profiles, preferences, consents, audit log, rate limits. It is private: the Supabase Data API roles (`anon`, `authenticated`) have no access to it. The API connects with `DATABASE_URL` (`src/lib/db.ts`) so these flows run in transactions.
+- **`public`** (catalog and reviews): `companies`, `company_tags`, `issuers`, `issuer_tags`, `reviews`, `review_tags`, `review_attachments`, `review_versions`, `company_stats`, `company_trend_points`, plus the read-only views `company_cards` and `review_feed`, and the private Storage bucket `review-evidence`. The API reads and writes them with the service role (`src/lib/supabase.ts`). Every table has Row Level Security enabled with no policies, so the app cannot query the database directly. The `issuers` tables are read by the Ratings module's APIs.
+
+`src/types/database.ts` mirrors the `public` schema. After a schema change, regenerate it:
+
+```sh
+npx supabase gen types typescript --project-id <ref> --schema public > src/types/database.ts
+```
+
+Company scores give newer reviews more weight, so the stats need a nightly recompute (for example with pg_cron): `select public.recompute_all_company_stats();`
+
+### Users, tier and KYC
+
+Users belong to the auth module (`app.users`). Other modules identify a user by `app.users.public_id` (a uuid): it is stored in `reviews.user_id` and `review_versions.actor_id`, and is the first folder of every evidence path. Tier, KYC status and the reviewer's name (`app.user_profiles.name`) are read in one place, `loadMember` in `src/lib/membership.ts`. The reviewer's name is also saved on each review when it is submitted.
+
+Prive and Institutional are granted only after KYC approval. To test review submission before the KYC module exists, make a user a verified Prive member in the SQL editor (the next request picks it up; no new sign-in needed):
+
+```sql
+update app.users set tier = 'PRIVE', kyc_status = 'APPROVED' where public_id = '<user id>';
+```
+
+## API conventions
+
+All routes are served under `/api/v1`.
+
+- **Auth:** `Authorization: Bearer <access token>` from `/auth/login`, `/auth/otp/verify` or `/auth/refresh`.
+- **Access levels:**
+  - **Public**: no token needed.
+  - **User**: any signed-in tier.
+  - **Prive**: Prive tier with approved KYC.
+  - **Full**: Prive with approved KYC, or Institutional.
+- **Success responses:** `{ "data": ... }`. Lists add `"meta": { "page", "pageSize", "total" }`. Paging is `?page=1&pageSize=20`, with a maximum `pageSize` of 100.
+- **Error responses:** `{ "error": { "code", "message", "fields"? } }`.
+  - Shared codes: `VALIDATION_FAILED`, `UNAUTHENTICATED`, `FORBIDDEN`, `KYC_REQUIRED`, `NOT_FOUND`, `CONFLICT`, `IDEMPOTENCY_CONFLICT`, `INTERNAL`. Some auth routes add their own, such as `INVALID_CREDENTIALS` or `INVALID_REFRESH_TOKEN`.
+  - `fields` maps a field path, such as `metrics.transparency`, to its message.
+- **Submissions:** send an `Idempotency-Key` header (8-128 characters, for example a UUID). The key is saved on the review. A retry with the same key and body returns the same review (with the header `Idempotent-Replayed: true`); the same key with a different body gets `409 IDEMPOTENCY_CONFLICT`.
+- **Filters:** `filter[name]=A,B`. Values within one filter are OR'd; separate filters are AND'd.
 
 ## Auth and onboarding
 
-Phase 1, plan weeks 3-5. All routes are under `/api/v1`. Successful responses are `{ "data": ... }`; errors are `{ "error": { "code", "message", "fields"? } }`.
+Phase 1, plan weeks 3-5.
 
 | Method | Path                    | Access | Purpose                                                                         |
 | ------ | ----------------------- | ------ | ------------------------------------------------------------------------------- |
@@ -115,3 +181,82 @@ The account only exists once both email and phone are verified. A pending sign-u
 - **Phone at sign-up:** send the country code (`+91` by default, or `+971`).
 - **Forgot password:** the app needs a "new password" screen that calls `/auth/password/reset`.
 - **Tier choice:** choosing Prive or Institutional records a request (`requestedTier`). The tier itself changes only after KYC approval.
+
+## Catalog and reviews
+
+| Method | Path                              | Access | Purpose                                                                                                                          |
+| ------ | --------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/companies`                      | Public | Company list with search, sort and filters (see below)                                                                           |
+| GET    | `/companies/compare?ids=a,b`      | User   | 2-4 companies side by side ("across"). Resolution lens and 12-month change for Full only                                         |
+| GET    | `/companies/:id`                  | Public | Header, sentiment split, 5-metric scorecard. `analytics` (resolution lens, momentum) for Full only                               |
+| GET    | `/companies/:id/trends?range=12M` | Full   | Monthly overall-satisfaction and positive-sentiment series. `range` is `12M`, `24M` or `ALL`                                     |
+| GET    | `/companies/:id/reviews`          | Public | Published reviews (see below)                                                                                                    |
+| POST   | `/reviews`                        | Prive  | Submit a review. Needs `Idempotency-Key`. Returns the full receipt (`receiptNo`, reviewer, company, status `PENDING_MODERATION`) |
+| GET    | `/reviews/me`                     | User   | My reviews. Optional `?status=` filter                                                                                           |
+| GET    | `/reviews/:id`                    | User   | Owner: the full receipt with evidence and status timeline. Others: the published review                                          |
+| PATCH  | `/reviews/:id/resolution`         | Prive  | Reviewer only: `resolutionStatus` and `followUpNote` (omit to keep it, `null` to clear it)                                       |
+
+**`GET /companies`**
+
+- `q`: matches company names and tags.
+- `sort`: `relevant`, `recent`, `trending`, `top_rated`, `most_reviewed` or `improving`.
+- Filters: `filter[sentiment]`, `filter[assetClass]`, `filter[resolution]`, `filter[score]`, `filter[country]`, `filter[investedStatus]`, `filter[year]`. Years are `2024` or `before_2021`.
+
+**`GET /companies/:id/reviews`**
+
+- Each review has `detail: "SUMMARY"` for Observers and signed-out visitors, or `detail: "FULL"` for Full members.
+- `sort`: `recent`, `oldest`, `highest` or `lowest`.
+- Filters: `sentiment`, `resolution`, `assetClass`, `investedStatus`, `year`.
+
+New reviews stay `PENDING_MODERATION` and do not count towards public numbers until a moderator sets `status = 'PUBLISHED'`. That moderation step belongs to the admin module, which is not built yet. Company stats recompute automatically whenever a published review changes.
+
+### Submitting a review
+
+`sentiment` decides which fields are required:
+
+| Sentiment | Required fields                                                                                     |
+| --------- | --------------------------------------------------------------------------------------------------- |
+| Positive  | `appreciations` (1+), `detailedReview` (10-800 chars), `reinvestStatus` (`YES`, `MAYBE`, `NO`)      |
+| Neutral   | `mixedReview` and `detailedReview` (10-800 chars each)                                              |
+| Negative  | `concerns` (1+), `contactStatus` (1+), `negativeDescription` (10-800 chars), `evidence` (1-5 files) |
+
+`investmentYear` is a year or `"OLDER"`.
+
+Option codes (appreciations, concerns, contact statuses, document types) are fixed lists in `src/modules/reviews/reviews.schemas.ts`, with the same values checked by the database.
+
+Evidence files are uploaded with `POST /files/upload-url`, which belongs to the "Users, profile and KYC" section and is not part of this module. Uploads go into the private bucket `review-evidence` at `<user_id>/<file name>`, where `<user_id>` is the user's `public_id`. The review sends each file's path as `evidence[].path`. On submission, this module checks that each file is in the reviewer's own folder, exists in Storage and isn't attached to another review.
+
+```json
+POST /api/v1/reviews
+Idempotency-Key: 7d0f6c2e-1b7a-4f0e-9a51-3f1c2b9e8a10
+
+{
+  "companyId": "8f1c…",
+  "country": "IN",
+  "assetClass": "MF",
+  "productScheme": "Bluechip Fund - Direct Growth",
+  "investmentYear": 2024,
+  "investmentStatus": "CURRENTLY_INVESTED",
+  "sentiment": "Negative",
+  "concerns": ["DELAY_IN_RESPONSE"],
+  "contactStatus": ["CONTACTED_NO_RESPONSE"],
+  "negativeDescription": "Redemption took 21 days …",
+  "evidence": [{ "path": "<your user id>/statement.pdf", "docType": "STATEMENT" }],
+  "metrics": { "transparency": 2, "responsiveness": 1, "easeOfProcess": 2, "trustworthiness": 2, "overallSatisfaction": 2 },
+  "resolutionStatus": "CLOSED_UNRESOLVED",
+  "displayMode": "INITIALS",
+  "declarations": { "kycVerified": true, "genuine": true, "understandInsights": true, "allowContact": false }
+}
+```
+
+### Mapping the app's current values to API codes
+
+| In the app                                                                                         | API code                                                                                           |
+| -------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| Investment status `yes` / `maybe` ("Excited") / `no`                                               | `CURRENTLY_INVESTED` / `EXITED` / `NEVER_INVESTED`                                                 |
+| Resolution `not_contacted`, `contacted`, `in_progress`, `resolved`, `partially_resolved`, `closed` | `NOT_CONTACTED`, `CONTACTED`, `IN_PROGRESS`, `RESOLVED`, `PARTIALLY_RESOLVED`, `CLOSED_UNRESOLVED` |
+| Country India / UAE / Other                                                                        | `IN` / `AE` / `OTHER`                                                                              |
+| Asset class "Trading Platform"                                                                     | `BRK` (Broker / Platform)                                                                          |
+| Invest again Yes / Maybe / No                                                                      | `YES` / `MAYBE` / `NO`                                                                             |
+| Tag labels (appreciations, concerns, contact status, document types)                               | Codes listed in `reviews.schemas.ts`                                                               |
+| Company name typed as free text                                                                    | `companyId`, picked from `GET /companies?q=`                                                       |

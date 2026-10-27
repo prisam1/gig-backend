@@ -2,11 +2,10 @@ import type { z } from 'zod';
 import { audit } from '../../lib/audit';
 import { decrypt } from '../../lib/crypto';
 import { sql, transaction, type Db } from '../../lib/db';
+import type { Tier } from '../../lib/membership';
 import { AppError } from '../../middleware/errorHandler';
 import type { ClientContext } from '../../middleware/requestContext';
 import type { LookupType, preferencesSchema, tierSchema, updateMeSchema } from './users.schemas';
-
-export type Tier = 'OBSERVER' | 'PRIVE' | 'INSTITUTIONAL';
 
 interface Option {
   code: string;

@@ -7,14 +7,15 @@
     "node": ">=22.11"
   },
   "scripts": {
-    "dev": "tsx watch --env-file-if-exists=.env src/server.ts",
+    "dev": "nodemon --watch src --ext ts --exec \"tsx --env-file-if-exists=.env src/server.ts\"",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
-    "typecheck": "tsc --noEmit",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "test": "vitest run",
+    "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "db:migrate": "node --env-file=.env --import tsx src/db/migrate.ts",
-    "test": "tsx --test \"src/**/*.test.ts\""
+    "db:migrate": "node --env-file=.env --import tsx src/db/migrate.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",
@@ -28,15 +29,20 @@
     "zod": "^4.6.7"
   },
   "devDependencies": {
+    "@electric-sql/pglite": "^0.5.12",
     "@eslint/js": "^10.0.1",
     "@types/cors": "^2.8.19",
     "@types/express": "^5.0.6",
     "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^26.6.5",
+    "@types/supertest": "^7.2.1",
     "eslint": "^10.13.0",
+    "nodemon": "^3.1.14",
     "prettier": "^3.9.10",
+    "supertest": "^7.3.1",
     "tsx": "^4.23.15",
     "typescript": "^6.0.3",
-    "typescript-eslint": "^8.72.1"
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^5.0.5"
   }
 }
