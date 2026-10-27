@@ -42,7 +42,7 @@ The server refuses to start if any required variable is missing or invalid.
 | Folder       | What it tests                                                                                                                                                                                                                       |
 | ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `test/unit/` | Request validation: sign-up, login, OTP and onboarding rules; every review rule from the plan (per-sentiment fields, 10-800 chars, metrics 1-5, 6 resolution statuses, 400-char note, declarations), list filters, compare ids, trend ranges |
-| `test/db/`   | The real migrations and seed: constraints, review submission and receipt numbers, one active review per product, evidence checks, stats and weighted score, trends, public feed and name masking, search filters, resolution updates |
+| `test/db/`   | All migrations in PGlite. The `app_*` functions: sign-up, OTP limits and decoys, sessions, refresh-token theft, password reset, tier, KYC, who may call them, append-only audit log. Catalog and reviews: constraints, review submission and receipt numbers, one active review per product, evidence checks, stats and weighted score, trends, public feed and name masking, search filters, resolution updates |
 | `test/api/`  | Every catalog and review endpoint through Express: access rules per tier and KYC, response shapes, filters and sorting sent to the database, idempotency keys, evidence errors, 400/401/403/404/409 errors                          |
 
 ## Project structure
@@ -53,7 +53,7 @@ src/
   app.ts                  # Express app: request id, security headers, CORS, JSON, routes, errors
   config/env.ts           # environment variables, validated with zod
   lib/
-    db.ts                 # direct Postgres client for the private "app" schema
+    db.ts                 # callDb(): the app_* database functions, through supabase-js
     supabase.ts           # typed supabaseAdmin (service role) for catalog/reviews tables and Storage
     membership.ts         # the signed-in member: session, tier, KYC status and name
     http.ts               # response envelope, zod parsing, pagination helpers
@@ -89,9 +89,9 @@ The CLI records applied migrations in `supabase_migrations.schema_migrations`. T
 
 `supabase/seed.sql` loads the companies and issuers from the app's mock data (`npm run db:seed`). It is safe to run again: existing rows are skipped. The sign-up option lists (job profiles, focus, risk, styles, sectors) are inserted by the auth migration itself.
 
-The data is split into two schemas:
+The API has one way into the database: supabase-js with the service-role key (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; no database password or connection string). The data is split into two schemas:
 
-- **`app`** (auth, onboarding, profile and KYC): users, sessions, OTP challenges, profiles, preferences, follows, files, KYC submissions and documents, consents, audit log, rate limits. It is private: the Supabase Data API roles (`anon`, `authenticated`) have no access to it. The API connects with `DATABASE_URL` (`src/lib/db.ts`) so these flows run in transactions.
+- **`app`** (auth, onboarding, profile and KYC): users, sessions, OTP challenges, profiles, preferences, follows, files, KYC submissions and documents, consents, audit log, rate limits. It is not exposed by the Supabase API at all. The server reaches it only through the `public.app_*` database functions (`supabase/migrations/20261027160000_app_functions.sql`, called via `callDb` in `src/lib/db.ts`). Each function is one transaction, runs as its owner, and can be called by the service role only; the publishable key gets "permission denied". Hashing, encryption and token generation stay in the API, so the database only ever stores hashes and ciphertext.
 - **`public`** (catalog and reviews): `companies`, `company_tags`, `issuers`, `issuer_tags`, `reviews`, `review_tags`, `review_attachments`, `review_versions`, `company_stats`, `company_trend_points`, plus the read-only views `company_cards` and `review_feed`, and the private Storage bucket `review-evidence`. The API reads and writes them with the service role (`src/lib/supabase.ts`). Every table has Row Level Security enabled with no policies, so the app cannot query the database directly. The `issuers` tables are read by the Ratings module's APIs.
 
 `src/types/database.ts` mirrors the `public` schema. After a schema change, regenerate it:

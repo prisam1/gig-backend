@@ -1,17 +1,17 @@
 import type { z } from 'zod';
+import { env } from '../../config/env';
 import { audit } from '../../lib/audit';
-import { decrypt, encrypt, keyedHash, randomToken, safeEqualHex, sha256 } from '../../lib/crypto';
-import { sql, transaction, type Db } from '../../lib/db';
+import { decrypt, encrypt, keyedHash, randomToken, sha256 } from '../../lib/crypto';
+import { callDb } from '../../lib/db';
 import { maskDestination, sendNotice, sendOtp, type Channel, type OtpPurpose } from '../../lib/notifier';
 import { burnPasswordCheck, hashPassword, verifyPassword } from '../../lib/password';
-import { LIMITS, consume, reset } from '../../lib/rateLimit';
+import { LIMITS, consume, limitArg, reset, tooMany } from '../../lib/rateLimit';
 import type { AuthContext } from '../../middleware/auth';
 import { AppError } from '../../middleware/errorHandler';
 import type { ClientContext } from '../../middleware/requestContext';
 import { loadUser } from '../users/users.service';
 import {
   passwordContainsIdentity,
-  type DeviceInfo,
   type Identifier,
   type loginSchema,
   type otpSendSchema,
@@ -24,33 +24,58 @@ import {
   OTP_MAX_ATTEMPTS,
   OTP_MAX_SENDS,
   OTP_RESEND_COOLDOWN_SECONDS,
+  OTP_TTL_SECONDS,
   challengeView,
-  codeMatches,
-  createChallenge,
-  reissueChallenge,
-  type ChallengeRow,
+  codeHash,
+  issueCode,
 } from './otp';
-import { createSession, parseRefreshToken, revokeAllSessions, rotateSession } from './sessions';
+import { newSession, parseRefreshToken, tokenPair } from './sessions';
 
-const SIGNUP_TTL = '1 hour';
+const SIGNUP_TTL_SECONDS = 3600;
 const RESET_TOKEN_TTL_SECONDS = 600;
 const AGE_CONSENT_VERSION = '2026-10-27';
 
 const emailHash = (email: string) => keyedHash('email', email);
 const phoneHash = (phone: string) => keyedHash('phone', phone);
 const identifierHash = (id: Identifier) => (id.channel === 'EMAIL' ? emailHash(id.value) : phoneHash(id.value));
+const decryptContact = (channel: Channel, value: string) => decrypt(value, channel === 'EMAIL' ? 'email' : 'phone');
 
 const fieldError = (field: string, message: string) =>
   new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', { [field]: message });
 
-// Inside a transaction, failures that must still save state (a wrong OTP attempt, a revoked
-// session) are returned instead of thrown, so the transaction commits first.
-type Outcome<T> = { ok: true; value: T } | { ok: false; error: AppError };
-const ok = <T>(value: T): Outcome<T> => ({ ok: true, value });
-const fail = (error: AppError): Outcome<never> => ({ ok: false, error });
-function unwrap<O extends Outcome<unknown>>(outcome: O): Extract<O, { ok: true }>['value'] {
-  if (!outcome.ok) throw outcome.error;
-  return outcome.value;
+// Database functions report expected failures as { error } instead of raising, so the state that
+// must be kept (a counted OTP attempt, a revoked session) is committed.
+interface DbFailure {
+  error: string;
+  retryAfter?: number;
+  remaining?: number;
+}
+const failed = <T extends object>(result: T | DbFailure): result is DbFailure => 'error' in result;
+
+const signupExpired = () => new AppError(410, 'SIGNUP_EXPIRED', 'This sign-up has expired. Please register again.');
+const invalidCode = () => new AppError(400, 'OTP_INVALID', 'Invalid or expired code');
+
+function otpError(f: DbFailure): AppError {
+  switch (f.error) {
+    case 'OTP_EXPIRED':
+      return new AppError(400, 'OTP_EXPIRED', 'This code has expired. Request a new one.');
+    case 'OTP_ATTEMPTS_EXCEEDED':
+      return new AppError(429, 'OTP_ATTEMPTS_EXCEEDED', 'Too many incorrect codes. Request a new one.');
+    case 'OTP_INCORRECT': {
+      const remaining = f.remaining ?? 0;
+      return new AppError(400, 'OTP_INVALID', `Incorrect code. ${remaining} attempt${remaining === 1 ? '' : 's'} left.`, {
+        code: 'Incorrect code',
+      });
+    }
+    case 'RATE_LIMITED':
+      return tooMany(f.retryAfter ?? 60);
+    case 'SIGNUP_EXPIRED':
+      return signupExpired();
+    case 'ACCOUNT_EXISTS':
+      return new AppError(409, 'ACCOUNT_EXISTS', 'An account with this email or phone already exists. Log in or reset your password.');
+    default:
+      return invalidCode();
+  }
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -66,41 +91,39 @@ export async function register(input: z.infer<typeof registerSchema>, ctx: Clien
   await consume(LIMITS.otpSendPerDestination, eHash);
   await consume(LIMITS.otpSendPerDestination, pHash);
 
-  const passwordHash = await hashPassword(input.password);
-  const [taken] = await sql<{ emailTaken: boolean; phoneTaken: boolean }[]>`
-    select exists (select 1 from app.users where email_hash = ${eHash}) as email_taken,
-           exists (select 1 from app.users where phone_hash = ${pHash}) as phone_taken`;
-  const emailTaken = taken?.emailTaken ?? true;
-  const phoneTaken = taken?.phoneTaken ?? true;
+  const email = issueCode();
+  const phone = issueCode();
+  const started = await callDb<{ signupId: string; expiresAt: string; emailTaken: boolean; phoneTaken: boolean }>(
+    'app_signup_start',
+    {
+      p_signup: {
+        name: input.name,
+        emailEnc: encrypt(input.email, 'email'),
+        emailHash: eHash,
+        countryCode: input.countryCode,
+        phoneEnc: encrypt(input.phone, 'phone'),
+        phoneHash: pHash,
+        passwordHash: await hashPassword(input.password),
+        ttlSeconds: SIGNUP_TTL_SECONDS,
+        otpTtlSeconds: OTP_TTL_SECONDS,
+      },
+      p_email_challenge: email.stored,
+      p_phone_challenge: phone.stored,
+      p_ctx: ctx,
+    },
+  );
 
-  const created = await transaction(async (tx) => {
-    const [signup] = await tx<{ id: string; publicId: string; expiresAt: Date }[]>`
-      insert into app.signup_requests (name, email_enc, email_hash, phone_country_code, phone_enc,
-        phone_hash, password_hash, age_confirmed_at, created_ip, user_agent, app_version, expires_at)
-      values (${input.name}, ${encrypt(input.email, 'email')}, ${eHash}, ${input.countryCode},
-        ${encrypt(input.phone, 'phone')}, ${pHash}, ${passwordHash}, now(), ${ctx.ip}, ${ctx.userAgent},
-        ${ctx.appVersion}, now() + ${SIGNUP_TTL}::interval)
-      returning id, public_id, expires_at`;
-    if (!signup) throw new Error('signup insert returned no row');
-
-    const base = { purpose: 'SIGNUP' as const, signupRequestId: signup.id, ip: ctx.ip };
-    const email = await createChallenge(tx, { ...base, channel: 'EMAIL', destinationHash: eHash, isDecoy: emailTaken });
-    const phone = await createChallenge(tx, { ...base, channel: 'PHONE', destinationHash: pHash, isDecoy: phoneTaken });
-    await audit(ctx, 'auth.register.started', { metadata: { signupId: signup.publicId } }, tx);
-    return { signup, email, phone };
-  });
-
-  if (emailTaken) sendNotice('EMAIL', input.email, 'ACCOUNT_EXISTS');
-  else sendOtp('EMAIL', input.email, created.email.code, 'SIGNUP');
-  if (phoneTaken) sendNotice('PHONE', input.phone, 'ACCOUNT_EXISTS');
-  else sendOtp('PHONE', input.phone, created.phone.code, 'SIGNUP');
+  if (started.emailTaken) sendNotice('EMAIL', input.email, 'ACCOUNT_EXISTS');
+  else sendOtp('EMAIL', input.email, email.code, 'SIGNUP');
+  if (started.phoneTaken) sendNotice('PHONE', input.phone, 'ACCOUNT_EXISTS');
+  else sendOtp('PHONE', input.phone, phone.code, 'SIGNUP');
 
   return {
-    signupId: created.signup.publicId,
-    expiresAt: created.signup.expiresAt,
+    signupId: started.signupId,
+    expiresAt: new Date(started.expiresAt),
     challenges: [
-      challengeView(created.email.publicId, 'EMAIL', maskDestination('EMAIL', input.email)),
-      challengeView(created.phone.publicId, 'PHONE', maskDestination('PHONE', input.phone)),
+      challengeView(email.publicId, 'EMAIL', maskDestination('EMAIL', input.email)),
+      challengeView(phone.publicId, 'PHONE', maskDestination('PHONE', input.phone)),
     ],
   };
 }
@@ -115,35 +138,21 @@ export async function sendOtpRequest(input: z.infer<typeof otpSendSchema>, ctx: 
 }
 
 // Unknown and suspended accounts get a decoy challenge, so the response never reveals whether
-// an email or phone is registered.
+// an email or phone is registered. Only the newest code per address and purpose works.
 export async function startChallenge(purpose: Exclude<OtpPurpose, 'SIGNUP'>, identifier: Identifier, ctx: ClientContext) {
   const destinationHash = identifierHash(identifier);
   await consume(LIMITS.otpSendPerDestination, destinationHash);
 
-  const [user] =
-    identifier.channel === 'EMAIL'
-      ? await sql<{ id: string }[]>`select id from app.users where email_hash = ${destinationHash} and status = 'ACTIVE'`
-      : await sql<{ id: string }[]>`select id from app.users where phone_hash = ${destinationHash} and status = 'ACTIVE'`;
-
-  const challenge = await transaction(async (tx) => {
-    // Only the newest code for an address and purpose is valid, so older codes cannot be guessed in parallel.
-    await tx`
-      update app.otp_challenges set expires_at = now()
-      where destination_hash = ${destinationHash} and purpose = ${purpose}
-        and verified_at is null and expires_at > now()`;
-    return createChallenge(tx, {
-      purpose,
-      channel: identifier.channel,
-      destinationHash,
-      userId: user?.id ?? null,
-      isDecoy: !user,
-      ip: ctx.ip,
-    });
+  const challenge = issueCode();
+  const { userExists } = await callDb<{ userExists: boolean }>('app_otp_start', {
+    p_purpose: purpose,
+    p_channel: identifier.channel,
+    p_destination_hash: destinationHash,
+    p_challenge: challenge.stored,
+    p_ttl_seconds: OTP_TTL_SECONDS,
+    p_ctx: ctx,
   });
-  if (user) sendOtp(identifier.channel, identifier.value, challenge.code, purpose);
-  if (purpose === 'PASSWORD_RESET') {
-    await audit(ctx, 'auth.password.reset_requested', { userId: user?.id ?? null, metadata: { channel: identifier.channel } });
-  }
+  if (userExists) sendOtp(identifier.channel, identifier.value, challenge.code, purpose);
   return challengeView(challenge.publicId, identifier.channel, maskDestination(identifier.channel, identifier.value));
 }
 
@@ -154,57 +163,51 @@ export async function forgotPassword(identifier: Identifier, ctx: ClientContext)
   return startChallenge('PASSWORD_RESET', identifier, ctx);
 }
 
-type LockedChallenge = ChallengeRow & { destinationHash: string; expired: boolean; secondsSinceSent: number };
-
-async function lockChallenge(tx: Db, publicId: string): Promise<LockedChallenge | undefined> {
-  const [row] = await tx<LockedChallenge[]>`
-    select id, public_id, purpose, channel, user_id, signup_request_id, is_decoy, code_hash, attempts,
-           send_count, last_sent_at, expires_at, verified_at, destination_hash,
-           expires_at <= now() as expired,
-           extract(epoch from now() - last_sent_at)::float8 as seconds_since_sent
-    from app.otp_challenges where public_id = ${publicId}
-    for update`;
-  return row;
-}
-
-// Where to send a fresh code: the pending sign-up's address, or the account's address.
-async function challengeDestination(tx: Db, c: LockedChallenge): Promise<string | null> {
-  if (c.isDecoy) return null;
-  const column = c.channel === 'EMAIL' ? 'email_enc' : 'phone_enc';
-  const context = c.channel === 'EMAIL' ? 'email' : 'phone';
-  const [row] = c.signupRequestId
-    ? await tx<{ value: string }[]>`select ${tx(column)} as value from app.signup_requests where id = ${c.signupRequestId}`
-    : await tx<{ value: string }[]>`select ${tx(column)} as value from app.users where id = ${c.userId}`;
-  return row ? decrypt(row.value, context) : null;
+// The keyed hash of the address a challenge belongs to, for per-address limits.
+async function challengeDestination(publicId: string): Promise<string | null> {
+  const peek = await callDb<{ destinationHash: string } | null>('app_otp_peek', { p_public_id: publicId });
+  return peek?.destinationHash ?? null;
 }
 
 async function resendChallenge(publicId: string) {
-  const sent = await transaction(async (tx) => {
-    const c = await lockChallenge(tx, publicId);
-    if (!c || c.verifiedAt) throw new AppError(400, 'OTP_CHALLENGE_INVALID', 'This verification has ended. Start again.');
+  const invalid = new AppError(400, 'OTP_CHALLENGE_INVALID', 'This verification has ended. Start again.');
+  const destinationHash = await challengeDestination(publicId);
+  if (!destinationHash) throw invalid;
 
-    if (c.signupRequestId) {
-      const [signup] = await tx<{ open: boolean }[]>`
-        select completed_at is null and expires_at > now() as open
-        from app.signup_requests where id = ${c.signupRequestId}`;
-      if (!signup?.open) throw new AppError(410, 'SIGNUP_EXPIRED', 'This sign-up has expired. Please register again.');
-    }
-    if (c.secondsSinceSent < OTP_RESEND_COOLDOWN_SECONDS) {
-      const wait = Math.ceil(OTP_RESEND_COOLDOWN_SECONDS - c.secondsSinceSent);
-      throw new AppError(429, 'OTP_RESEND_COOLDOWN', `Please wait ${wait} seconds before requesting a new code.`, undefined, {
-        'Retry-After': String(wait),
-      });
-    }
-    if (c.sendCount >= OTP_MAX_SENDS) {
-      throw new AppError(429, 'OTP_RESEND_LIMIT', 'Too many codes requested. Please start again.');
-    }
-    await consume(LIMITS.otpSendPerDestination, c.destinationHash, tx);
-
-    const code = await reissueChallenge(tx, c);
-    return { channel: c.channel, purpose: c.purpose, code, destination: await challengeDestination(tx, c) };
+  const code = issueCode(publicId);
+  const sent = await callDb<
+    { channel: Channel; purpose: OtpPurpose; isDecoy: boolean; destinationEnc: string | null } | DbFailure
+  >('app_otp_resend', {
+    p_public_id: publicId,
+    p_challenge: code.stored,
+    p_cooldown_seconds: OTP_RESEND_COOLDOWN_SECONDS,
+    p_max_sends: OTP_MAX_SENDS,
+    p_ttl_seconds: OTP_TTL_SECONDS,
+    p_limit: limitArg(LIMITS.otpSendPerDestination, destinationHash),
   });
 
-  if (sent.destination) sendOtp(sent.channel, sent.destination, sent.code, sent.purpose);
+  if (failed(sent)) {
+    switch (sent.error) {
+      case 'SIGNUP_EXPIRED':
+        throw signupExpired();
+      case 'OTP_RESEND_COOLDOWN': {
+        const wait = String(sent.retryAfter ?? OTP_RESEND_COOLDOWN_SECONDS);
+        throw new AppError(429, 'OTP_RESEND_COOLDOWN', `Please wait ${wait} seconds before requesting a new code.`, undefined, {
+          'Retry-After': wait,
+        });
+      }
+      case 'OTP_RESEND_LIMIT':
+        throw new AppError(429, 'OTP_RESEND_LIMIT', 'Too many codes requested. Please start again.');
+      case 'RATE_LIMITED':
+        throw tooMany(sent.retryAfter ?? 60);
+      default:
+        throw invalid;
+    }
+  }
+
+  if (!sent.isDecoy && sent.destinationEnc) {
+    sendOtp(sent.channel, decryptContact(sent.channel, sent.destinationEnc), code.code, sent.purpose);
+  }
   // No destination in the response: a decoy has none, and leaving it out keeps both identical.
   return challengeView(publicId, sent.channel);
 }
@@ -212,138 +215,52 @@ async function resendChallenge(publicId: string) {
 // ---------------------------------------------------------------------------------------------
 // POST /auth/otp/verify
 // ---------------------------------------------------------------------------------------------
+type VerifyResult =
+  | { status: 'PENDING'; signupId: string; verified: Channel[]; pending: Channel[] }
+  | { status: 'COMPLETED'; userId: string; userPublicId: string; sessionExpiresAt: string }
+  | { status: 'RESET_TOKEN_ISSUED' };
+
 export async function verifyOtp(input: z.infer<typeof otpVerifySchema>, ctx: ClientContext) {
   await consume(LIMITS.otpVerifyPerIp, ctx.ip);
+  const destinationHash = await challengeDestination(input.challengeId);
+  if (!destinationHash) throw invalidCode();
 
-  const outcome = await transaction(async (tx) => {
-    const c = await lockChallenge(tx, input.challengeId);
-    if (!c || c.verifiedAt) return fail(new AppError(400, 'OTP_INVALID', 'Invalid or expired code'));
-    if (c.expired) return fail(new AppError(400, 'OTP_EXPIRED', 'This code has expired. Request a new one.'));
-    if (c.attempts >= OTP_MAX_ATTEMPTS) {
-      return fail(new AppError(429, 'OTP_ATTEMPTS_EXCEEDED', 'Too many incorrect codes. Request a new one.'));
-    }
-    // Per address, across every challenge and IP; throws 429 once used up, even for a correct code.
-    await consume(LIMITS.otpVerifyPerDestinationHour, c.destinationHash, tx);
-    await consume(LIMITS.otpVerifyPerDestinationDay, c.destinationHash, tx);
-
-    await tx`update app.otp_challenges set attempts = attempts + 1 where id = ${c.id}`;
-    if (!codeMatches(c, input.code)) {
-      const remaining = OTP_MAX_ATTEMPTS - c.attempts - 1;
-      await audit(ctx, 'auth.otp.failed', { userId: c.userId, metadata: { purpose: c.purpose, remaining } }, tx);
-      return fail(
-        new AppError(400, 'OTP_INVALID', `Incorrect code. ${remaining} attempt${remaining === 1 ? '' : 's'} left.`, {
-          code: 'Incorrect code',
-        }),
-      );
-    }
-    await tx`update app.otp_challenges set verified_at = now() where id = ${c.id}`;
-    await reset(LIMITS.otpVerifyPerDestinationHour, c.destinationHash, tx);
-    await reset(LIMITS.otpVerifyPerDestinationDay, c.destinationHash, tx);
-
-    if (c.purpose === 'SIGNUP') return completeSignupStep(tx, c, input.device, ctx);
-    if (c.purpose === 'LOGIN') return completeOtpLogin(tx, c, input.device, ctx);
-    return issueResetToken(tx, c);
+  // Prepared up front; the database keeps only hashes and uses whichever the challenge needs.
+  const session = newSession(input.device);
+  const resetToken = randomToken();
+  const result = await callDb<VerifyResult | DbFailure>('app_otp_verify', {
+    p_public_id: input.challengeId,
+    p_code_hash: codeHash(input.challengeId, input.code),
+    p_max_attempts: OTP_MAX_ATTEMPTS,
+    // Per address, across every challenge and IP, so spreading guesses over many IPs does not help.
+    p_limits: [
+      limitArg(LIMITS.otpVerifyPerDestinationHour, destinationHash),
+      limitArg(LIMITS.otpVerifyPerDestinationDay, destinationHash),
+    ],
+    p_session: session.stored,
+    p_reset: { tokenHash: sha256(resetToken), ttlSeconds: RESET_TOKEN_TTL_SECONDS },
+    p_age_consent_version: AGE_CONSENT_VERSION,
+    p_ctx: ctx,
   });
+  if (failed(result)) throw otpError(result);
 
-  return unwrap(outcome);
-}
-
-async function completeSignupStep(tx: Db, c: LockedChallenge, device: DeviceInfo, ctx: ClientContext) {
-  const [s] = await tx<
-    {
-      id: string;
-      publicId: string;
-      name: string;
-      emailEnc: string;
-      emailHash: string;
-      phoneCountryCode: string;
-      phoneEnc: string;
-      phoneHash: string;
-      passwordHash: string;
-      ageConfirmedAt: Date;
-      emailVerifiedAt: Date | null;
-      phoneVerifiedAt: Date | null;
-      open: boolean;
-      createdIp: string | null;
-      userAgent: string | null;
-      appVersion: string | null;
-    }[]
-  >`
-    select id, public_id, name, email_enc, email_hash, phone_country_code, phone_enc, phone_hash,
-           password_hash, age_confirmed_at, email_verified_at, phone_verified_at, created_ip, user_agent,
-           app_version, completed_at is null and expires_at > now() as open
-    from app.signup_requests where id = ${c.signupRequestId}
-    for update`;
-  if (!s?.open) return fail(new AppError(410, 'SIGNUP_EXPIRED', 'This sign-up has expired. Please register again.'));
-
-  const emailVerifiedAt = c.channel === 'EMAIL' ? new Date() : s.emailVerifiedAt;
-  const phoneVerifiedAt = c.channel === 'PHONE' ? new Date() : s.phoneVerifiedAt;
-  await tx`
-    update app.signup_requests set email_verified_at = ${emailVerifiedAt}, phone_verified_at = ${phoneVerifiedAt}
-    where id = ${s.id}`;
-
-  if (!emailVerifiedAt || !phoneVerifiedAt) {
-    return ok({
-      status: 'PENDING' as const,
-      signupId: s.publicId,
-      verified: [emailVerifiedAt && 'EMAIL', phoneVerifiedAt && 'PHONE'].filter(Boolean) as Channel[],
-      pending: [!emailVerifiedAt && 'EMAIL', !phoneVerifiedAt && 'PHONE'].filter(Boolean) as Channel[],
-    });
+  switch (result.status) {
+    case 'PENDING':
+      return result;
+    case 'RESET_TOKEN_ISSUED':
+      return { status: result.status, resetToken, resetTokenExpiresIn: RESET_TOKEN_TTL_SECONDS };
+    case 'COMPLETED':
+      return {
+        status: result.status,
+        user: await loadUser(result.userId),
+        tokens: tokenPair(result.userPublicId, session.publicId, session.secret, result.sessionExpiresAt),
+      };
   }
-
-  // Both verified: create the account. A unique conflict means someone else completed sign-up
-  // with this email or phone first; the caller has proven they own both, so saying so is safe.
-  const [user] = await tx<{ id: string; publicId: string }[]>`
-    insert into app.users (email_enc, email_hash, phone_country_code, phone_enc, phone_hash, password_hash,
-      email_verified_at, phone_verified_at)
-    values (${s.emailEnc}, ${s.emailHash}, ${s.phoneCountryCode}, ${s.phoneEnc}, ${s.phoneHash},
-      ${s.passwordHash}, ${emailVerifiedAt}, ${phoneVerifiedAt})
-    on conflict do nothing
-    returning id, public_id`;
-  if (!user) {
-    return fail(
-      new AppError(409, 'ACCOUNT_EXISTS', 'An account with this email or phone already exists. Log in or reset your password.'),
-    );
-  }
-
-  await tx`insert into app.user_profiles (user_id, name) values (${user.id}, ${s.name})`;
-  await tx`
-    insert into app.consents (user_id, type, version, accepted_at, ip, user_agent, app_version)
-    values (${user.id}, 'AGE_18_PLUS', ${AGE_CONSENT_VERSION}, ${s.ageConfirmedAt}, ${s.createdIp},
-      ${s.userAgent}, ${s.appVersion})`;
-  // The pending copy (and any other open sign-ups for the same email or phone) is no longer needed.
-  await tx`
-    delete from app.signup_requests
-    where id = ${s.id} or (completed_at is null and (email_hash = ${s.emailHash} or phone_hash = ${s.phoneHash}))`;
-
-  const tokens = await createSession(tx, user, device, ctx);
-  await audit(ctx, 'auth.register.completed', { userId: user.id }, tx);
-  return ok({ status: 'COMPLETED' as const, user: await loadUser(user.id, tx), tokens });
-}
-
-async function completeOtpLogin(tx: Db, c: LockedChallenge, device: DeviceInfo, ctx: ClientContext) {
-  const [user] = await tx<{ id: string; publicId: string }[]>`
-    select id, public_id from app.users where id = ${c.userId} and status = 'ACTIVE' for update`;
-  if (!user) return fail(new AppError(400, 'OTP_INVALID', 'Invalid or expired code'));
-
-  const tokens = await createSession(tx, user, device, ctx);
-  await audit(ctx, 'auth.otp.login', { userId: user.id, metadata: { channel: c.channel } }, tx);
-  return ok({ status: 'COMPLETED' as const, user: await loadUser(user.id, tx), tokens });
-}
-
-async function issueResetToken(tx: Db, c: LockedChallenge) {
-  const token = randomToken();
-  // Only the newest reset token for a user is valid.
-  await tx`update app.password_reset_tickets set used_at = now() where user_id = ${c.userId} and used_at is null`;
-  await tx`
-    insert into app.password_reset_tickets (token_hash, user_id, challenge_id, expires_at)
-    values (${sha256(token)}, ${c.userId}, ${c.id}, now() + make_interval(secs => ${RESET_TOKEN_TTL_SECONDS}))`;
-  return ok({ status: 'RESET_TOKEN_ISSUED' as const, resetToken: token, resetTokenExpiresIn: RESET_TOKEN_TTL_SECONDS });
 }
 
 // ---------------------------------------------------------------------------------------------
-// POST /auth/login. One generic error for unknown accounts and wrong passwords; 5 failures per
-// email/phone in 15 minutes lock that identifier, whether or not an account exists.
+// POST /auth/login. One generic error for unknown accounts and wrong passwords; 5 attempts per
+// email/phone in 15 minutes, whether or not an account exists.
 // ---------------------------------------------------------------------------------------------
 export async function login(input: z.infer<typeof loginSchema>, ctx: ClientContext) {
   await consume(LIMITS.loginPerIp, ctx.ip);
@@ -351,22 +268,19 @@ export async function login(input: z.infer<typeof loginSchema>, ctx: ClientConte
   // Counted before the password check, so parallel guesses cannot all pass; reset on success.
   await consume(LIMITS.loginFailuresPerAccount, idHash);
 
-  const [user] =
-    input.identifier.channel === 'EMAIL'
-      ? await sql<{ id: string; publicId: string; passwordHash: string; status: string }[]>`
-          select id, public_id, password_hash, status from app.users
-          where email_hash = ${idHash} and status <> 'DELETED'`
-      : await sql<{ id: string; publicId: string; passwordHash: string; status: string }[]>`
-          select id, public_id, password_hash, status from app.users
-          where phone_hash = ${idHash} and status <> 'DELETED'`;
+  const user = await callDb<{ userId: string; userPublicId: string; passwordHash: string; status: string } | null>(
+    'app_login_lookup',
+    { p_channel: input.identifier.channel, p_id_hash: idHash },
+  );
 
   let valid = false;
   if (user) valid = await verifyPassword(user.passwordHash, input.password);
   else await burnPasswordCheck(input.password);
 
+  const invalidCredentials = new AppError(401, 'INVALID_CREDENTIALS', 'Incorrect email/phone or password');
   if (!user || !valid) {
-    await audit(ctx, 'auth.login.failed', { userId: user?.id ?? null, metadata: { channel: input.identifier.channel } });
-    throw new AppError(401, 'INVALID_CREDENTIALS', 'Incorrect email/phone or password');
+    await audit(ctx, 'auth.login.failed', { userId: user?.userId ?? null, metadata: { channel: input.identifier.channel } });
+    throw invalidCredentials;
   }
   // Only revealed to someone who knows the password.
   if (user.status === 'SUSPENDED') {
@@ -374,12 +288,18 @@ export async function login(input: z.infer<typeof loginSchema>, ctx: ClientConte
   }
 
   await reset(LIMITS.loginFailuresPerAccount, idHash);
-  const tokens = await transaction(async (tx) => {
-    const pair = await createSession(tx, user, input.device, ctx);
-    await audit(ctx, 'auth.login.succeeded', { userId: user.id }, tx);
-    return pair;
+  const session = newSession(input.device);
+  const done = await callDb<{ sessionExpiresAt: string } | DbFailure>('app_login_complete', {
+    p_user_id: user.userId,
+    p_session: session.stored,
+    p_ctx: ctx,
   });
-  return { user: await loadUser(user.id), tokens };
+  if (failed(done)) throw invalidCredentials;
+
+  return {
+    user: await loadUser(user.userId),
+    tokens: tokenPair(user.userPublicId, session.publicId, session.secret, done.sessionExpiresAt),
+  };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -392,87 +312,57 @@ export async function refresh(input: z.infer<typeof refreshSchema>, ctx: ClientC
   const parsed = parseRefreshToken(input.refreshToken);
   if (!parsed) throw invalid;
 
-  const outcome = await transaction(async (tx) => {
-    const [s] = await tx<
-      {
-        id: string;
-        publicId: string;
-        userId: string;
-        refreshTokenHash: string;
-        previousRefreshTokenHash: string | null;
-        revokedAt: Date | null;
-        expired: boolean;
-        absoluteExpiresAt: Date;
-        userPublicId: string;
-        userStatus: string;
-      }[]
-    >`
-      select s.id, s.public_id, s.user_id, s.refresh_token_hash, s.previous_refresh_token_hash, s.revoked_at,
-             s.expires_at <= now() or s.absolute_expires_at <= now() as expired, s.absolute_expires_at,
-             u.public_id as user_public_id, u.status as user_status
-      from app.user_sessions s join app.users u on u.id = s.user_id
-      where s.public_id = ${parsed.sessionPublicId}
-      for update of s`;
-    if (!s) return fail(invalid);
-
-    if (s.previousRefreshTokenHash && safeEqualHex(s.previousRefreshTokenHash, parsed.secretHash)) {
-      if (!s.revokedAt) {
-        await tx`update app.user_sessions set revoked_at = now(), revoked_reason = 'TOKEN_REUSE' where id = ${s.id}`;
-        await audit(ctx, 'auth.refresh.reuse_detected', { userId: s.userId, metadata: { session: s.publicId } }, tx);
-      }
-      return fail(invalid);
-    }
-    if (!safeEqualHex(s.refreshTokenHash, parsed.secretHash) || s.revokedAt || s.expired || s.userStatus !== 'ACTIVE') {
-      return fail(invalid);
-    }
-    return ok(await rotateSession(tx, s, s.userPublicId, ctx));
+  const secret = randomToken();
+  const rotated = await callDb<{ userPublicId: string; sessionExpiresAt: string } | DbFailure>('app_refresh', {
+    p_session_public_id: parsed.sessionPublicId,
+    p_secret_hash: parsed.secretHash,
+    p_new_secret_hash: sha256(secret),
+    p_idle_days: env.REFRESH_TOKEN_IDLE_DAYS,
+    p_ctx: ctx,
   });
+  if (failed(rotated)) throw invalid;
 
-  return { tokens: unwrap(outcome) };
+  return { tokens: tokenPair(rotated.userPublicId, parsed.sessionPublicId, secret, rotated.sessionExpiresAt) };
 }
 
 // ---------------------------------------------------------------------------------------------
 // Signed-in session management
 // ---------------------------------------------------------------------------------------------
 export async function logout(auth: AuthContext, ctx: ClientContext) {
-  await sql`
-    update app.user_sessions set revoked_at = now(), revoked_reason = 'LOGOUT'
-    where id = ${auth.sessionId} and revoked_at is null`;
-  await audit(ctx, 'auth.logout', { userId: auth.userId });
+  await callDb('app_logout', { p_user_id: auth.userId, p_session_id: auth.sessionId, p_ctx: ctx });
 }
 
 export async function listSessions(auth: AuthContext) {
-  const rows = await sql<
+  const rows = await callDb<
     {
       id: string;
       deviceName: string | null;
       platform: string;
       appVersion: string | null;
       ip: string | null;
-      createdAt: Date;
-      lastUsedAt: Date;
+      createdAt: string;
+      lastUsedAt: string;
     }[]
-  >`
-    select public_id as id, device_name, platform, app_version, ip::text as ip, created_at, last_used_at
-    from app.user_sessions
-    where user_id = ${auth.userId} and revoked_at is null
-      and expires_at > now() and absolute_expires_at > now()
-    order by last_used_at desc`;
-  return rows.map((r) => ({ ...r, current: r.id === auth.sessionPublicId }));
+  >('app_list_sessions', { p_user_id: auth.userId });
+  return rows.map((r) => ({
+    ...r,
+    createdAt: new Date(r.createdAt),
+    lastUsedAt: new Date(r.lastUsedAt),
+    current: r.id === auth.sessionPublicId,
+  }));
 }
 
 export async function revokeSession(auth: AuthContext, sessionPublicId: string, ctx: ClientContext) {
-  const rows = await sql`
-    update app.user_sessions set revoked_at = now(), revoked_reason = 'REVOKED_BY_USER'
-    where user_id = ${auth.userId} and public_id = ${sessionPublicId} and revoked_at is null
-    returning id`;
-  if (rows.length === 0) throw new AppError(404, 'SESSION_NOT_FOUND', 'Session not found');
-  await audit(ctx, 'auth.session.revoked', { userId: auth.userId, metadata: { session: sessionPublicId } });
+  const revoked = await callDb<boolean>('app_revoke_session', {
+    p_user_id: auth.userId,
+    p_session_public_id: sessionPublicId,
+    p_ctx: ctx,
+  });
+  if (!revoked) throw new AppError(404, 'SESSION_NOT_FOUND', 'Session not found');
 }
 
 export async function revokeOtherSessions(auth: AuthContext, ctx: ClientContext) {
-  await revokeAllSessions(sql, auth.userId, 'REVOKED_BY_USER', auth.sessionId);
-  await audit(ctx, 'auth.session.revoked', { userId: auth.userId, metadata: { scope: 'others' } });
+  await callDb('app_revoke_other_sessions', { p_user_id: auth.userId, p_keep_session_id: auth.sessionId, p_ctx: ctx });
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -480,49 +370,35 @@ export async function revokeOtherSessions(auth: AuthContext, ctx: ClientContext)
 // ---------------------------------------------------------------------------------------------
 export async function resetPassword(input: z.infer<typeof resetPasswordSchema>, ctx: ClientContext) {
   await consume(LIMITS.passwordResetPerIp, ctx.ip);
+  const invalid = new AppError(400, 'RESET_TOKEN_INVALID', 'This reset has expired. Please request a new code.');
+  const tokenHash = sha256(input.resetToken);
 
-  const done = await transaction(async (tx) => {
-    const [t] = await tx<
-      {
-        id: string;
-        userId: string;
-        passwordHash: string;
-        emailEnc: string;
-        phoneEnc: string;
-        status: string;
-        usable: boolean;
-      }[]
-    >`
-      select t.id, t.user_id, u.password_hash, u.email_enc, u.phone_enc, u.status,
-             t.used_at is null and t.expires_at > now() as usable
-      from app.password_reset_tickets t join app.users u on u.id = t.user_id
-      where t.token_hash = ${sha256(input.resetToken)}
-      for update of t, u`;
-    if (!t?.usable || t.status !== 'ACTIVE') {
-      throw new AppError(400, 'RESET_TOKEN_INVALID', 'This reset has expired. Please request a new code.');
-    }
+  const ticket = await callDb<{ userId: string; passwordHash: string; emailEnc: string; phoneEnc: string } | null>(
+    'app_reset_lookup',
+    { p_token_hash: tokenHash },
+  );
+  if (!ticket) throw invalid;
 
-    const email = decrypt(t.emailEnc, 'email');
-    const phone = decrypt(t.phoneEnc, 'phone');
-    if (passwordContainsIdentity(input.newPassword, email, phone)) {
-      throw fieldError('newPassword', 'Password must not contain your email name or phone number');
-    }
-    if (await verifyPassword(t.passwordHash, input.newPassword)) {
-      throw fieldError('newPassword', 'New password must be different from your current password');
-    }
+  const email = decrypt(ticket.emailEnc, 'email');
+  const phone = decrypt(ticket.phoneEnc, 'phone');
+  if (passwordContainsIdentity(input.newPassword, email, phone)) {
+    throw fieldError('newPassword', 'Password must not contain your email name or phone number');
+  }
+  if (await verifyPassword(ticket.passwordHash, input.newPassword)) {
+    throw fieldError('newPassword', 'New password must be different from your current password');
+  }
 
-    await tx`
-      update app.users set password_hash = ${await hashPassword(input.newPassword)}, password_changed_at = now()
-      where id = ${t.userId}`;
-    await tx`update app.password_reset_tickets set used_at = now() where user_id = ${t.userId} and used_at is null`;
-    await revokeAllSessions(tx, t.userId, 'PASSWORD_RESET');
-    await audit(ctx, 'auth.password.reset', { userId: t.userId }, tx);
-    return { email, phone };
+  // Re-checks the ticket under lock, so a ticket used or replaced meanwhile is refused.
+  const done = await callDb<{ ok: boolean }>('app_reset_complete', {
+    p_token_hash: tokenHash,
+    p_password_hash: await hashPassword(input.newPassword),
+    p_ctx: ctx,
   });
+  if (!done.ok) throw invalid;
 
   // A fresh password clears any login lock on this account.
-  await reset(LIMITS.loginFailuresPerAccount, emailHash(done.email));
-  await reset(LIMITS.loginFailuresPerAccount, phoneHash(done.phone));
-  sendNotice('EMAIL', done.email, 'PASSWORD_CHANGED');
+  await reset(LIMITS.loginFailuresPerAccount, emailHash(email));
+  await reset(LIMITS.loginFailuresPerAccount, phoneHash(phone));
+  sendNotice('EMAIL', email, 'PASSWORD_CHANGED');
   return { passwordReset: true };
 }

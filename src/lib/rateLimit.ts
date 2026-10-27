@@ -1,6 +1,6 @@
 import { AppError } from '../middleware/errorHandler';
 import { keyedHash } from './crypto';
-import { sql, type Db } from './db';
+import { callDb } from './db';
 
 export interface Limit {
   name: string;
@@ -36,7 +36,12 @@ function key(limit: Limit, subject: string | null): string {
   return `${limit.name}:${keyedHash('rate-limit', subject ?? 'unknown')}`;
 }
 
-function tooMany(retryAfterSeconds: number): AppError {
+/** A limit as the database functions take it, for limits counted inside one of them. */
+export function limitArg(limit: Limit, subject: string | null) {
+  return { key: key(limit, subject), max: limit.max, window: limit.windowSeconds };
+}
+
+export function tooMany(retryAfterSeconds: number): AppError {
   const seconds = Math.max(1, Math.ceil(retryAfterSeconds));
   return new AppError(429, 'RATE_LIMITED', 'Too many requests. Please try again later.', undefined, {
     'Retry-After': String(seconds),
@@ -44,17 +49,15 @@ function tooMany(retryAfterSeconds: number): AppError {
 }
 
 // Counts one hit and throws 429 once the limit is passed.
-export async function consume(limit: Limit, subject: string | null, db: Db = sql): Promise<void> {
-  const [row] = await db<{ count: number; retryAfter: number }[]>`
-    insert into app.rate_limits as r (key, count, expires_at)
-    values (${key(limit, subject)}, 1, now() + make_interval(secs => ${limit.windowSeconds}))
-    on conflict (key) do update set
-      count = case when r.expires_at <= now() then 1 else r.count + 1 end,
-      expires_at = case when r.expires_at <= now() then excluded.expires_at else r.expires_at end
-    returning count, extract(epoch from expires_at - now())::float8 as retry_after`;
-  if (row && row.count > limit.max) throw tooMany(row.retryAfter);
+export async function consume(limit: Limit, subject: string | null): Promise<void> {
+  const hit = await callDb<{ limited: boolean; retryAfter: number }>('app_rate_limit_hit', {
+    p_key: key(limit, subject),
+    p_max: limit.max,
+    p_window_seconds: limit.windowSeconds,
+  });
+  if (hit.limited) throw tooMany(hit.retryAfter);
 }
 
-export async function reset(limit: Limit, subject: string | null, db: Db = sql): Promise<void> {
-  await db`delete from app.rate_limits where key = ${key(limit, subject)}`;
+export async function reset(limit: Limit, subject: string | null): Promise<void> {
+  await callDb('app_rate_limit_reset', { p_keys: [key(limit, subject)] });
 }
