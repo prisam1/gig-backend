@@ -8,7 +8,10 @@ describe('authentication on protected routes', () => {
     const res = await request(app).get('/api/v1/me');
 
     expect(res.status).toBe(401);
-    expect(res.body.error).toMatchObject({ code: 'UNAUTHENTICATED', message: 'Missing bearer token' });
+    expect(res.body.error).toMatchObject({
+      code: 'UNAUTHENTICATED',
+      message: 'Missing bearer token',
+    });
   });
 
   it('rejects an invalid or expired token', async () => {

@@ -61,7 +61,11 @@ export const notFound: RequestHandler = (req, _res, next) => {
 
 // Errors raised by Express itself (e.g. by express.json()) carry their own 4xx status.
 function expressError(err: unknown): HttpError | undefined {
-  const { status, type, message } = (err ?? {}) as { status?: unknown; type?: string; message?: string };
+  const { status, type, message } = (err ?? {}) as {
+    status?: unknown;
+    type?: string;
+    message?: string;
+  };
   if (type === 'entity.parse.failed') return new HttpError(400, 'Malformed JSON body');
   const code = Number(status);
   if (code >= 400 && code < 500) return new HttpError(code, message ?? 'Bad request');
@@ -81,13 +85,18 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     res.status(500).json({
       error: {
         code: 'INTERNAL',
-        message: env.NODE_ENV === 'production' ? 'Internal server error' : String(err?.message ?? err),
+        message:
+          env.NODE_ENV === 'production' ? 'Internal server error' : String(err?.message ?? err),
       },
     });
     return;
   }
 
   res.status(known.status).json({
-    error: { code: known.code, message: known.message, ...(known.fields && { fields: known.fields }) },
+    error: {
+      code: known.code,
+      message: known.message,
+      ...(known.fields && { fields: known.fields }),
+    },
   });
 };

@@ -1,5 +1,5 @@
 import type { PageMeta } from '../../lib/http';
-import { pageRange } from '../../lib/http';
+import { escapeLike, pageRange } from '../../lib/http';
 import { supabaseAdmin } from '../../lib/supabase';
 import type { Member } from '../../lib/membership';
 import { HttpError } from '../../middleware/errorHandler';
@@ -192,11 +192,6 @@ function nonEmpty<T>(list: T[] | undefined): T[] | undefined {
   return list && list.length > 0 ? list : undefined;
 }
 
-/** Escapes LIKE wildcards so user input matches literally. */
-function escapeLike(value: string): string {
-  return value.replace(/[\\%_]/g, (c) => `\\${c}`);
-}
-
 function searchArgs(query: ListCompaniesQuery): SearchArgs {
   const f = query.filter ?? {};
   const years = f.year ?? [];
@@ -285,10 +280,7 @@ export async function getCompany(id: string, user: Member | undefined): Promise<
   };
 }
 
-export async function compareCompanies(
-  ids: string[],
-  user: Member,
-): Promise<CompanyComparison[]> {
+export async function compareCompanies(ids: string[], user: Member): Promise<CompanyComparison[]> {
   const { data, error } = await supabaseAdmin.from('company_cards').select('*').in('id', ids);
   if (error) throw error;
 

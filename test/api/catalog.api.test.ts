@@ -20,7 +20,8 @@ vi.mock('../../src/lib/auth', async () => {
 });
 vi.mock('../../src/modules/users/users.repository', async (importOriginal) => {
   const { fakeUsersRepository } = await import('../helpers/fakeSupabase');
-  const original = await importOriginal<typeof import('../../src/modules/users/users.repository')>();
+  const original =
+    await importOriginal<typeof import('../../src/modules/users/users.repository')>();
   return { ...original, usersRepository: { ...original.usersRepository, ...fakeUsersRepository } };
 });
 

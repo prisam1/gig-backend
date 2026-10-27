@@ -7,6 +7,8 @@ import { kycRouter } from '../modules/kyc/kyc.routes';
 import { lookupsRouter } from '../modules/lookups/lookups.routes';
 import { reviewsRouter } from '../modules/reviews/reviews.routes';
 import { meRouter, usersRouter } from '../modules/users/users.routes';
+import { issuersRouter, ratingsRouter } from '../modules/ratings/ratings.routes';
+import { representationsRouter } from '../modules/representations/representations.routes';
 
 export const router = Router();
 
@@ -48,3 +50,24 @@ router.use('/lookups', lookupsRouter);
 // ---------------------------------------------------------------------------------------------
 router.use('/companies', companiesRouter);
 router.use('/reviews', reviewsRouter);
+
+// ---------------------------------------------------------------------------------------------
+// Ratings (Phase 1)
+//   GET   /issuers                         issuers list and offer details
+//   GET   /issuers/:id                     issuer offer details
+//   GET   /issuers/:id/rating-summary      aggregate score (Prive: weighted, full breakdown)
+//   POST  /issuers/:id/ratings             submit a rating; returns the receipt
+//   GET   /ratings/me                      my ratings
+// ---------------------------------------------------------------------------------------------
+router.use('/issuers', issuersRouter);
+router.use('/ratings', ratingsRouter);
+
+// ---------------------------------------------------------------------------------------------
+// Representations (Phase 1)
+//   GET   /representations                 petitions with goal, signatures, days left, status
+//   GET   /representations/:id             overview, evidence, signers, my signature
+//   GET   /representations/:id/timeline    track status history
+//   POST  /representations/:id/signatures  sign; returns signature ID and receipt PDF
+//   GET   /representations/:id/submission  download the submitted petition pack
+// ---------------------------------------------------------------------------------------------
+router.use('/representations', representationsRouter);

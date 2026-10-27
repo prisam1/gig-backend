@@ -1,5 +1,6 @@
-import { createHash } from 'node:crypto';
 import type { PostgrestError } from '@supabase/supabase-js';
+import { displayNameFor } from '../../lib/displayName';
+import { hashRequest } from '../../lib/idempotency';
 import type { PageMeta } from '../../lib/http';
 import { pageRange } from '../../lib/http';
 import type { Member, Tier } from '../../lib/membership';
@@ -229,17 +230,6 @@ function toPublicReview(row: Views<'review_feed'>, access: 'SUMMARY' | 'FULL'): 
   };
 }
 
-/** Same rule as the review_feed view: full name, initials ("S. M.") or hidden. */
-function displayNameFor(fullName: string, mode: Enums<'display_mode'>): string | null {
-  const name = fullName.trim();
-  if (mode === 'ANONYMOUS' || name === '') return null;
-  if (mode === 'FULL_NAME') return name;
-  return name
-    .split(/\s+/)
-    .map((part) => `${part.charAt(0).toUpperCase()}.`)
-    .join(' ');
-}
-
 function tagsOf(tags: { tag_type: string; code: string }[], type: ReviewTagType): string[] {
   return tags
     .filter((t) => t.tag_type === type)
@@ -324,10 +314,6 @@ function sentimentFields(input: SubmitReviewInput) {
   }
 }
 
-function requestHash(input: SubmitReviewInput): string {
-  return createHash('sha256').update(JSON.stringify(input)).digest('hex');
-}
-
 /**
  * The review this Idempotency-Key already created, or null. The same key with a different body
  * is a client bug and gets 409.
@@ -405,7 +391,7 @@ export async function submitReview(
   input: SubmitReviewInput,
   idempotencyKey: string,
 ): Promise<SubmitResult> {
-  const hash = requestHash(input);
+  const hash = hashRequest(input);
   const replay = await replayedReview(user, idempotencyKey, hash);
   if (replay) return replay;
 

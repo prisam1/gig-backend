@@ -68,7 +68,14 @@ export const fakeUsersRepository = {
 
   async findProfile(userId: number): Promise<Profile | null> {
     const name = TEST_USER_KEYS[userId - 1] === 'prive' ? 'Shreya Mehta' : 'Test User';
-    return { name, experience: null, jobProfile: null, otherJob: null, location: null, avatar: null };
+    return {
+      name,
+      experience: null,
+      jobProfile: null,
+      otherJob: null,
+      location: null,
+      avatar: null,
+    };
   },
 };
 

@@ -3,9 +3,13 @@ import { env } from '../config/env';
 import type { Database } from '../types/database';
 
 // Server-side admin client: bypasses Row Level Security. Never expose this key to the app.
-export const supabaseAdmin = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
-  auth: { autoRefreshToken: false, persistSession: false },
-});
+export const supabaseAdmin = createClient<Database>(
+  env.SUPABASE_URL,
+  env.SUPABASE_SERVICE_ROLE_KEY,
+  {
+    auth: { autoRefreshToken: false, persistSession: false },
+  },
+);
 
 /** Postgres error codes the services react to. */
 export const PG_UNIQUE_VIOLATION = '23505';

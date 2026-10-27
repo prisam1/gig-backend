@@ -10,6 +10,7 @@ const BUCKET_BY_PURPOSE: Record<FilePurpose, string> = {
   AVATAR: 'avatars',
   KYC_DOCUMENT: 'kyc-documents',
   REVIEW_EVIDENCE: 'review-evidence',
+  SIGNATURE: 'signatures',
 };
 
 const EXTENSION_BY_MIME: Record<CreateUploadUrlInput['mimeType'], string> = {

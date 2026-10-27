@@ -44,11 +44,9 @@ export const kycService = {
   async submit(user: User, input: SubmitKycInput, meta: RequestMeta) {
     const tier = user.requestedTier;
     if (!tier) {
-      throw new HttpError(
-        409,
-        'Choose the Prive or Institutional tier before submitting KYC',
-        { code: 'TIER_NOT_REQUESTED' },
-      );
+      throw new HttpError(409, 'Choose the Prive or Institutional tier before submitting KYC', {
+        code: 'TIER_NOT_REQUESTED',
+      });
     }
     if (user.kycStatus === 'PENDING') throw alreadyPending();
     if (tier === 'PRIVE' && !input.consentAccepted) {

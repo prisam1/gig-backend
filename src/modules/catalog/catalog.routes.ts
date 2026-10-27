@@ -40,6 +40,10 @@ companiesRouter.get('/:id/trends', requireUser, requireFullAccess, async (req, r
 companiesRouter.get('/:id/reviews', optionalUser, async (req, res) => {
   const { id } = parse(companyIdParams, req.params);
   const query = parse(listCompanyReviewsQuery, req.query);
-  const { items, meta } = await listCompanyReviews(id, query, req.user && (await loadMember(req.user)));
+  const { items, meta } = await listCompanyReviews(
+    id,
+    query,
+    req.user && (await loadMember(req.user)),
+  );
   sendPage(res, items, meta);
 });
