@@ -2,7 +2,7 @@
 
 REST API for the GIG (Global Investorz Group) mobile app. Node.js + TypeScript + Express, with Supabase (Postgres) as the database.
 
-> **Status:** Phase 1 "Auth and onboarding", "Users, profile and KYC" and "Catalog and reviews" are implemented. Ratings, representations, roadshows and admin are not built yet.
+> **Status:** Phase 1 "Auth and onboarding", "Users, profile and KYC", "Catalog and reviews", "Ratings" and "Representations" are implemented. Roadshows and admin are not built yet.
 
 ## Getting started
 
@@ -20,18 +20,18 @@ The server refuses to start if any required variable is missing or invalid.
 
 ## Scripts
 
-| Command              | Purpose                                             |
-| -------------------- | --------------------------------------------------- |
-| `npm run dev`        | Start with hot reload (nodemon + tsx), loads `.env` |
-| `npm run build`      | Compile to `dist/`                                  |
-| `npm start`          | Run the compiled build                              |
+| Command              | Purpose                                                     |
+| -------------------- | ----------------------------------------------------------- |
+| `npm run dev`        | Start with hot reload (nodemon + tsx), loads `.env`         |
+| `npm run build`      | Compile to `dist/`                                          |
+| `npm start`          | Run the compiled build                                      |
 | `npm run db:migrate` | Push new SQL files in `supabase/migrations/` (Supabase CLI) |
-| `npm run db:seed`    | Push migrations and `supabase/seed.sql`             |
-| `npm run typecheck`  | TypeScript check (source and tests)                 |
-| `npm run lint`       | ESLint                                              |
-| `npm run format`     | Prettier                                            |
-| `npm test`           | Run all tests once (Vitest)                         |
-| `npm run test:watch` | Re-run tests on file changes                        |
+| `npm run db:seed`    | Push migrations and `supabase/seed.sql`                     |
+| `npm run typecheck`  | TypeScript check (source and tests)                         |
+| `npm run lint`       | ESLint                                                      |
+| `npm run format`     | Prettier                                                    |
+| `npm test`           | Run all tests once (Vitest)                                 |
+| `npm run test:watch` | Re-run tests on file changes                                |
 
 ## Tests
 
@@ -39,11 +39,11 @@ The server refuses to start if any required variable is missing or invalid.
 
 `test/auth.test.ts` checks that every protected route rejects a missing, forged, unsigned (`alg: none`), expired or wrongly signed token, a token for another issuer or audience, and a valid token whose session has ended. `test/users.test.ts`, `test/files.test.ts` and `test/kyc.test.ts` cover public profiles and follows, uploads, and KYC submissions.
 
-| Folder       | What it tests                                                                                                                                                                                                                       |
-| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `test/unit/` | Request validation: sign-up, login, OTP and onboarding rules; every review rule from the plan (per-sentiment fields, 10-800 chars, metrics 1-5, 6 resolution statuses, 400-char note, declarations), list filters, compare ids, trend ranges |
-| `test/db/`   | All migrations in PGlite. The `app_*` functions: sign-up, OTP limits and decoys, sessions, refresh-token theft, password reset, tier, KYC, who may call them, append-only audit log. Catalog and reviews: constraints, review submission and receipt numbers, one active review per product, evidence checks, stats and weighted score, trends, public feed and name masking, search filters, resolution updates |
-| `test/api/`  | Every catalog and review endpoint through Express: access rules per tier and KYC, response shapes, filters and sorting sent to the database, idempotency keys, evidence errors, 400/401/403/404/409 errors                          |
+| Folder       | What it tests |
+| ------------ | ------------- |
+| `test/unit/` | Request validation: sign-up, login, OTP and onboarding rules; every review, rating and signing rule from the plan; list filters, compare ids, trend ranges |
+| `test/db/`   | All migrations and the seed in PGlite. The `app_*` functions: sign-up, OTP limits and decoys, sessions, refresh-token theft, password reset, tier, KYC, who may call them, append-only audit log. Ratings and Representations: their repositories call the same `app_*` functions against PGlite (rating and signature transactions, issuer stats, effective petition status, signer names, infected documents, counts). Catalog and reviews: constraints, review submission and receipt numbers, evidence checks, stats, trends, feed, search, resolution updates |
+| `test/api/`  | Every catalog, review, rating and representation endpoint through Express: access rules per tier and KYC, response shapes, filters and sorting, idempotency keys, evidence and signature-file errors, 400/401/403/404/409 errors |
 
 ## Project structure
 
@@ -68,6 +68,8 @@ src/
     files/                # signed upload URLs for avatars, KYC documents and review evidence
     kyc/                  # KYC submissions and status
     catalog/  reviews/    # companies, trends, compare; review submission and receipts
+    ratings/              # issuers, rating summary, rating submission and receipts
+    representations/      # petitions, timeline, signatures and receipt PDFs, submission packs
 supabase/
   migrations/             # SQL migrations, applied in name order, never edited once applied
   seed.sql                # development data
@@ -87,11 +89,11 @@ npm run db:migrate     # afterwards: applies only new migrations
 
 The CLI records applied migrations in `supabase_migrations.schema_migrations`. To change the schema, add a new file (for example `20261101090000_kyc.sql`); never edit a file that has been pushed.
 
-`supabase/seed.sql` loads the companies and issuers from the app's mock data (`npm run db:seed`). It is safe to run again: existing rows are skipped. The sign-up option lists (job profiles, focus, risk, styles, sectors) are inserted by the auth migration itself.
+`supabase/seed.sql` loads the companies and issuers from the app's mock data (`npm run db:seed`). It is safe to run again: existing rows are skipped. The sign-up option lists (job profiles, focus, risk, styles, sectors) are inserted by the auth migration itself, and the rating factors, risk factors and investor types by `20261027161000_ratings_representations_support.sql`. The seed also loads the app's mock petitions.
 
 The API has one way into the database: supabase-js with the service-role key (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; no database password or connection string). The data is split into two schemas:
 
-- **`app`** (auth, onboarding, profile and KYC): users, sessions, OTP challenges, profiles, preferences, follows, files, KYC submissions and documents, consents, audit log, rate limits. It is not exposed by the Supabase API at all. The server reaches it only through the `public.app_*` database functions (`supabase/migrations/20261027160000_app_functions.sql`, called via `callDb` in `src/lib/db.ts`). Each function is one transaction, runs as its owner, and can be called by the service role only; the publishable key gets "permission denied". Hashing, encryption and token generation stay in the API, so the database only ever stores hashes and ciphertext.
+- **`app`** (auth, onboarding, profile, KYC, ratings and representations): users, sessions, OTP challenges, profiles, preferences, follows, files, KYC submissions and documents, consents, audit log, rate limits, the 4 Ratings tables and the 4 Representations tables. It is not exposed by the Supabase API at all. The server reaches it only through the `public.app_*` database functions (`supabase/migrations/20261027160000_app_functions.sql` and `20261027190000_ratings_representations_functions.sql`, called via `callDb` in `src/lib/db.ts`). Each function is one transaction, runs as its owner, and can be called by the service role only; the publishable key gets "permission denied". Hashing, encryption and token generation stay in the API, so the database only ever stores hashes and ciphertext.
 - **`public`** (catalog and reviews): `companies`, `company_tags`, `issuers`, `issuer_tags`, `reviews`, `review_tags`, `review_attachments`, `review_versions`, `company_stats`, `company_trend_points`, plus the read-only views `company_cards` and `review_feed`, and the private Storage bucket `review-evidence`. The API reads and writes them with the service role (`src/lib/supabase.ts`). Every table has Row Level Security enabled with no policies, so the app cannot query the database directly. The `issuers` tables are read by the Ratings module's APIs.
 
 `src/types/database.ts` mirrors the `public` schema. After a schema change, regenerate it:
@@ -100,7 +102,7 @@ The API has one way into the database: supabase-js with the service-role key (`S
 npx supabase gen types typescript --project-id <ref> --schema public > src/types/database.ts
 ```
 
-Company scores give newer reviews more weight, so the stats need a nightly recompute (for example with pg_cron): `select public.recompute_all_company_stats();`
+Company and issuer scores give newer reviews and ratings more weight, so the stats need a nightly recompute (for example with pg_cron): `select public.recompute_all_company_stats(); select app.recompute_all_issuer_stats();`
 
 ### Users, tier and KYC
 
@@ -133,36 +135,36 @@ All routes are served under `/api/v1`.
 
 Phase 1, plan weeks 3-5.
 
-| Method | Path                    | Access | Purpose                                                                         |
-| ------ | ----------------------- | ------ | ------------------------------------------------------------------------------- |
-| POST   | `/auth/register`        | Public | Sign-up step 1: name, email, phone, password, 18+ confirmation. Sends 2 OTPs     |
+| Method | Path                    | Access | Purpose                                                                                      |
+| ------ | ----------------------- | ------ | -------------------------------------------------------------------------------------------- |
+| POST   | `/auth/register`        | Public | Sign-up step 1: name, email, phone, password, 18+ confirmation. Sends 2 OTPs                 |
 | POST   | `/auth/otp/send`        | Public | Resend a code `{ challengeId }`, or start `{ purpose: LOGIN \| PASSWORD_RESET, identifier }` |
-| POST   | `/auth/otp/verify`      | Public | Verify a 6-digit code. Returns tokens, sign-up progress, or a reset token        |
-| POST   | `/auth/login`           | Public | Email or phone (`+91…`, `+971…`) + password                                      |
-| POST   | `/auth/refresh`         | Public | Rotate the refresh token                                                         |
-| POST   | `/auth/logout`          | User   | End this session                                                                 |
-| POST   | `/auth/password/forgot` | Public | Start a reset by OTP                                                             |
-| POST   | `/auth/password/reset`  | Public | Set a new password with the reset token; signs out every device                  |
-| GET    | `/auth/sessions`        | User   | Signed-in devices                                                                |
-| DELETE | `/auth/sessions`        | User   | Sign out every other device                                                      |
-| DELETE | `/auth/sessions/:id`    | User   | Sign out one device                                                              |
+| POST   | `/auth/otp/verify`      | Public | Verify a 6-digit code. Returns tokens, sign-up progress, or a reset token                    |
+| POST   | `/auth/login`           | Public | Email or phone (`+91…`, `+971…`) + password                                                  |
+| POST   | `/auth/refresh`         | Public | Rotate the refresh token                                                                     |
+| POST   | `/auth/logout`          | User   | End this session                                                                             |
+| POST   | `/auth/password/forgot` | Public | Start a reset by OTP                                                                         |
+| POST   | `/auth/password/reset`  | Public | Set a new password with the reset token; signs out every device                              |
+| GET    | `/auth/sessions`        | User   | Signed-in devices                                                                            |
+| DELETE | `/auth/sessions`        | User   | Sign out every other device                                                                  |
+| DELETE | `/auth/sessions/:id`    | User   | Sign out one device                                                                          |
 
 ## Users, profile and KYC
 
 Phase 1, plan weeks 5-7. Every route except `/lookups` requires your access token and a live session.
 
-| Method        | Path                    | Access | Purpose                                                                         |
-| ------------- | ----------------------- | ------ | ------------------------------------------------------------------------------- |
-| GET           | `/me`                   | User   | Profile, avatar, follower counts, preferences, tier and onboarding progress      |
-| PATCH         | `/me`                   | User   | Sign-up step 2: experience, job profile (or Others + text), location; name and avatar edits |
-| PUT           | `/me/preferences`       | User   | Sign-up step 3: 1 focus, 1 risk, 1-3 styles, 1-3 sectors                          |
-| PUT           | `/me/tier`              | User   | Observer is granted at once; Prive / Institutional wait for KYC. Blocked while KYC is under review |
-| GET           | `/users/:id`            | User   | Public profile (no email, phone or KYC detail) with follower counts              |
-| POST / DELETE | `/users/:id/follow`     | User   | Follow / unfollow                                                                |
-| POST          | `/files/upload-url`     | User   | Signed upload URL; PDF/JPG/PNG up to 10 MB. Returns `fileId` and the Storage `path` |
-| POST          | `/kyc/submissions`      | User   | Submit uploaded documents for the requested tier (+ consent, required for Prive) |
-| GET           | `/kyc/submissions/me`   | User   | KYC status, latest submission and rejection reason                               |
-| GET           | `/lookups/:type`        | Public | `job-profiles`, `investment-focus`, `risk-levels`, `investment-styles`, `investment-sectors` |
+| Method        | Path                  | Access | Purpose                                                                                            |
+| ------------- | --------------------- | ------ | -------------------------------------------------------------------------------------------------- |
+| GET           | `/me`                 | User   | Profile, avatar, follower counts, preferences, tier and onboarding progress                        |
+| PATCH         | `/me`                 | User   | Sign-up step 2: experience, job profile (or Others + text), location; name and avatar edits        |
+| PUT           | `/me/preferences`     | User   | Sign-up step 3: 1 focus, 1 risk, 1-3 styles, 1-3 sectors                                           |
+| PUT           | `/me/tier`            | User   | Observer is granted at once; Prive / Institutional wait for KYC. Blocked while KYC is under review |
+| GET           | `/users/:id`          | User   | Public profile (no email, phone or KYC detail) with follower counts                                |
+| POST / DELETE | `/users/:id/follow`   | User   | Follow / unfollow                                                                                  |
+| POST          | `/files/upload-url`   | User   | Signed upload URL; PDF/JPG/PNG up to 10 MB. Returns `fileId` and the Storage `path`                |
+| POST          | `/kyc/submissions`    | User   | Submit uploaded documents for the requested tier (+ consent, required for Prive)                   |
+| GET           | `/kyc/submissions/me` | User   | KYC status, latest submission and rejection reason                                                 |
+| GET           | `/lookups/:type`      | Public | `job-profiles`, `investment-focus`, `risk-levels`, `investment-styles`, `investment-sectors`; also `rating-factors`, `risk-factors`, `investor-types` |
 
 **Uploads:** the app asks for a URL with `purpose` (`AVATAR`, `KYC_DOCUMENT` or `REVIEW_EVIDENCE`), `mimeType` and `sizeBytes`, then PUTs the file to `uploadUrl`. Files are stored at `<user public_id>/<random id>.<ext>`, so each user writes only to their own folder. Avatars go to the public `avatars` bucket; KYC documents and review evidence stay private. Use the `fileId` for `PATCH /me` (`avatarFileId`) and KYC documents, and the `path` for review evidence.
 
@@ -279,3 +281,67 @@ Idempotency-Key: 7d0f6c2e-1b7a-4f0e-9a51-3f1c2b9e8a10
 | Invest again Yes / Maybe / No                                                                      | `YES` / `MAYBE` / `NO`                                                                             |
 | Tag labels (appreciations, concerns, contact status, document types)                               | Codes listed in `reviews.schemas.ts`                                                               |
 | Company name typed as free text                                                                    | `companyId`, picked from `GET /companies?q=`                                                       |
+
+## Ratings
+
+| Method | Path                          | Access | Purpose                                                                                          |
+| ------ | ----------------------------- | ------ | ------------------------------------------------------------------------------------------------ |
+| GET    | `/issuers`                    | Public | Issuers with offer terms and aggregate score. `q`, `sort`, `filter[assetType]`, `filter[listed]` |
+| GET    | `/issuers/:id`                | Public | Offer details                                                                                    |
+| GET    | `/issuers/:id/rating-summary` | Public | Average score and count. Full members also get the weighted score and full breakdown             |
+| POST   | `/issuers/:id/ratings`        | Prive  | Submit a rating. Needs `Idempotency-Key`. Returns the receipt (`GIG-RT-YYYY-NNNNNN`)             |
+| GET    | `/ratings/me`                 | User   | My ratings. Optional `?status=` filter                                                           |
+
+- `sort` is `recent`, `closing_soon`, `top_rated` or `most_rated`.
+- A rating is `{ overallScore, factors, riskFactors }`:
+  - `overallScore`: an integer from 1 to 5.
+  - `factors`: a flag (`POSITIVE`, `NEUTRAL` or `NEGATIVE`) for every one of the 10 rating factors.
+  - `riskFactors`: exactly 3 different risk factors from the 12.
+- Factor and risk codes come from `GET /lookups/rating-factors` and `GET /lookups/risk-factors`.
+- One active rating per investor and issuer; a second one gets `409 RATING_ALREADY_SUBMITTED`.
+- Ratings start as `PENDING_MODERATION` and count towards the summary only once `PUBLISHED`.
+- The breakdown has the weighted score (newer ratings weigh more, down to 0.5 at 24 months), the 1-5 distribution, the share of each flag per factor, and how often each risk was picked.
+
+Tables (private `app` schema): `issuer_ratings`, `issuer_rating_factors`, `issuer_rating_risks`, `issuer_stats` (the plan's Ratings domain). A rating and its factors and risks are saved, and audited (`rating.submitted`), in one transaction. Recompute stats nightly with `select app.recompute_all_issuer_stats();`.
+
+## Representations
+
+| Method | Path                              | Access       | Purpose                                                                                          |
+| ------ | --------------------------------- | ------------ | ------------------------------------------------------------------------------------------------ |
+| GET    | `/representations`                | Public       | Petitions with goal, signatures, progress, days left and track status                            |
+| GET    | `/representations/:id`            | Public       | Overview, evidence download links, recent signers; your own signature and receipt when signed in |
+| GET    | `/representations/:id/timeline`   | Public       | The 9-step track with when each step was reached, and the status history                         |
+| POST   | `/representations/:id/signatures` | Prive        | Sign. Needs `Idempotency-Key`. Returns the signature ID (`GIG-XXXXXXXXX`) and a receipt PDF link |
+| GET    | `/representations/:id/submission` | Prive, Inst. | Download link for the submitted petition pack; `404 SUBMISSION_NOT_AVAILABLE` until there is one |
+
+- `GET /representations` takes `q`, `sort` (`closing_soon`, `recent`, `most_signed` or `progress`), and the filters `filter[status]`, `filter[country]` and `filter[openForSigning]`.
+- Track statuses: `OPEN`, `CLOSING_SOON`, `CLOSED`, `UNDER_REVIEW`, `SUBMITTED_TO_REGULATOR`, `MEETING_REQUESTED`, `MEETING_SCHEDULED`, `REGULATOR_RESPONDED`, `RESOLVED`.
+  - The first three follow the signing window: "Closing Soon" in the last 7 days, "Closed" after `closesAt`.
+  - The rest are set by GIG staff, and every change is recorded in the history.
+- Each response also carries the app's label (`trackLabel`), for example "Submitted to Reg.".
+- A signature is `{ displayMode, investorType?, signatureFileId, consents: { supportSubmission: true, digitalEndorsement: true } }`.
+  - `displayMode` is `FULL_NAME`, `INITIALS` or `ANONYMOUS`. Anonymous signers are counted but never named.
+  - `investorType` is a code from `GET /lookups/investor-types`.
+  - `signatureFileId` comes from `POST /files/upload-url` with `purpose: "SIGNATURE"` (PDF, JPG or PNG).
+  - Both consents are stored in `app.consents` with their version, IP, user agent and app version, in the same transaction as the signature and its audit entry (`representation.signed`).
+- Only Prive signatures count as votes (`voteCount`). One signature per investor and petition; a second one gets `409 ALREADY_SIGNED`.
+- Signatures have a `status` (`VALID` or `REMOVED`) and a soft delete. Removed or deleted signatures stop counting and are no longer listed, and the investor can sign again.
+- Signature files and petition documents flagged `INFECTED` by the virus scan are never accepted or offered for download.
+- The receipt PDF is stored privately and served through 5-minute download links.
+
+Tables (private `app` schema): `representations`, `representation_signatures`, `representation_status_history`, `representation_documents` (the plan's Representations domain). Storage buckets: `signatures`, `signature-receipts` and `representation-documents`, all private. Petition packs themselves are generated in Phase 2 ("Petition PDF packs"); the download endpoint serves them once GIG attaches one.
+
+### Mapping the app's current values (ratings and representations)
+
+| In the app                                                                                                                         | API                                                          |
+| ---------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| Rating factor labels ("PROMOTERS", "FINANCIAL HEALTH", ...)                                                                        | Codes from `/lookups/rating-factors` (`PROMOTERS`, ...)      |
+| Flags `negative` / `neutral` / `positive`                                                                                          | `NEGATIVE` / `NEUTRAL` / `POSITIVE`                          |
+| Risk factors 'Credit', 'Market', ...                                                                                               | Codes from `/lookups/risk-factors` (`CREDIT`, ...)           |
+| Issuer chosen by name (`companyName`)                                                                                              | Issuer `id` in the URL                                       |
+| Name display 'Show full name' / 'Show initials only' / 'Anonymous (counted but not shown)' (stored in the review form's `country`) | `displayMode`: `FULL_NAME` / `INITIALS` / `ANONYMOUS`        |
+| Investor type label (stored in the review form's `assetClass`)                                                                     | `investorType` code from `/lookups/investor-types`           |
+| Signature file name only                                                                                                           | Upload the file, send its `signatureFileId`                  |
+| Review-form `isKycVerified` / `isGenuine` as the 2 consents                                                                        | `consents.supportSubmission` / `consents.digitalEndorsement` |
+| `signedSignature`, `Goal`, `closeIn`, `totalSignature`                                                                             | `signatureCount`, `goal`, `daysLeft`, `progressPercent`      |
+| Petition opened without an id                                                                                                      | Petition `id` in the URL                                     |

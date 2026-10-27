@@ -53,5 +53,9 @@ export const LOOKUP_TYPES = {
   'risk-levels': 'RISK_LEVEL',
   'investment-styles': 'INVESTMENT_STYLE',
   'investment-sectors': 'INVESTMENT_SECTOR',
+  // Ratings: the rating wizard's factors and risks. Representations: the signing flow.
+  'rating-factors': 'RATING_FACTOR',
+  'risk-factors': 'RISK_FACTOR',
+  'investor-types': 'INVESTOR_TYPE',
 } as const;
 export type LookupType = (typeof LOOKUP_TYPES)[keyof typeof LOOKUP_TYPES];

@@ -31,4 +31,3 @@ describe('parse', () => {
     expect(() => parse(z.number(), 'x')).toThrow(z.ZodError);
   });
 });
-

@@ -55,11 +55,7 @@ const option = <T extends readonly [string, ...string[]]>(codes: T) =>
   z.enum(codes, { message: 'Unknown option' });
 
 /** Header that makes POST /reviews safe to retry. */
-export const idempotencyHeaders = z.object({
-  'Idempotency-Key': z
-    .string({ message: 'Send a unique key per submission, e.g. a UUID' })
-    .regex(/^[A-Za-z0-9_-]{8,128}$/, { message: 'Use 8-128 characters: A-Z a-z 0-9 _ -' }),
-});
+export { idempotencyHeaders } from '../../lib/idempotency';
 
 const reviewText = (label: string) =>
   z
