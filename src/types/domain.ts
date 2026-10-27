@@ -1,26 +1,18 @@
-import { Constants, type Enums } from './database';
+// Value lists of the users, files and KYC tables. They match the CHECK constraints in
+// supabase/migrations/20261027140000_files_kyc_follows.sql; change both together.
 
-// Every enum comes from the database types, so a schema change shows up as a compile error.
-const DB_ENUMS = Constants.public.Enums;
+export type { KycStatus, Tier, VerifiedTier } from '../lib/membership';
 
-export const TIERS = DB_ENUMS.membership_tier;
-export type Tier = Enums<'membership_tier'>;
+export const FILE_PURPOSES = ['AVATAR', 'KYC_DOCUMENT', 'REVIEW_EVIDENCE'] as const;
+export type FilePurpose = (typeof FILE_PURPOSES)[number];
 
-/** Tiers that require an approved KYC submission. */
-export type VerifiedTier = Enums<'verified_tier'>;
+export const KYC_DOCUMENT_TYPES = [
+  'ID_PROOF',
+  'ADDRESS_PROOF',
+  'TAX_ID',
+  'INCORPORATION_CERTIFICATE',
+  'AUTHORISATION_LETTER',
+] as const;
+export type KycDocumentType = (typeof KYC_DOCUMENT_TYPES)[number];
 
-export type KycStatus = Enums<'kyc_status'>;
-export type UserStatus = Enums<'user_status'>;
-
-export const FILE_PURPOSES = DB_ENUMS.file_purpose;
-export type FilePurpose = Enums<'file_purpose'>;
-
-export const PREFERENCE_TYPES = DB_ENUMS.preference_type;
-export type PreferenceType = Enums<'preference_type'>;
-
-export const LOOKUP_TYPES = DB_ENUMS.lookup_type;
-export type LookupType = Enums<'lookup_type'>;
-
-export const KYC_DOCUMENT_TYPES = DB_ENUMS.kyc_document_type;
-export type KycDocumentType = Enums<'kyc_document_type'>;
-export type KycSubmissionStatus = Enums<'kyc_submission_status'>;
+export type KycSubmissionStatus = 'PENDING' | 'APPROVED' | 'REJECTED';

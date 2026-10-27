@@ -23,6 +23,7 @@ describe('POST /files/upload-url', () => {
     expect(res.status).toBe(201);
     expect(res.body.data).toEqual({
       fileId: makeFile().publicId,
+      path: expect.stringMatching(new RegExp(`^${USER_ID}/[0-9a-f-]{36}\\.pdf$`)),
       uploadUrl: 'https://storage.example/upload?token=abc',
       method: 'PUT',
       contentType: 'application/pdf',
@@ -32,7 +33,7 @@ describe('POST /files/upload-url', () => {
     expect(bucket).toBe('kyc-documents');
     expect(objectKey).toMatch(new RegExp(`^${USER_ID}/[0-9a-f-]{36}\\.pdf$`));
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ ownerId: 1, purpose: 'KYC_DOCUMENT', objectKey, sizeBytes: 2048 }),
+      expect.objectContaining({ ownerId: '1', purpose: 'KYC_DOCUMENT', objectKey, sizeBytes: 2048 }),
     );
   });
 
@@ -50,6 +51,15 @@ describe('POST /files/upload-url', () => {
         sizeBytes: 'File must be 10 MB or smaller',
       },
     });
+  });
+
+  it('rejects fields the endpoint does not take', async () => {
+    const res = await request(app)
+      .post('/api/v1/files/upload-url')
+      .set(AUTH_HEADER)
+      .send({ purpose: 'AVATAR', mimeType: 'image/png', sizeBytes: 100, objectKey: 'someone-else/x.png' });
+
+    expect(res.status).toBe(400);
   });
 
   it('rejects a PDF avatar', async () => {
