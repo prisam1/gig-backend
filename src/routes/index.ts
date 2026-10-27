@@ -1,18 +1,19 @@
 import { Router } from 'express';
-import { supabaseAdmin } from '../lib/supabase';
-import { noStore } from '../middleware/requestContext';
+import { sql } from '../lib/db';
+import { authRouter } from '../modules/auth/auth.routes';
 import { companiesRouter } from '../modules/catalog/catalog.routes';
 import { creditsRouter } from '../modules/credits/credits.routes';
 import { filesRouter } from '../modules/files/files.routes';
 import { kycRouter } from '../modules/kyc/kyc.routes';
 import { learnRouter } from '../modules/learn/learn.routes';
-import { lookupsRouter } from '../modules/lookups/lookups.routes';
 import { devicesRouter, notificationsRouter } from '../modules/notifications/notifications.routes';
 import { reviewsRouter } from '../modules/reviews/reviews.routes';
 import { roadshowsRouter } from '../modules/roadshows/roadshows.routes';
 import { savedRouter } from '../modules/saved/saved.routes';
+import { lookupsRouter } from '../modules/users/lookups.routes';
 import { meRouter, usersRouter } from '../modules/users/users.routes';
 import { webinarsRouter } from '../modules/webinars/webinars.routes';
+import { apiRateLimit, noStore } from '../middleware/requestContext';
 
 export const router = Router();
 
@@ -20,18 +21,25 @@ router.get('/health', (_req, res) => {
   res.json({ status: 'ok', uptime: process.uptime() });
 });
 
-// Readiness: the process can also reach the database.
-router.get('/health/ready', async (_req, res) => {
-  const { error } = await supabaseAdmin.from('lookup_options').select('code').limit(1);
-  if (error) {
-    res.status(503).json({ status: 'unavailable', database: 'unreachable' });
-    return;
-  }
-  res.json({ status: 'ok', database: 'ok' });
+// Liveness: the process is up. Readiness: it can also reach the database.
+router.get('/health/live', (_req, res) => {
+  res.json({ status: 'ok' });
 });
 
-// Sign-up, login, OTP and sessions are handled by Supabase Auth in the app. The API accepts its
-// access tokens (src/lib/auth.ts) and creates the GIG user on the first request.
+router.get('/health/ready', async (_req, res) => {
+  try {
+    await sql`select 1`;
+    res.json({ status: 'ok', database: 'ok' });
+  } catch {
+    res.status(503).json({ status: 'unavailable', database: 'unreachable' });
+  }
+});
+
+// Everything below: a per-IP request limit, and no caching of any response by proxies or devices.
+router.use(apiRateLimit, noStore);
+
+// ===== Auth and onboarding (Phase 1) =====
+router.use('/auth', authRouter);
 
 // ---------------------------------------------------------------------------------------------
 // Saved items, credits and notifications (the signed-in user's own data)
@@ -49,10 +57,10 @@ router.use('/me/notifications', noStore, notificationsRouter);
 router.use('/me/devices', noStore, devicesRouter);
 
 // ===== Users, profile and KYC (Phase 1) =====
-router.use('/me', noStore, meRouter);
+router.use('/me', meRouter);
 router.use('/users', usersRouter);
 router.use('/files', filesRouter);
-router.use('/kyc', noStore, kycRouter);
+router.use('/kyc', kycRouter);
 router.use('/lookups', lookupsRouter);
 
 // ---------------------------------------------------------------------------------------------

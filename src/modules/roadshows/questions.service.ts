@@ -2,7 +2,7 @@ import type { PageMeta } from '../../lib/http';
 import { containsPattern, fetchPage, supabaseAdmin, unwrap } from '../../lib/supabase';
 import { HttpError } from '../../middleware/errorHandler';
 import type { Enums, Tables } from '../../types/database';
-import type { User } from '../users/users.repository';
+import type { AuthUser } from '../../middleware/auth';
 import type { AskQuestionInput, ListQuestionsQuery } from './roadshows.schemas';
 import { findPublishedRoadshow } from './roadshows.service';
 
@@ -77,7 +77,7 @@ export async function listQuestions(
 
 /** Prive: ask a question while the roadshow is open. It is published after moderation. */
 export async function askQuestion(
-  user: User,
+  user: AuthUser,
   roadshowId: string,
   input: AskQuestionInput,
 ): Promise<SubmittedQuestion> {
@@ -91,7 +91,7 @@ export async function askQuestion(
       .from('roadshow_questions')
       .insert({
         roadshow_id: roadshowId,
-        user_id: user.publicId,
+        user_id: user.id,
         category: input.category,
         question: input.question,
       })

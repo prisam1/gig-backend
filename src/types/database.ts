@@ -1,5 +1,5 @@
-// Database types for supabase-js, in the format `supabase gen types typescript` produces.
-// Mirrors supabase/migrations. After changing the schema, regenerate instead of editing:
+// Database types in the `supabase gen types typescript` format, matching supabase/migrations.
+// Regenerate once the project is linked:
 //   npx supabase gen types typescript --project-id <ref> --schema public > src/types/database.ts
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
@@ -52,89 +52,6 @@ export type Database = {
         };
         Relationships: [];
       };
-      company_stats: {
-        Row: {
-          company_id: string;
-          review_count: number;
-          score: number;
-          relevance: number;
-          avg_transparency: number;
-          avg_responsiveness: number;
-          avg_ease_of_process: number;
-          avg_trustworthiness: number;
-          avg_overall_satisfaction: number;
-          positive_pct: number;
-          neutral_pct: number;
-          negative_pct: number;
-          dominant_sentiment: Database['public']['Enums']['sentiment'] | null;
-          resolved_pct: number;
-          in_progress_pct: number;
-          unresolved_pct: number;
-          not_contacted_pct: number;
-          dominant_resolution: Database['public']['Enums']['resolution_bucket'] | null;
-          reviews_30d: number;
-          score_change_12m: number;
-          last_review_at: string | null;
-          updated_at: string;
-        };
-        Insert: {
-          company_id: string;
-          review_count?: number;
-          score?: number;
-          relevance?: number;
-          avg_transparency?: number;
-          avg_responsiveness?: number;
-          avg_ease_of_process?: number;
-          avg_trustworthiness?: number;
-          avg_overall_satisfaction?: number;
-          positive_pct?: number;
-          neutral_pct?: number;
-          negative_pct?: number;
-          dominant_sentiment?: Database['public']['Enums']['sentiment'] | null;
-          resolved_pct?: number;
-          in_progress_pct?: number;
-          unresolved_pct?: number;
-          not_contacted_pct?: number;
-          dominant_resolution?: Database['public']['Enums']['resolution_bucket'] | null;
-          reviews_30d?: number;
-          score_change_12m?: number;
-          last_review_at?: string | null;
-          updated_at?: string;
-        };
-        Update: {
-          company_id?: string;
-          review_count?: number;
-          score?: number;
-          relevance?: number;
-          avg_transparency?: number;
-          avg_responsiveness?: number;
-          avg_ease_of_process?: number;
-          avg_trustworthiness?: number;
-          avg_overall_satisfaction?: number;
-          positive_pct?: number;
-          neutral_pct?: number;
-          negative_pct?: number;
-          dominant_sentiment?: Database['public']['Enums']['sentiment'] | null;
-          resolved_pct?: number;
-          in_progress_pct?: number;
-          unresolved_pct?: number;
-          not_contacted_pct?: number;
-          dominant_resolution?: Database['public']['Enums']['resolution_bucket'] | null;
-          reviews_30d?: number;
-          score_change_12m?: number;
-          last_review_at?: string | null;
-          updated_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'company_stats_company_id_fkey';
-            columns: ['company_id'];
-            isOneToOne: true;
-            referencedRelation: 'companies';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
       company_tags: {
         Row: {
           company_id: string;
@@ -157,282 +74,6 @@ export type Database = {
             columns: ['company_id'];
             isOneToOne: false;
             referencedRelation: 'companies';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      company_trend_points: {
-        Row: {
-          company_id: string;
-          month: string;
-          review_count: number;
-          overall_sum: number;
-          positive_count: number;
-        };
-        Insert: {
-          company_id: string;
-          month: string;
-          review_count: number;
-          overall_sum: number;
-          positive_count: number;
-        };
-        Update: {
-          company_id?: string;
-          month?: string;
-          review_count?: number;
-          overall_sum?: number;
-          positive_count?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'company_trend_points_company_id_fkey';
-            columns: ['company_id'];
-            isOneToOne: false;
-            referencedRelation: 'companies';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      consents: {
-        Row: {
-          accepted_at: string;
-          app_version: string | null;
-          id: number;
-          ip_address: string | null;
-          type: string;
-          user_id: number;
-          version: string;
-        };
-        Insert: {
-          accepted_at?: string;
-          app_version?: string | null;
-          id?: never;
-          ip_address?: string | null;
-          type: string;
-          user_id: number;
-          version: string;
-        };
-        Update: {
-          accepted_at?: string;
-          app_version?: string | null;
-          id?: never;
-          ip_address?: string | null;
-          type?: string;
-          user_id?: number;
-          version?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'consents_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      credit_ledger: {
-        Row: {
-          id: number;
-          user_id: string;
-          delta: number;
-          balance_after: number;
-          reason: Database['public']['Enums']['credit_reason'];
-          ref_type: string | null;
-          ref_id: string | null;
-          note: string | null;
-          created_at: string;
-        };
-        Insert: {
-          id?: never;
-          user_id: string;
-          delta: number;
-          balance_after: number;
-          reason: Database['public']['Enums']['credit_reason'];
-          ref_type?: string | null;
-          ref_id?: string | null;
-          note?: string | null;
-          created_at?: string;
-        };
-        Update: {
-          id?: never;
-          user_id?: string;
-          delta?: number;
-          balance_after?: number;
-          reason?: Database['public']['Enums']['credit_reason'];
-          ref_type?: string | null;
-          ref_id?: string | null;
-          note?: string | null;
-          created_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'credit_ledger_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['public_id'];
-          },
-        ];
-      };
-      device_tokens: {
-        Row: {
-          token: string;
-          user_id: string;
-          platform: Database['public']['Enums']['device_platform'];
-          app_version: string | null;
-          created_at: string;
-          last_seen_at: string;
-        };
-        Insert: {
-          token: string;
-          user_id: string;
-          platform: Database['public']['Enums']['device_platform'];
-          app_version?: string | null;
-          created_at?: string;
-          last_seen_at?: string;
-        };
-        Update: {
-          token?: string;
-          user_id?: string;
-          platform?: Database['public']['Enums']['device_platform'];
-          app_version?: string | null;
-          created_at?: string;
-          last_seen_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'device_tokens_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['public_id'];
-          },
-        ];
-      };
-      files: {
-        Row: {
-          bucket: string;
-          created_at: string;
-          id: number;
-          mime_type: string;
-          object_key: string;
-          owner_id: number;
-          public_id: string;
-          purpose: Database['public']['Enums']['file_purpose'];
-          scan_status: Database['public']['Enums']['file_scan_status'];
-          size_bytes: number;
-          updated_at: string;
-        };
-        Insert: {
-          bucket: string;
-          created_at?: string;
-          id?: never;
-          mime_type: string;
-          object_key: string;
-          owner_id: number;
-          public_id?: string;
-          purpose: Database['public']['Enums']['file_purpose'];
-          scan_status?: Database['public']['Enums']['file_scan_status'];
-          size_bytes: number;
-          updated_at?: string;
-        };
-        Update: {
-          bucket?: string;
-          created_at?: string;
-          id?: never;
-          mime_type?: string;
-          object_key?: string;
-          owner_id?: number;
-          public_id?: string;
-          purpose?: Database['public']['Enums']['file_purpose'];
-          scan_status?: Database['public']['Enums']['file_scan_status'];
-          size_bytes?: number;
-          updated_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'files_owner_id_fkey';
-            columns: ['owner_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      follows: {
-        Row: {
-          created_at: string;
-          followee_id: number;
-          follower_id: number;
-        };
-        Insert: {
-          created_at?: string;
-          followee_id: number;
-          follower_id: number;
-        };
-        Update: {
-          created_at?: string;
-          followee_id?: number;
-          follower_id?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'follows_followee_id_fkey';
-            columns: ['followee_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'follows_follower_id_fkey';
-            columns: ['follower_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      fx_rates: {
-        Row: {
-          currency: Database['public']['Enums']['currency_code'];
-          per_usd: number;
-          as_of: string;
-        };
-        Insert: {
-          currency: Database['public']['Enums']['currency_code'];
-          per_usd: number;
-          as_of?: string;
-        };
-        Update: {
-          currency?: Database['public']['Enums']['currency_code'];
-          per_usd?: number;
-          as_of?: string;
-        };
-        Relationships: [];
-      };
-      issuer_tags: {
-        Row: {
-          issuer_id: string;
-          tag: string;
-          sort_order: number;
-        };
-        Insert: {
-          issuer_id: string;
-          tag: string;
-          sort_order?: number;
-        };
-        Update: {
-          issuer_id?: string;
-          tag?: string;
-          sort_order?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'issuer_tags_issuer_id_fkey';
-            columns: ['issuer_id'];
-            isOneToOne: false;
-            referencedRelation: 'issuers';
             referencedColumns: ['id'];
           },
         ];
@@ -509,404 +150,28 @@ export type Database = {
         };
         Relationships: [];
       };
-      kyc_documents: {
+      issuer_tags: {
         Row: {
-          document_type: Database['public']['Enums']['kyc_document_type'];
-          file_id: number;
-          submission_id: number;
-        };
-        Insert: {
-          document_type: Database['public']['Enums']['kyc_document_type'];
-          file_id: number;
-          submission_id: number;
-        };
-        Update: {
-          document_type?: Database['public']['Enums']['kyc_document_type'];
-          file_id?: number;
-          submission_id?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'kyc_documents_file_id_fkey';
-            columns: ['file_id'];
-            isOneToOne: false;
-            referencedRelation: 'files';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'kyc_documents_submission_id_fkey';
-            columns: ['submission_id'];
-            isOneToOne: false;
-            referencedRelation: 'kyc_submissions';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      kyc_submissions: {
-        Row: {
-          created_at: string;
-          id: number;
-          provider: string;
-          public_id: string;
-          reason: string | null;
-          reference: string | null;
-          reviewed_at: string | null;
-          reviewer_id: number | null;
-          status: Database['public']['Enums']['kyc_submission_status'];
-          tier: Database['public']['Enums']['verified_tier'];
-          updated_at: string;
-          user_id: number;
-        };
-        Insert: {
-          created_at?: string;
-          id?: never;
-          provider?: string;
-          public_id?: string;
-          reason?: string | null;
-          reference?: string | null;
-          reviewed_at?: string | null;
-          reviewer_id?: number | null;
-          status?: Database['public']['Enums']['kyc_submission_status'];
-          tier: Database['public']['Enums']['verified_tier'];
-          updated_at?: string;
-          user_id: number;
-        };
-        Update: {
-          created_at?: string;
-          id?: never;
-          provider?: string;
-          public_id?: string;
-          reason?: string | null;
-          reference?: string | null;
-          reviewed_at?: string | null;
-          reviewer_id?: number | null;
-          status?: Database['public']['Enums']['kyc_submission_status'];
-          tier?: Database['public']['Enums']['verified_tier'];
-          updated_at?: string;
-          user_id?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'kyc_submissions_reviewer_id_fkey';
-            columns: ['reviewer_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'kyc_submissions_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      learn_items: {
-        Row: {
-          id: string;
-          title: string;
-          summary: string | null;
-          format: Database['public']['Enums']['learn_format'];
-          category: string | null;
-          access: Database['public']['Enums']['content_access'];
-          thumbnail_url: string | null;
-          content_url: string | null;
-          duration_seconds: number | null;
-          download_path: string | null;
-          rating_avg: number;
-          rating_count: number;
-          status: Database['public']['Enums']['content_status'];
-          published_at: string | null;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          id?: string;
-          title: string;
-          summary?: string | null;
-          format: Database['public']['Enums']['learn_format'];
-          category?: string | null;
-          access?: Database['public']['Enums']['content_access'];
-          thumbnail_url?: string | null;
-          content_url?: string | null;
-          duration_seconds?: number | null;
-          download_path?: string | null;
-          rating_avg?: number;
-          rating_count?: number;
-          status?: Database['public']['Enums']['content_status'];
-          published_at?: string | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          id?: string;
-          title?: string;
-          summary?: string | null;
-          format?: Database['public']['Enums']['learn_format'];
-          category?: string | null;
-          access?: Database['public']['Enums']['content_access'];
-          thumbnail_url?: string | null;
-          content_url?: string | null;
-          duration_seconds?: number | null;
-          download_path?: string | null;
-          rating_avg?: number;
-          rating_count?: number;
-          status?: Database['public']['Enums']['content_status'];
-          published_at?: string | null;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Relationships: [];
-      };
-      learn_ratings: {
-        Row: {
-          learn_item_id: string;
-          user_id: string;
-          rating: number;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          learn_item_id: string;
-          user_id: string;
-          rating: number;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          learn_item_id?: string;
-          user_id?: string;
-          rating?: number;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'learn_ratings_learn_item_id_fkey';
-            columns: ['learn_item_id'];
-            isOneToOne: false;
-            referencedRelation: 'learn_items';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'learn_ratings_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['public_id'];
-          },
-        ];
-      };
-      lookup_options: {
-        Row: {
-          active: boolean;
-          code: string;
-          label: string;
+          issuer_id: string;
+          tag: string;
           sort_order: number;
-          type: Database['public']['Enums']['lookup_type'];
         };
         Insert: {
-          active?: boolean;
-          code: string;
-          label: string;
+          issuer_id: string;
+          tag: string;
           sort_order?: number;
-          type: Database['public']['Enums']['lookup_type'];
         };
         Update: {
-          active?: boolean;
-          code?: string;
-          label?: string;
+          issuer_id?: string;
+          tag?: string;
           sort_order?: number;
-          type?: Database['public']['Enums']['lookup_type'];
-        };
-        Relationships: [];
-      };
-      notifications: {
-        Row: {
-          id: string;
-          user_id: string;
-          type: Database['public']['Enums']['notification_type'];
-          title: string;
-          body: string;
-          data: Json;
-          read_at: string | null;
-          created_at: string;
-        };
-        Insert: {
-          id?: string;
-          user_id: string;
-          type: Database['public']['Enums']['notification_type'];
-          title: string;
-          body: string;
-          data?: Json;
-          read_at?: string | null;
-          created_at?: string;
-        };
-        Update: {
-          id?: string;
-          user_id?: string;
-          type?: Database['public']['Enums']['notification_type'];
-          title?: string;
-          body?: string;
-          data?: Json;
-          read_at?: string | null;
-          created_at?: string;
         };
         Relationships: [
           {
-            foreignKeyName: 'notifications_user_id_fkey';
-            columns: ['user_id'];
+            foreignKeyName: 'issuer_tags_issuer_id_fkey';
+            columns: ['issuer_id'];
             isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['public_id'];
-          },
-        ];
-      };
-      pool_members: {
-        Row: {
-          roadshow_id: string;
-          user_id: string;
-          capital_interest: number;
-          ledger_entry_id: number;
-          idempotency_key: string;
-          request_hash: string;
-          created_at: string;
-        };
-        Insert: {
-          roadshow_id: string;
-          user_id: string;
-          capital_interest: number;
-          ledger_entry_id: number;
-          idempotency_key: string;
-          request_hash: string;
-          created_at?: string;
-        };
-        Update: {
-          roadshow_id?: string;
-          user_id?: string;
-          capital_interest?: number;
-          ledger_entry_id?: number;
-          idempotency_key?: string;
-          request_hash?: string;
-          created_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'pool_members_ledger_entry_id_fkey';
-            columns: ['ledger_entry_id'];
-            isOneToOne: false;
-            referencedRelation: 'credit_ledger';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'pool_members_roadshow_id_fkey';
-            columns: ['roadshow_id'];
-            isOneToOne: false;
-            referencedRelation: 'roadshows';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'pool_members_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['public_id'];
-          },
-        ];
-      };
-      review_attachments: {
-        Row: {
-          review_id: string;
-          storage_path: string;
-          doc_type: string;
-          created_at: string;
-        };
-        Insert: {
-          review_id: string;
-          storage_path: string;
-          doc_type: string;
-          created_at?: string;
-        };
-        Update: {
-          review_id?: string;
-          storage_path?: string;
-          doc_type?: string;
-          created_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'review_attachments_review_id_fkey';
-            columns: ['review_id'];
-            isOneToOne: false;
-            referencedRelation: 'reviews';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      review_tags: {
-        Row: {
-          review_id: string;
-          tag_type: string;
-          code: string;
-        };
-        Insert: {
-          review_id: string;
-          tag_type: string;
-          code: string;
-        };
-        Update: {
-          review_id?: string;
-          tag_type?: string;
-          code?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'review_tags_review_id_fkey';
-            columns: ['review_id'];
-            isOneToOne: false;
-            referencedRelation: 'reviews';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      review_versions: {
-        Row: {
-          id: number;
-          review_id: string;
-          change_type: Database['public']['Enums']['review_change_type'];
-          from_value: string | null;
-          to_value: string | null;
-          note: string | null;
-          actor_id: string | null;
-          created_at: string;
-        };
-        Insert: {
-          id?: number;
-          review_id: string;
-          change_type: Database['public']['Enums']['review_change_type'];
-          from_value?: string | null;
-          to_value?: string | null;
-          note?: string | null;
-          actor_id?: string | null;
-          created_at?: string;
-        };
-        Update: {
-          id?: number;
-          review_id?: string;
-          change_type?: Database['public']['Enums']['review_change_type'];
-          from_value?: string | null;
-          to_value?: string | null;
-          note?: string | null;
-          actor_id?: string | null;
-          created_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'review_versions_review_id_fkey';
-            columns: ['review_id'];
-            isOneToOne: false;
-            referencedRelation: 'reviews';
+            referencedRelation: 'issuers';
             referencedColumns: ['id'];
           },
         ];
@@ -1027,6 +292,503 @@ export type Database = {
             isOneToOne: false;
             referencedRelation: 'companies';
             referencedColumns: ['id'];
+          },
+        ];
+      };
+      review_tags: {
+        Row: {
+          review_id: string;
+          tag_type: string;
+          code: string;
+        };
+        Insert: {
+          review_id: string;
+          tag_type: string;
+          code: string;
+        };
+        Update: {
+          review_id?: string;
+          tag_type?: string;
+          code?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'review_tags_review_id_fkey';
+            columns: ['review_id'];
+            isOneToOne: false;
+            referencedRelation: 'reviews';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      review_attachments: {
+        Row: {
+          review_id: string;
+          storage_path: string;
+          doc_type: string;
+          created_at: string;
+        };
+        Insert: {
+          review_id: string;
+          storage_path: string;
+          doc_type: string;
+          created_at?: string;
+        };
+        Update: {
+          review_id?: string;
+          storage_path?: string;
+          doc_type?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'review_attachments_review_id_fkey';
+            columns: ['review_id'];
+            isOneToOne: false;
+            referencedRelation: 'reviews';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      review_versions: {
+        Row: {
+          id: number;
+          review_id: string;
+          change_type: Database['public']['Enums']['review_change_type'];
+          from_value: string | null;
+          to_value: string | null;
+          note: string | null;
+          actor_id: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: number;
+          review_id: string;
+          change_type: Database['public']['Enums']['review_change_type'];
+          from_value?: string | null;
+          to_value?: string | null;
+          note?: string | null;
+          actor_id?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: number;
+          review_id?: string;
+          change_type?: Database['public']['Enums']['review_change_type'];
+          from_value?: string | null;
+          to_value?: string | null;
+          note?: string | null;
+          actor_id?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'review_versions_review_id_fkey';
+            columns: ['review_id'];
+            isOneToOne: false;
+            referencedRelation: 'reviews';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      company_stats: {
+        Row: {
+          company_id: string;
+          review_count: number;
+          score: number;
+          relevance: number;
+          avg_transparency: number;
+          avg_responsiveness: number;
+          avg_ease_of_process: number;
+          avg_trustworthiness: number;
+          avg_overall_satisfaction: number;
+          positive_pct: number;
+          neutral_pct: number;
+          negative_pct: number;
+          dominant_sentiment: Database['public']['Enums']['sentiment'] | null;
+          resolved_pct: number;
+          in_progress_pct: number;
+          unresolved_pct: number;
+          not_contacted_pct: number;
+          dominant_resolution: Database['public']['Enums']['resolution_bucket'] | null;
+          reviews_30d: number;
+          score_change_12m: number;
+          last_review_at: string | null;
+          updated_at: string;
+        };
+        Insert: {
+          company_id: string;
+          review_count?: number;
+          score?: number;
+          relevance?: number;
+          avg_transparency?: number;
+          avg_responsiveness?: number;
+          avg_ease_of_process?: number;
+          avg_trustworthiness?: number;
+          avg_overall_satisfaction?: number;
+          positive_pct?: number;
+          neutral_pct?: number;
+          negative_pct?: number;
+          dominant_sentiment?: Database['public']['Enums']['sentiment'] | null;
+          resolved_pct?: number;
+          in_progress_pct?: number;
+          unresolved_pct?: number;
+          not_contacted_pct?: number;
+          dominant_resolution?: Database['public']['Enums']['resolution_bucket'] | null;
+          reviews_30d?: number;
+          score_change_12m?: number;
+          last_review_at?: string | null;
+          updated_at?: string;
+        };
+        Update: {
+          company_id?: string;
+          review_count?: number;
+          score?: number;
+          relevance?: number;
+          avg_transparency?: number;
+          avg_responsiveness?: number;
+          avg_ease_of_process?: number;
+          avg_trustworthiness?: number;
+          avg_overall_satisfaction?: number;
+          positive_pct?: number;
+          neutral_pct?: number;
+          negative_pct?: number;
+          dominant_sentiment?: Database['public']['Enums']['sentiment'] | null;
+          resolved_pct?: number;
+          in_progress_pct?: number;
+          unresolved_pct?: number;
+          not_contacted_pct?: number;
+          dominant_resolution?: Database['public']['Enums']['resolution_bucket'] | null;
+          reviews_30d?: number;
+          score_change_12m?: number;
+          last_review_at?: string | null;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'company_stats_company_id_fkey';
+            columns: ['company_id'];
+            isOneToOne: true;
+            referencedRelation: 'companies';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      company_trend_points: {
+        Row: {
+          company_id: string;
+          month: string;
+          review_count: number;
+          overall_sum: number;
+          positive_count: number;
+        };
+        Insert: {
+          company_id: string;
+          month: string;
+          review_count: number;
+          overall_sum: number;
+          positive_count: number;
+        };
+        Update: {
+          company_id?: string;
+          month?: string;
+          review_count?: number;
+          overall_sum?: number;
+          positive_count?: number;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'company_trend_points_company_id_fkey';
+            columns: ['company_id'];
+            isOneToOne: false;
+            referencedRelation: 'companies';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      credit_ledger: {
+        Row: {
+          id: number;
+          user_id: string;
+          delta: number;
+          balance_after: number;
+          reason: Database['public']['Enums']['credit_reason'];
+          ref_type: string | null;
+          ref_id: string | null;
+          note: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: never;
+          user_id: string;
+          delta: number;
+          balance_after: number;
+          reason: Database['public']['Enums']['credit_reason'];
+          ref_type?: string | null;
+          ref_id?: string | null;
+          note?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: never;
+          user_id?: string;
+          delta?: number;
+          balance_after?: number;
+          reason?: Database['public']['Enums']['credit_reason'];
+          ref_type?: string | null;
+          ref_id?: string | null;
+          note?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'credit_ledger_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
+      };
+      device_tokens: {
+        Row: {
+          token: string;
+          user_id: string;
+          platform: Database['public']['Enums']['device_platform'];
+          app_version: string | null;
+          created_at: string;
+          last_seen_at: string;
+        };
+        Insert: {
+          token: string;
+          user_id: string;
+          platform: Database['public']['Enums']['device_platform'];
+          app_version?: string | null;
+          created_at?: string;
+          last_seen_at?: string;
+        };
+        Update: {
+          token?: string;
+          user_id?: string;
+          platform?: Database['public']['Enums']['device_platform'];
+          app_version?: string | null;
+          created_at?: string;
+          last_seen_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'device_tokens_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
+      };
+      fx_rates: {
+        Row: {
+          currency: Database['public']['Enums']['currency_code'];
+          per_usd: number;
+          as_of: string;
+        };
+        Insert: {
+          currency: Database['public']['Enums']['currency_code'];
+          per_usd: number;
+          as_of?: string;
+        };
+        Update: {
+          currency?: Database['public']['Enums']['currency_code'];
+          per_usd?: number;
+          as_of?: string;
+        };
+        Relationships: [];
+      };
+      learn_items: {
+        Row: {
+          id: string;
+          title: string;
+          summary: string | null;
+          format: Database['public']['Enums']['learn_format'];
+          category: string | null;
+          access: Database['public']['Enums']['content_access'];
+          thumbnail_url: string | null;
+          content_url: string | null;
+          duration_seconds: number | null;
+          download_path: string | null;
+          rating_avg: number;
+          rating_count: number;
+          status: Database['public']['Enums']['content_status'];
+          published_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          title: string;
+          summary?: string | null;
+          format: Database['public']['Enums']['learn_format'];
+          category?: string | null;
+          access?: Database['public']['Enums']['content_access'];
+          thumbnail_url?: string | null;
+          content_url?: string | null;
+          duration_seconds?: number | null;
+          download_path?: string | null;
+          rating_avg?: number;
+          rating_count?: number;
+          status?: Database['public']['Enums']['content_status'];
+          published_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          id?: string;
+          title?: string;
+          summary?: string | null;
+          format?: Database['public']['Enums']['learn_format'];
+          category?: string | null;
+          access?: Database['public']['Enums']['content_access'];
+          thumbnail_url?: string | null;
+          content_url?: string | null;
+          duration_seconds?: number | null;
+          download_path?: string | null;
+          rating_avg?: number;
+          rating_count?: number;
+          status?: Database['public']['Enums']['content_status'];
+          published_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [];
+      };
+      learn_ratings: {
+        Row: {
+          learn_item_id: string;
+          user_id: string;
+          rating: number;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          learn_item_id: string;
+          user_id: string;
+          rating: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: {
+          learn_item_id?: string;
+          user_id?: string;
+          rating?: number;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'learn_ratings_learn_item_id_fkey';
+            columns: ['learn_item_id'];
+            isOneToOne: false;
+            referencedRelation: 'learn_items';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'learn_ratings_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
+      };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: Database['public']['Enums']['notification_type'];
+          title: string;
+          body: string;
+          data: Json;
+          read_at: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          type: Database['public']['Enums']['notification_type'];
+          title: string;
+          body: string;
+          data?: Json;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Update: {
+          id?: string;
+          user_id?: string;
+          type?: Database['public']['Enums']['notification_type'];
+          title?: string;
+          body?: string;
+          data?: Json;
+          read_at?: string | null;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'notifications_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
+          },
+        ];
+      };
+      pool_members: {
+        Row: {
+          roadshow_id: string;
+          user_id: string;
+          capital_interest: number;
+          ledger_entry_id: number;
+          idempotency_key: string;
+          request_hash: string;
+          created_at: string;
+        };
+        Insert: {
+          roadshow_id: string;
+          user_id: string;
+          capital_interest: number;
+          ledger_entry_id: number;
+          idempotency_key: string;
+          request_hash: string;
+          created_at?: string;
+        };
+        Update: {
+          roadshow_id?: string;
+          user_id?: string;
+          capital_interest?: number;
+          ledger_entry_id?: number;
+          idempotency_key?: string;
+          request_hash?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'pool_members_ledger_entry_id_fkey';
+            columns: ['ledger_entry_id'];
+            isOneToOne: false;
+            referencedRelation: 'credit_ledger';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'pool_members_roadshow_id_fkey';
+            columns: ['roadshow_id'];
+            isOneToOne: false;
+            referencedRelation: 'roadshows';
+            referencedColumns: ['id'];
+          },
+          {
+            foreignKeyName: 'pool_members_user_id_fkey';
+            columns: ['user_id'];
+            isOneToOne: false;
+            referencedRelation: 'users';
+            referencedColumns: ['public_id'];
           },
         ];
       };
@@ -1397,163 +1159,6 @@ export type Database = {
           },
         ];
       };
-      tier_history: {
-        Row: {
-          created_at: string;
-          from_tier: Database['public']['Enums']['membership_tier'];
-          id: number;
-          to_tier: Database['public']['Enums']['membership_tier'];
-          user_id: number;
-        };
-        Insert: {
-          created_at?: string;
-          from_tier: Database['public']['Enums']['membership_tier'];
-          id?: never;
-          to_tier: Database['public']['Enums']['membership_tier'];
-          user_id: number;
-        };
-        Update: {
-          created_at?: string;
-          from_tier?: Database['public']['Enums']['membership_tier'];
-          id?: never;
-          to_tier?: Database['public']['Enums']['membership_tier'];
-          user_id?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'tier_history_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      user_preferences: {
-        Row: {
-          created_at: string;
-          option_code: string;
-          type: Database['public']['Enums']['preference_type'];
-          user_id: number;
-        };
-        Insert: {
-          created_at?: string;
-          option_code: string;
-          type: Database['public']['Enums']['preference_type'];
-          user_id: number;
-        };
-        Update: {
-          created_at?: string;
-          option_code?: string;
-          type?: Database['public']['Enums']['preference_type'];
-          user_id?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'user_preferences_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      user_profiles: {
-        Row: {
-          avatar_file_id: number | null;
-          created_at: string;
-          experience: string | null;
-          job_profile: string | null;
-          location: string | null;
-          name: string | null;
-          other_job: string | null;
-          updated_at: string;
-          user_id: number;
-        };
-        Insert: {
-          avatar_file_id?: number | null;
-          created_at?: string;
-          experience?: string | null;
-          job_profile?: string | null;
-          location?: string | null;
-          name?: string | null;
-          other_job?: string | null;
-          updated_at?: string;
-          user_id: number;
-        };
-        Update: {
-          avatar_file_id?: number | null;
-          created_at?: string;
-          experience?: string | null;
-          job_profile?: string | null;
-          location?: string | null;
-          name?: string | null;
-          other_job?: string | null;
-          updated_at?: string;
-          user_id?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'user_profiles_avatar_file_id_fkey';
-            columns: ['avatar_file_id'];
-            isOneToOne: false;
-            referencedRelation: 'files';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'user_profiles_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: true;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      users: {
-        Row: {
-          auth_user_id: string;
-          created_at: string;
-          credit_balance: number;
-          email: string | null;
-          id: number;
-          kyc_status: Database['public']['Enums']['kyc_status'];
-          phone: string | null;
-          public_id: string;
-          requested_tier: Database['public']['Enums']['verified_tier'] | null;
-          status: Database['public']['Enums']['user_status'];
-          tier: Database['public']['Enums']['membership_tier'];
-          updated_at: string;
-        };
-        Insert: {
-          auth_user_id: string;
-          created_at?: string;
-          credit_balance?: number;
-          email?: string | null;
-          id?: never;
-          kyc_status?: Database['public']['Enums']['kyc_status'];
-          phone?: string | null;
-          public_id?: string;
-          requested_tier?: Database['public']['Enums']['verified_tier'] | null;
-          status?: Database['public']['Enums']['user_status'];
-          tier?: Database['public']['Enums']['membership_tier'];
-          updated_at?: string;
-        };
-        Update: {
-          auth_user_id?: string;
-          created_at?: string;
-          credit_balance?: number;
-          email?: string | null;
-          id?: never;
-          kyc_status?: Database['public']['Enums']['kyc_status'];
-          phone?: string | null;
-          public_id?: string;
-          requested_tier?: Database['public']['Enums']['verified_tier'] | null;
-          status?: Database['public']['Enums']['user_status'];
-          tier?: Database['public']['Enums']['membership_tier'];
-          updated_at?: string;
-        };
-        Relationships: [];
-      };
       webinar_registrations: {
         Row: {
           webinar_id: string;
@@ -1715,37 +1320,6 @@ export type Database = {
       };
     };
     Functions: {
-      apply_credit_change: {
-        Args: {
-          p_user_id: string;
-          p_delta: number;
-          p_reason: Database['public']['Enums']['credit_reason'];
-          p_ref_type?: string;
-          p_ref_id?: string;
-          p_note?: string;
-        };
-        Returns: Database['public']['Tables']['credit_ledger']['Row'][];
-        SetofOptions: {
-          from: '*';
-          to: 'credit_ledger';
-          isOneToOne: false;
-          isSetofReturn: true;
-        };
-      };
-      join_roadshow_pool: {
-        Args: {
-          p_user_id: string;
-          p_roadshow_id: string;
-          p_capital_interest: number;
-          p_expectations: Database['public']['Enums']['pool_expectation'][];
-          p_idempotency_key: string;
-          p_request_hash: string;
-        };
-        Returns: {
-          joined_at: string;
-          credits_remaining: number;
-        }[];
-      };
       name_initials: {
         Args: { full_name: string };
         Returns: string;
@@ -1757,22 +1331,6 @@ export type Database = {
       recompute_company_stats: {
         Args: { p_company_id: string };
         Returns: undefined;
-      };
-      replace_user_preferences: {
-        Args: { p_preferences: Json; p_user_id: number };
-        Returns: undefined;
-      };
-      roadshow_pool_power: {
-        Args: { p_roadshow_id: string };
-        Returns: {
-          band: number;
-          band_min: number;
-          band_max: number;
-          band_members: number;
-          band_capital: number;
-          expectation: Database['public']['Enums']['pool_expectation'];
-          votes: number;
-        }[];
       };
       search_companies: {
         Args: {
@@ -1793,15 +1351,6 @@ export type Database = {
           isOneToOne: false;
           isSetofReturn: true;
         };
-      };
-      submit_kyc: {
-        Args: {
-          p_consent: Json;
-          p_documents: Json;
-          p_tier: Database['public']['Enums']['verified_tier'];
-          p_user_id: number;
-        };
-        Returns: string;
       };
       submit_review: {
         Args: {
@@ -1858,56 +1407,55 @@ export type Database = {
           updated_at: string;
         }[];
       };
+      apply_credit_change: {
+        Args: {
+          p_user_id: string;
+          p_delta: number;
+          p_reason: Database['public']['Enums']['credit_reason'];
+          p_ref_type?: string;
+          p_ref_id?: string;
+          p_note?: string;
+        };
+        Returns: Database['public']['Tables']['credit_ledger']['Row'][];
+        SetofOptions: {
+          from: '*';
+          to: 'credit_ledger';
+          isOneToOne: false;
+          isSetofReturn: true;
+        };
+      };
+      join_roadshow_pool: {
+        Args: {
+          p_user_id: string;
+          p_roadshow_id: string;
+          p_capital_interest: number;
+          p_expectations: Database['public']['Enums']['pool_expectation'][];
+          p_idempotency_key: string;
+          p_request_hash: string;
+        };
+        Returns: {
+          joined_at: string;
+          credits_remaining: number;
+        }[];
+      };
+      roadshow_pool_power: {
+        Args: { p_roadshow_id: string };
+        Returns: {
+          band: number;
+          band_min: number;
+          band_max: number;
+          band_members: number;
+          band_capital: number;
+          expectation: Database['public']['Enums']['pool_expectation'];
+          votes: number;
+        }[];
+      };
     };
     Enums: {
       asset_class: 'EQ' | 'MF' | 'INS' | 'BND' | 'PMS' | 'BRK' | 'RE' | 'CRY';
-      content_access: 'FREE' | 'PREMIUM';
-      content_status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
-      credit_reason: 'ADMIN_GRANT' | 'ADMIN_REVOKE' | 'PURCHASE' | 'REFUND' | 'POOL_JOIN';
-      currency_code: 'INR' | 'USD' | 'EUR' | 'GBP' | 'AED';
-      device_platform: 'IOS' | 'ANDROID' | 'WEB';
       display_mode: 'FULL_NAME' | 'INITIALS' | 'ANONYMOUS';
-      file_purpose: 'AVATAR' | 'KYC_DOCUMENT' | 'REVIEW_EVIDENCE';
-      file_scan_status: 'PENDING' | 'CLEAN' | 'INFECTED';
       investment_status: 'CURRENTLY_INVESTED' | 'EXITED' | 'NEVER_INVESTED';
-      kyc_document_type:
-        | 'ID_PROOF'
-        | 'ADDRESS_PROOF'
-        | 'TAX_ID'
-        | 'INCORPORATION_CERTIFICATE'
-        | 'AUTHORISATION_LETTER';
-      kyc_status: 'NOT_STARTED' | 'PENDING' | 'APPROVED' | 'REJECTED';
-      kyc_submission_status: 'PENDING' | 'APPROVED' | 'REJECTED';
-      lookup_type:
-        | 'JOB_PROFILE'
-        | 'FOCUS'
-        | 'RISK'
-        | 'STYLE'
-        | 'SECTOR'
-        | 'ASSET_CLASS'
-        | 'APPRECIATION_TAG'
-        | 'CONCERN_TAG'
-        | 'RATING_FACTOR'
-        | 'RISK_FACTOR'
-        | 'INVESTOR_TYPE';
-      learn_format: 'VIDEO' | 'ARTICLE' | 'REPORT' | 'PODCAST';
       market_country: 'IN' | 'AE' | 'OTHER';
-      membership_tier: 'OBSERVER' | 'PRIVE' | 'INSTITUTIONAL';
-      notification_type:
-        'SYSTEM' | 'CREDITS' | 'POOL' | 'ROADSHOW' | 'WEBINAR' | 'REVIEW' | 'LEARN';
-      offer_status: 'PENDING_REVIEW' | 'PUBLISHED' | 'WITHDRAWN' | 'REJECTED';
-      pool_expectation:
-        | 'BETTER_ROI_IRR'
-        | 'SHORTER_LOCK_IN'
-        | 'LOWER_ENTRY_LOAD'
-        | 'LOWER_EXIT_LOAD'
-        | 'PRIORITY_ALLOTMENT'
-        | 'FLEXIBLE_PAYMENT_TERMS'
-        | 'DISCOUNTED_OFFER_PRICE'
-        | 'REGULAR_DISCLOSURES';
-      preference_type: 'FOCUS' | 'RISK' | 'STYLE' | 'SECTOR';
-      question_category: 'GENERAL' | 'EQUITY' | 'DEBT' | 'INSURANCE' | 'CRYPTO' | 'MUTUAL_FUNDS';
-      question_status: 'PENDING_MODERATION' | 'PUBLISHED' | 'REJECTED';
       reinvest_status: 'YES' | 'MAYBE' | 'NO';
       resolution_bucket: 'RESOLVED' | 'IN_PROGRESS' | 'UNRESOLVED' | 'NOT_CONTACTED';
       resolution_status:
@@ -1926,10 +1474,28 @@ export type Database = {
         | 'RESOLUTION_UPDATED';
       review_status:
         'PENDING_MODERATION' | 'PUBLISHED' | 'CHANGES_REQUESTED' | 'REJECTED' | 'REMOVED';
-      saved_entity_type: 'COMPANY' | 'ISSUER' | 'ROADSHOW' | 'LEARN_ITEM';
       sentiment: 'Positive' | 'Neutral' | 'Negative';
-      user_status: 'ACTIVE' | 'SUSPENDED';
-      verified_tier: 'PRIVE' | 'INSTITUTIONAL';
+      content_access: 'FREE' | 'PREMIUM';
+      content_status: 'DRAFT' | 'PUBLISHED' | 'ARCHIVED';
+      credit_reason: 'ADMIN_GRANT' | 'ADMIN_REVOKE' | 'PURCHASE' | 'REFUND' | 'POOL_JOIN';
+      currency_code: 'INR' | 'USD' | 'EUR' | 'GBP' | 'AED';
+      device_platform: 'IOS' | 'ANDROID' | 'WEB';
+      learn_format: 'VIDEO' | 'ARTICLE' | 'REPORT' | 'PODCAST';
+      notification_type:
+        'SYSTEM' | 'CREDITS' | 'POOL' | 'ROADSHOW' | 'WEBINAR' | 'REVIEW' | 'LEARN';
+      offer_status: 'PENDING_REVIEW' | 'PUBLISHED' | 'WITHDRAWN' | 'REJECTED';
+      pool_expectation:
+        | 'BETTER_ROI_IRR'
+        | 'SHORTER_LOCK_IN'
+        | 'LOWER_ENTRY_LOAD'
+        | 'LOWER_EXIT_LOAD'
+        | 'PRIORITY_ALLOTMENT'
+        | 'FLEXIBLE_PAYMENT_TERMS'
+        | 'DISCOUNTED_OFFER_PRICE'
+        | 'REGULAR_DISCLOSURES';
+      question_category: 'GENERAL' | 'EQUITY' | 'DEBT' | 'INSURANCE' | 'CRYPTO' | 'MUTUAL_FUNDS';
+      question_status: 'PENDING_MODERATION' | 'PUBLISHED' | 'REJECTED';
+      saved_entity_type: 'COMPANY' | 'ISSUER' | 'ROADSHOW' | 'LEARN_ITEM';
     };
     CompositeTypes: {
       [_ in never]: never;
@@ -1940,10 +1506,6 @@ export type Database = {
 type PublicSchema = Database['public'];
 
 export type Tables<T extends keyof PublicSchema['Tables']> = PublicSchema['Tables'][T]['Row'];
-export type TablesInsert<T extends keyof PublicSchema['Tables']> =
-  PublicSchema['Tables'][T]['Insert'];
-export type TablesUpdate<T extends keyof PublicSchema['Tables']> =
-  PublicSchema['Tables'][T]['Update'];
 export type Views<T extends keyof PublicSchema['Views']> = PublicSchema['Views'][T]['Row'];
 export type Enums<T extends keyof PublicSchema['Enums']> = PublicSchema['Enums'][T];
 
@@ -1952,55 +1514,9 @@ export const Constants = {
   public: {
     Enums: {
       asset_class: ['EQ', 'MF', 'INS', 'BND', 'PMS', 'BRK', 'RE', 'CRY'],
-      content_access: ['FREE', 'PREMIUM'],
-      content_status: ['DRAFT', 'PUBLISHED', 'ARCHIVED'],
-      credit_reason: ['ADMIN_GRANT', 'ADMIN_REVOKE', 'PURCHASE', 'REFUND', 'POOL_JOIN'],
-      currency_code: ['INR', 'USD', 'EUR', 'GBP', 'AED'],
-      device_platform: ['IOS', 'ANDROID', 'WEB'],
       display_mode: ['FULL_NAME', 'INITIALS', 'ANONYMOUS'],
-      file_purpose: ['AVATAR', 'KYC_DOCUMENT', 'REVIEW_EVIDENCE'],
-      file_scan_status: ['PENDING', 'CLEAN', 'INFECTED'],
       investment_status: ['CURRENTLY_INVESTED', 'EXITED', 'NEVER_INVESTED'],
-      kyc_document_type: [
-        'ID_PROOF',
-        'ADDRESS_PROOF',
-        'TAX_ID',
-        'INCORPORATION_CERTIFICATE',
-        'AUTHORISATION_LETTER',
-      ],
-      kyc_status: ['NOT_STARTED', 'PENDING', 'APPROVED', 'REJECTED'],
-      kyc_submission_status: ['PENDING', 'APPROVED', 'REJECTED'],
-      learn_format: ['VIDEO', 'ARTICLE', 'REPORT', 'PODCAST'],
-      lookup_type: [
-        'JOB_PROFILE',
-        'FOCUS',
-        'RISK',
-        'STYLE',
-        'SECTOR',
-        'ASSET_CLASS',
-        'APPRECIATION_TAG',
-        'CONCERN_TAG',
-        'RATING_FACTOR',
-        'RISK_FACTOR',
-        'INVESTOR_TYPE',
-      ],
       market_country: ['IN', 'AE', 'OTHER'],
-      membership_tier: ['OBSERVER', 'PRIVE', 'INSTITUTIONAL'],
-      notification_type: ['SYSTEM', 'CREDITS', 'POOL', 'ROADSHOW', 'WEBINAR', 'REVIEW', 'LEARN'],
-      offer_status: ['PENDING_REVIEW', 'PUBLISHED', 'WITHDRAWN', 'REJECTED'],
-      pool_expectation: [
-        'BETTER_ROI_IRR',
-        'SHORTER_LOCK_IN',
-        'LOWER_ENTRY_LOAD',
-        'LOWER_EXIT_LOAD',
-        'PRIORITY_ALLOTMENT',
-        'FLEXIBLE_PAYMENT_TERMS',
-        'DISCOUNTED_OFFER_PRICE',
-        'REGULAR_DISCLOSURES',
-      ],
-      preference_type: ['FOCUS', 'RISK', 'STYLE', 'SECTOR'],
-      question_category: ['GENERAL', 'EQUITY', 'DEBT', 'INSURANCE', 'CRYPTO', 'MUTUAL_FUNDS'],
-      question_status: ['PENDING_MODERATION', 'PUBLISHED', 'REJECTED'],
       reinvest_status: ['YES', 'MAYBE', 'NO'],
       resolution_bucket: ['RESOLVED', 'IN_PROGRESS', 'UNRESOLVED', 'NOT_CONTACTED'],
       resolution_status: [
@@ -2018,10 +1534,28 @@ export const Constants = {
         'REJECTED',
         'REMOVED',
       ],
-      saved_entity_type: ['COMPANY', 'ISSUER', 'ROADSHOW', 'LEARN_ITEM'],
       sentiment: ['Positive', 'Neutral', 'Negative'],
-      user_status: ['ACTIVE', 'SUSPENDED'],
-      verified_tier: ['PRIVE', 'INSTITUTIONAL'],
+      content_access: ['FREE', 'PREMIUM'],
+      content_status: ['DRAFT', 'PUBLISHED', 'ARCHIVED'],
+      credit_reason: ['ADMIN_GRANT', 'ADMIN_REVOKE', 'PURCHASE', 'REFUND', 'POOL_JOIN'],
+      currency_code: ['INR', 'USD', 'EUR', 'GBP', 'AED'],
+      device_platform: ['IOS', 'ANDROID', 'WEB'],
+      learn_format: ['VIDEO', 'ARTICLE', 'REPORT', 'PODCAST'],
+      notification_type: ['SYSTEM', 'CREDITS', 'POOL', 'ROADSHOW', 'WEBINAR', 'REVIEW', 'LEARN'],
+      offer_status: ['PENDING_REVIEW', 'PUBLISHED', 'WITHDRAWN', 'REJECTED'],
+      pool_expectation: [
+        'BETTER_ROI_IRR',
+        'SHORTER_LOCK_IN',
+        'LOWER_ENTRY_LOAD',
+        'LOWER_EXIT_LOAD',
+        'PRIORITY_ALLOTMENT',
+        'FLEXIBLE_PAYMENT_TERMS',
+        'DISCOUNTED_OFFER_PRICE',
+        'REGULAR_DISCLOSURES',
+      ],
+      question_category: ['GENERAL', 'EQUITY', 'DEBT', 'INSURANCE', 'CRYPTO', 'MUTUAL_FUNDS'],
+      question_status: ['PENDING_MODERATION', 'PUBLISHED', 'REJECTED'],
+      saved_entity_type: ['COMPANY', 'ISSUER', 'ROADSHOW', 'LEARN_ITEM'],
     },
   },
 } as const satisfies {

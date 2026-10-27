@@ -41,11 +41,15 @@ async function expectDbError(promise: Promise<unknown>, message: RegExp) {
   expect(error?.message).toMatch(message);
 }
 
-/** A new GIG user (users.public_id), optionally with credits granted. */
+/** A new GIG user (app.users.public_id), optionally with credits granted. */
 async function newUser(credits = 0): Promise<string> {
   const id = randomUUID();
-  await db.query('insert into auth.users (id) values ($1)', [id]);
-  await db.query('insert into public.users (auth_user_id, public_id) values ($1, $1)', [id]);
+  await db.query(
+    `insert into app.users (public_id, email_enc, email_hash, phone_country_code, phone_enc,
+                            phone_hash, password_hash, email_verified_at, phone_verified_at)
+     values ($1, 'x', $2, '+91', 'x', $2, 'x', now(), now())`,
+    [id, id],
+  );
   if (credits > 0) await grant(id, credits);
   return id;
 }
@@ -60,7 +64,7 @@ function grant(user: string, delta: number) {
 async function balance(user: string): Promise<number> {
   return (
     await one<{ credit_balance: number }>(
-      'select credit_balance from public.users where public_id = $1',
+      'select credit_balance from app.users where public_id = $1',
       [user],
     )
   ).credit_balance;
@@ -181,7 +185,7 @@ describe('credit ledger', () => {
       db.query('delete from public.credit_ledger where user_id = $1', [user]),
       /CREDIT_LEDGER_APPEND_ONLY/,
     );
-    await db.query('delete from public.users where public_id = $1', [user]);
+    await db.query('delete from app.users where public_id = $1', [user]);
     expect(await rows('select 1 from public.credit_ledger where user_id = $1', [user])).toEqual([]);
   });
 });

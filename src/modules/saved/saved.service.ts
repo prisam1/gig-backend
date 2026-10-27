@@ -2,7 +2,7 @@ import type { PageMeta } from '../../lib/http';
 import { fetchPage, supabaseAdmin, unwrap } from '../../lib/supabase';
 import { HttpError } from '../../middleware/errorHandler';
 import type { Enums } from '../../types/database';
-import type { User } from '../users/users.repository';
+import type { AuthUser } from '../../middleware/auth';
 import type { ListSavedQuery, SavedItemRef } from './saved.schemas';
 
 type SavedType = Enums<'saved_entity_type'>;
@@ -98,14 +98,14 @@ async function summariesFor(
 }
 
 export async function listSaved(
-  user: User,
+  user: AuthUser,
   query: ListSavedQuery,
 ): Promise<{ items: SavedItem[]; meta: PageMeta }> {
   const build = (head: boolean) => {
     const q = supabaseAdmin
       .from('saved_items')
       .select('entity_type, entity_id, created_at', { count: 'exact', head })
-      .eq('user_id', user.publicId);
+      .eq('user_id', user.id);
     return query.type?.length ? q.in('entity_type', query.type) : q;
   };
 
@@ -128,7 +128,7 @@ export async function listSaved(
 }
 
 /** Saves an item; saving it again keeps the original save time. */
-export async function saveItem(user: User, ref: SavedItemRef): Promise<SavedItem> {
+export async function saveItem(user: AuthUser, ref: SavedItemRef): Promise<SavedItem> {
   const entity = (await summaryLoaders[ref.type]([ref.id])).get(ref.id);
   if (!entity) throw new HttpError(404, 'Item not found');
 
@@ -136,7 +136,7 @@ export async function saveItem(user: User, ref: SavedItemRef): Promise<SavedItem
     await supabaseAdmin
       .from('saved_items')
       .upsert(
-        { user_id: user.publicId, entity_type: ref.type, entity_id: ref.id },
+        { user_id: user.id, entity_type: ref.type, entity_id: ref.id },
         { onConflict: 'user_id,entity_type,entity_id', ignoreDuplicates: true },
       ),
   );
@@ -144,7 +144,7 @@ export async function saveItem(user: User, ref: SavedItemRef): Promise<SavedItem
     await supabaseAdmin
       .from('saved_items')
       .select('created_at')
-      .eq('user_id', user.publicId)
+      .eq('user_id', user.id)
       .eq('entity_type', ref.type)
       .eq('entity_id', ref.id)
       .single(),
@@ -153,12 +153,12 @@ export async function saveItem(user: User, ref: SavedItemRef): Promise<SavedItem
 }
 
 /** Removes a saved item. Removing one that is not saved is not an error. */
-export async function removeSavedItem(user: User, ref: SavedItemRef): Promise<void> {
+export async function removeSavedItem(user: AuthUser, ref: SavedItemRef): Promise<void> {
   unwrap(
     await supabaseAdmin
       .from('saved_items')
       .delete()
-      .eq('user_id', user.publicId)
+      .eq('user_id', user.id)
       .eq('entity_type', ref.type)
       .eq('entity_id', ref.id),
   );

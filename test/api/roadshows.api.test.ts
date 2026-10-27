@@ -9,14 +9,8 @@ vi.mock('../../src/lib/supabase', async (importOriginal) => {
   return { ...original, supabaseAdmin: fake.client };
 });
 vi.mock('../../src/lib/auth', async () => {
-  const { fakeAuthProvider } = await import('../helpers/fakeSupabase');
-  return { authProvider: fakeAuthProvider };
-});
-vi.mock('../../src/modules/users/users.repository', async (importOriginal) => {
-  const { fakeUsersRepository } = await import('../helpers/fakeSupabase');
-  const original =
-    await importOriginal<typeof import('../../src/modules/users/users.repository')>();
-  return { ...original, usersRepository: { ...original.usersRepository, ...fakeUsersRepository } };
+  const { fakeLoadMember } = await import('../helpers/fakeSupabase');
+  return { authProvider: { loadMember: fakeLoadMember } };
 });
 
 const app = createApp();
@@ -206,7 +200,7 @@ describe('POST /roadshows/:id/pool', () => {
         roadshow_improvement_votes: poolBody.expectations.map((expectation) => ({ expectation })),
       },
     });
-    fake.on('from:users', { data: { credit_balance: 4 } });
+    fake.on('from:credit_ledger', { data: [{ balance_after: 4 }] });
 
     const retry = await join();
     expect(retry.status).toBe(201);

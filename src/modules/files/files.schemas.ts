@@ -3,7 +3,7 @@ import { FILE_PURPOSES } from '../../types/domain';
 
 export const MAX_FILE_BYTES = 10 * 1024 * 1024;
 
-export const createUploadUrlSchema = z.object({
+export const createUploadUrlSchema = z.strictObject({
   purpose: z.enum(FILE_PURPOSES),
   mimeType: z.enum(['application/pdf', 'image/jpeg', 'image/png'], {
     error: 'Only PDF, JPG and PNG files are allowed',

@@ -1,7 +1,7 @@
 import type { PageMeta } from '../../lib/http';
 import { pageRange } from '../../lib/http';
 import { supabaseAdmin } from '../../lib/supabase';
-import type { Member } from '../../lib/membership';
+import type { AuthUser } from '../../middleware/auth';
 import { HttpError } from '../../middleware/errorHandler';
 import type { Database, Enums, Views } from '../../types/database';
 import type { CompanySort, ListCompaniesQuery, TrendRange } from './catalog.schemas';
@@ -152,7 +152,7 @@ function toResolutionLens(row: CompanyCardRow): ResolutionLens {
   };
 }
 
-export function accessLevel(user: Member | undefined): AccessLevel {
+export function accessLevel(user: AuthUser | undefined): AccessLevel {
   return user?.hasFullAccess ? 'FULL' : 'SUMMARY';
 }
 
@@ -266,7 +266,7 @@ export async function assertCompanyExists(id: string): Promise<void> {
   if (!count) throw new HttpError(404, 'Company not found');
 }
 
-export async function getCompany(id: string, user: Member | undefined): Promise<CompanyDetail> {
+export async function getCompany(id: string, user: AuthUser | undefined): Promise<CompanyDetail> {
   const row = await findCompanyRow(id);
   const access = accessLevel(user);
   return {
@@ -287,7 +287,7 @@ export async function getCompany(id: string, user: Member | undefined): Promise<
 
 export async function compareCompanies(
   ids: string[],
-  user: Member,
+  user: AuthUser,
 ): Promise<CompanyComparison[]> {
   const { data, error } = await supabaseAdmin.from('company_cards').select('*').in('id', ids);
   if (error) throw error;

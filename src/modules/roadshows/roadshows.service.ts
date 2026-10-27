@@ -3,7 +3,7 @@ import { createSignedDownload, fileNameOf, type SignedDownload } from '../../lib
 import { containsPattern, fetchPage, supabaseAdmin, unwrap } from '../../lib/supabase';
 import { HttpError } from '../../middleware/errorHandler';
 import type { Enums, Tables } from '../../types/database';
-import type { User } from '../users/users.repository';
+import type { AuthUser } from '../../middleware/auth';
 import type { ListRoadshowsQuery, PostOfferInput, RoadshowSort } from './roadshows.schemas';
 
 export type Currency = Enums<'currency_code'>;
@@ -203,17 +203,17 @@ export async function listRoadshows(
   return { items: rows.map(toCard), meta };
 }
 
-async function isPoolMember(roadshowId: string, user: User): Promise<boolean> {
+async function isPoolMember(roadshowId: string, user: AuthUser): Promise<boolean> {
   const result = await supabaseAdmin
     .from('pool_members')
     .select('*', { count: 'exact', head: true })
     .eq('roadshow_id', roadshowId)
-    .eq('user_id', user.publicId);
+    .eq('user_id', user.id);
   unwrap(result);
   return (result.count ?? 0) > 0;
 }
 
-export async function getRoadshow(id: string, user: User | undefined): Promise<RoadshowDetail> {
+export async function getRoadshow(id: string, user: AuthUser | undefined): Promise<RoadshowDetail> {
   const row = unwrap(
     await supabaseAdmin
       .from('roadshows')
@@ -380,7 +380,7 @@ function toOffer(row: Tables<'roadshow_offers'>): RoadshowOffer {
 
 /** Saved as PENDING_REVIEW; GIG staff publish it to the pool. */
 export async function postOffer(
-  user: User,
+  user: AuthUser,
   roadshowId: string,
   input: PostOfferInput,
 ): Promise<RoadshowOffer> {
@@ -390,7 +390,7 @@ export async function postOffer(
       .from('roadshow_offers')
       .insert({
         roadshow_id: roadshowId,
-        user_id: user.publicId,
+        user_id: user.id,
         currency: input.currency ?? roadshow.currency,
         offer_price: input.offerPrice ?? null,
         expected_roi: input.expectedRoi ?? null,

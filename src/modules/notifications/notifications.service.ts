@@ -1,7 +1,7 @@
 import type { PageMeta } from '../../lib/http';
 import { fetchPage, supabaseAdmin, unwrap } from '../../lib/supabase';
 import type { Enums, Json, Tables } from '../../types/database';
-import type { User } from '../users/users.repository';
+import type { AuthUser } from '../../middleware/auth';
 import type { ListNotificationsQuery, RegisterDeviceInput } from './notifications.schemas';
 
 export interface Notification {
@@ -37,11 +37,11 @@ function toNotification(row: Tables<'notifications'>): Notification {
   };
 }
 
-async function countUnread(user: User): Promise<number> {
+async function countUnread(user: AuthUser): Promise<number> {
   const result = await supabaseAdmin
     .from('notifications')
     .select('*', { count: 'exact', head: true })
-    .eq('user_id', user.publicId)
+    .eq('user_id', user.id)
     .is('read_at', null);
   unwrap(result);
   return result.count ?? 0;
@@ -49,14 +49,14 @@ async function countUnread(user: User): Promise<number> {
 
 /** The inbox, newest first. */
 export async function listNotifications(
-  user: User,
+  user: AuthUser,
   query: ListNotificationsQuery,
 ): Promise<{ items: Notification[]; meta: InboxMeta }> {
   const build = (head: boolean) => {
     const q = supabaseAdmin
       .from('notifications')
       .select('*', { count: 'exact', head })
-      .eq('user_id', user.publicId);
+      .eq('user_id', user.id);
     return query.unread ? q.is('read_at', null) : q;
   };
 
@@ -72,11 +72,11 @@ export async function listNotifications(
 }
 
 /** Marks the given notifications (or all of them) read. Returns how many changed. */
-export async function markRead(user: User, ids: string[] | undefined): Promise<number> {
+export async function markRead(user: AuthUser, ids: string[] | undefined): Promise<number> {
   let q = supabaseAdmin
     .from('notifications')
     .update({ read_at: new Date().toISOString() })
-    .eq('user_id', user.publicId)
+    .eq('user_id', user.id)
     .is('read_at', null);
   if (ids) q = q.in('id', ids);
   const updated = unwrap(await q.select('id'));
@@ -85,7 +85,7 @@ export async function markRead(user: User, ids: string[] | undefined): Promise<n
 
 /** Registers a push token for the signed-in user; a token seen before moves to this user. */
 export async function registerDevice(
-  user: User,
+  user: AuthUser,
   input: RegisterDeviceInput,
 ): Promise<RegisteredDevice> {
   const row = unwrap(
@@ -94,7 +94,7 @@ export async function registerDevice(
       .upsert(
         {
           token: input.token,
-          user_id: user.publicId,
+          user_id: user.id,
           platform: input.platform,
           app_version: input.appVersion ?? null,
           last_seen_at: new Date().toISOString(),

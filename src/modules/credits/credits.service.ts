@@ -1,7 +1,7 @@
 import type { PageMeta } from '../../lib/http';
 import { fetchPage, supabaseAdmin, unwrap } from '../../lib/supabase';
 import type { Enums, Tables } from '../../types/database';
-import type { User } from '../users/users.repository';
+import type { AuthUser } from '../../middleware/auth';
 
 export interface CreditEntry {
   id: number;
@@ -32,31 +32,32 @@ function toEntry(row: Tables<'credit_ledger'>): CreditEntry {
   };
 }
 
-/** The cached balance on public.users (always the sum of the user's ledger). */
+/** The balance after the user's latest ledger entry (0 before any). */
 export async function getCreditBalance(userPublicId: string): Promise<number> {
-  const row = unwrap(
+  const rows = unwrap(
     await supabaseAdmin
-      .from('users')
-      .select('credit_balance')
-      .eq('public_id', userPublicId)
-      .single(),
+      .from('credit_ledger')
+      .select('balance_after')
+      .eq('user_id', userPublicId)
+      .order('id', { ascending: false })
+      .limit(1),
   );
-  return row.credit_balance;
+  return rows[0]?.balance_after ?? 0;
 }
 
 /** Balance and ledger, newest entry first. */
 export async function getCreditStatement(
-  user: User,
+  user: AuthUser,
   page: { page: number; pageSize: number },
 ): Promise<{ statement: CreditStatement; meta: PageMeta }> {
   const build = (head: boolean) =>
     supabaseAdmin
       .from('credit_ledger')
       .select('*', { count: 'exact', head })
-      .eq('user_id', user.publicId);
+      .eq('user_id', user.id);
 
   const [balance, { rows, meta }] = await Promise.all([
-    getCreditBalance(user.publicId),
+    getCreditBalance(user.id),
     fetchPage(page, {
       rows: (from, to) => build(false).order('id', { ascending: false }).range(from, to),
       count: () => build(true),

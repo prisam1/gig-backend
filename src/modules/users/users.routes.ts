@@ -1,56 +1,53 @@
+// Users, profile and KYC (Phase 1): sign-up steps 2-3 and tier selection under /api/v1/me,
+// and other investors' public profiles under /api/v1/users.
 import { Router } from 'express';
-import { currentUser, requireUser } from '../../middleware/auth';
+import { getAuth, requireAuth } from '../../middleware/auth';
+import { clientContext } from '../../middleware/requestContext';
 import { parse } from '../../middleware/validate';
-import {
-  chooseTierSchema,
-  preferencesSchema,
-  updateProfileSchema,
-  userIdParamSchema,
-} from './users.schemas';
-import { usersService } from './users.service';
+import { preferencesSchema, tierSchema, updateMeSchema, userIdParamSchema } from './users.schemas';
+import * as users from './users.service';
 
-/** The signed-in user's own account: `/me`. */
 export const meRouter = Router();
-
-meRouter.use(requireUser);
+meRouter.use(requireAuth);
 
 meRouter.get('/', async (req, res) => {
-  res.json({ data: await usersService.getMyProfile(currentUser(req)) });
+  res.json({ data: await users.loadUser(getAuth(req).userId) });
 });
 
+// Step 2 (professional details) and later profile edits, including the avatar.
 meRouter.patch('/', async (req, res) => {
-  const input = parse(updateProfileSchema, req.body);
-  res.json({ data: await usersService.updateMyProfile(currentUser(req), input) });
+  const data = await users.updateMe(getAuth(req).userId, parse(updateMeSchema, req.body), clientContext(req));
+  res.json({ data });
 });
 
+// Step 3 (investment details). Replaces all preferences.
 meRouter.put('/preferences', async (req, res) => {
-  const input = parse(preferencesSchema, req.body);
-  res.json({ data: await usersService.replaceMyPreferences(currentUser(req), input) });
+  const data = await users.setPreferences(getAuth(req).userId, parse(preferencesSchema, req.body), clientContext(req));
+  res.json({ data });
 });
 
 meRouter.put('/tier', async (req, res) => {
-  const { tier } = parse(chooseTierSchema, req.body);
-  res.json({ data: await usersService.chooseTier(currentUser(req), tier) });
+  const data = await users.selectTier(getAuth(req).userId, parse(tierSchema, req.body), clientContext(req));
+  res.json({ data });
 });
 
-/** Other investors' public profiles: `/users/:id`. */
 export const usersRouter = Router();
+usersRouter.use(requireAuth);
 
-usersRouter.use(requireUser);
-
+// Public profile: no email, phone or KYC detail.
 usersRouter.get('/:id', async (req, res) => {
   const { id } = parse(userIdParamSchema, req.params);
-  res.json({ data: await usersService.getPublicProfile(id) });
+  res.json({ data: await users.getPublicProfile(id) });
 });
 
 usersRouter.post('/:id/follow', async (req, res) => {
   const { id } = parse(userIdParamSchema, req.params);
-  await usersService.follow(currentUser(req), id);
+  await users.follow(getAuth(req), id, clientContext(req));
   res.status(204).end();
 });
 
 usersRouter.delete('/:id/follow', async (req, res) => {
   const { id } = parse(userIdParamSchema, req.params);
-  await usersService.unfollow(currentUser(req), id);
+  await users.unfollow(getAuth(req), id, clientContext(req));
   res.status(204).end();
 });

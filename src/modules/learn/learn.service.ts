@@ -1,10 +1,9 @@
 import type { PageMeta } from '../../lib/http';
-import { hasFullAccess } from '../../lib/membership';
 import { createSignedDownload, fileNameOf, type SignedDownload } from '../../lib/storage';
 import { containsPattern, fetchPage, supabaseAdmin, unwrap } from '../../lib/supabase';
 import { HttpError } from '../../middleware/errorHandler';
 import type { Enums, Tables } from '../../types/database';
-import type { User } from '../users/users.repository';
+import type { AuthUser } from '../../middleware/auth';
 import type { LearnSort, ListLearnQuery } from './learn.schemas';
 
 /** Private Storage bucket holding downloadable reports. */
@@ -44,11 +43,11 @@ export interface LearnRatingResult {
 
 type LearnRow = Tables<'learn_items'>;
 
-function isLocked(row: Pick<LearnRow, 'access'>, user: User | undefined): boolean {
-  return row.access === 'PREMIUM' && !(user && hasFullAccess(user));
+function isLocked(row: Pick<LearnRow, 'access'>, user: AuthUser | undefined): boolean {
+  return row.access === 'PREMIUM' && !(user && user.hasFullAccess);
 }
 
-function toCard(row: LearnRow, user: User | undefined): LearnCard {
+function toCard(row: LearnRow, user: AuthUser | undefined): LearnCard {
   return {
     id: row.id,
     title: row.title,
@@ -75,7 +74,7 @@ const learnOrders: Record<LearnSort, ['published_at' | 'rating_avg', boolean][]>
 
 export async function listLearn(
   query: ListLearnQuery,
-  user: User | undefined,
+  user: AuthUser | undefined,
 ): Promise<{ items: LearnCard[]; meta: PageMeta }> {
   const filter = query.filter ?? {};
 
@@ -117,13 +116,13 @@ async function findPublishedItem(id: string): Promise<LearnRow> {
   return row;
 }
 
-async function findOwnRating(itemId: string, user: User): Promise<number | null> {
+async function findOwnRating(itemId: string, user: AuthUser): Promise<number | null> {
   const row = unwrap(
     await supabaseAdmin
       .from('learn_ratings')
       .select('rating')
       .eq('learn_item_id', itemId)
-      .eq('user_id', user.publicId)
+      .eq('user_id', user.id)
       .maybeSingle(),
   );
   return row?.rating ?? null;
@@ -132,15 +131,15 @@ async function findOwnRating(itemId: string, user: User): Promise<number | null>
 /** Reports are downloadable by Full members only. */
 async function reportDownload(
   row: LearnRow,
-  user: User | undefined,
+  user: AuthUser | undefined,
 ): Promise<LearnDetail['download']> {
-  if (row.download_path === null || !user || !hasFullAccess(user)) return null;
+  if (row.download_path === null || !user || !user.hasFullAccess) return null;
   const fileName = fileNameOf(row.download_path);
   const signed = await createSignedDownload(LEARN_REPORTS_BUCKET, row.download_path, fileName);
   return { ...signed, fileName };
 }
 
-export async function getLearnItem(id: string, user: User | undefined): Promise<LearnDetail> {
+export async function getLearnItem(id: string, user: AuthUser | undefined): Promise<LearnDetail> {
   const row = await findPublishedItem(id);
   const card = toCard(row, user);
   const [download, myRating] = await Promise.all([
@@ -154,7 +153,7 @@ export async function getLearnItem(id: string, user: User | undefined): Promise<
 /** Rates (or re-rates) content the member can open. */
 export async function rateLearnItem(
   id: string,
-  user: User,
+  user: AuthUser,
   rating: number,
 ): Promise<LearnRatingResult> {
   const item = await findPublishedItem(id);
@@ -168,7 +167,7 @@ export async function rateLearnItem(
     await supabaseAdmin
       .from('learn_ratings')
       .upsert(
-        { learn_item_id: id, user_id: user.publicId, rating },
+        { learn_item_id: id, user_id: user.id, rating },
         { onConflict: 'learn_item_id,user_id' },
       ),
   );

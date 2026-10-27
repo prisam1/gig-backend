@@ -1,9 +1,8 @@
 import type { PageMeta } from '../../lib/http';
-import { hasFullAccess } from '../../lib/membership';
 import { fetchPage, supabaseAdmin, unwrap } from '../../lib/supabase';
 import { HttpError } from '../../middleware/errorHandler';
 import type { Enums, Tables } from '../../types/database';
-import type { User } from '../users/users.repository';
+import type { AuthUser } from '../../middleware/auth';
 import type { ListWebinarsQuery } from './webinars.schemas';
 
 export interface Webinar {
@@ -50,8 +49,8 @@ function recordingFor(
   };
 }
 
-function toWebinar(row: WebinarRow, user: User, registered: boolean, now: number): Webinar {
-  const fullAccess = hasFullAccess(user);
+function toWebinar(row: WebinarRow, user: AuthUser, registered: boolean, now: number): Webinar {
+  const fullAccess = user.hasFullAccess;
   const locked = row.access === 'PREMIUM' && !fullAccess;
   const recording = locked
     ? { recordingUrl: null, recordingAvailableAt: null }
@@ -72,20 +71,20 @@ function toWebinar(row: WebinarRow, user: User, registered: boolean, now: number
   };
 }
 
-async function registeredIds(user: User, webinarIds: string[]): Promise<Set<string>> {
+async function registeredIds(user: AuthUser, webinarIds: string[]): Promise<Set<string>> {
   if (webinarIds.length === 0) return new Set();
   const rows = unwrap(
     await supabaseAdmin
       .from('webinar_registrations')
       .select('webinar_id')
-      .eq('user_id', user.publicId)
+      .eq('user_id', user.id)
       .in('webinar_id', webinarIds),
   );
   return new Set(rows.map((r) => r.webinar_id));
 }
 
 export async function listWebinars(
-  user: User,
+  user: AuthUser,
   query: ListWebinarsQuery,
 ): Promise<{ items: Webinar[]; meta: PageMeta }> {
   const nowIso = new Date().toISOString();
@@ -114,7 +113,7 @@ export async function listWebinars(
 }
 
 /** Registers for a webinar that has not ended. Registering again returns the same registration. */
-export async function registerForWebinar(user: User, id: string): Promise<WebinarRegistration> {
+export async function registerForWebinar(user: AuthUser, id: string): Promise<WebinarRegistration> {
   const webinar = unwrap(
     await supabaseAdmin
       .from('webinars')
@@ -124,7 +123,7 @@ export async function registerForWebinar(user: User, id: string): Promise<Webina
       .maybeSingle(),
   );
   if (!webinar) throw new HttpError(404, 'Webinar not found');
-  if (webinar.access === 'PREMIUM' && !hasFullAccess(user)) {
+  if (webinar.access === 'PREMIUM' && !user.hasFullAccess) {
     throw new HttpError(403, 'Available to verified Prive and Institutional members', {
       code: 'PREMIUM_CONTENT',
     });
@@ -137,7 +136,7 @@ export async function registerForWebinar(user: User, id: string): Promise<Webina
     await supabaseAdmin
       .from('webinar_registrations')
       .upsert(
-        { webinar_id: id, user_id: user.publicId },
+        { webinar_id: id, user_id: user.id },
         { onConflict: 'webinar_id,user_id', ignoreDuplicates: true },
       ),
   );
@@ -146,7 +145,7 @@ export async function registerForWebinar(user: User, id: string): Promise<Webina
       .from('webinar_registrations')
       .select('created_at')
       .eq('webinar_id', id)
-      .eq('user_id', user.publicId)
+      .eq('user_id', user.id)
       .single(),
   );
   return { webinarId: id, registeredAt: registration.created_at, joinUrl: webinar.join_url };

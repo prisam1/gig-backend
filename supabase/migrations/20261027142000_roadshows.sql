@@ -123,7 +123,7 @@ on conflict (id) do nothing;
 create table public.roadshow_questions (
   id           uuid primary key default gen_random_uuid(),
   roadshow_id  uuid not null references public.roadshows (id) on delete cascade,
-  user_id      uuid not null references public.users (public_id) on delete cascade,
+  user_id      uuid not null references app.users (public_id) on delete cascade,
   category     public.question_category not null default 'GENERAL',
   question     text not null check (char_length(question) between 10 and 500),
   status       public.question_status not null default 'PENDING_MODERATION',
@@ -152,7 +152,7 @@ create index roadshow_questions_text_trgm_idx
 
 create table public.pool_members (
   roadshow_id       uuid not null references public.roadshows (id) on delete cascade,
-  user_id           uuid not null references public.users (public_id) on delete cascade,
+  user_id           uuid not null references app.users (public_id) on delete cascade,
   -- In the roadshow's currency.
   capital_interest  numeric(18, 2) not null check (capital_interest > 0),
   -- The ledger entry that paid for joining.
@@ -177,7 +177,7 @@ create table public.roadshow_improvement_votes (
 create table public.roadshow_offers (
   id                uuid primary key default gen_random_uuid(),
   roadshow_id       uuid not null references public.roadshows (id) on delete cascade,
-  user_id           uuid not null references public.users (public_id) on delete cascade,
+  user_id           uuid not null references app.users (public_id) on delete cascade,
   offer_price       numeric(18, 2) check (offer_price >= 0),
   currency          public.currency_code not null,
   -- Percentages
@@ -215,6 +215,8 @@ create or replace function public.join_roadshow_pool(
 )
 returns table (joined_at timestamptz, credits_remaining integer)
 language plpgsql
+-- Definer rights: the service role cannot read the private app schema directly.
+security definer
 set search_path = ''
 as $$
 declare
@@ -224,7 +226,7 @@ declare
   v_member public.pool_members;
 begin
   -- Serialises concurrent joins (and credit spends) by the same user.
-  perform 1 from public.users u where u.public_id = p_user_id for update;
+  perform 1 from app.users u where u.public_id = p_user_id for update;
 
   select r.* into v_roadshow
   from public.roadshows r

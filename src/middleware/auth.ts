@@ -1,13 +1,21 @@
 import type { Request, RequestHandler } from 'express';
 import { authProvider } from '../lib/auth';
-import { hasFullAccess, isVerifiedPrive } from '../lib/membership';
-import { usersRepository, type User } from '../modules/users/users.repository';
+import type { KycStatus, Member, Tier } from '../lib/membership';
 import { HttpError } from './errorHandler';
 
-declare module 'express-serve-static-core' {
-  interface Request {
-    user?: User;
-  }
+export type AuthContext = Member;
+
+/** The signed-in user as the catalog and reviews modules see it. */
+export interface AuthUser {
+  /** app.users.public_id */
+  id: string;
+  tier: Tier;
+  kycStatus: KycStatus;
+  fullName: string;
+  /** Prive with approved KYC: the "Prive" access level in the API spec. */
+  isVerifiedPrive: boolean;
+  /** Prive (verified) or Institutional: may see full analytics and full reviews. */
+  hasFullAccess: boolean;
 }
 
 function bearerToken(req: Request): string | undefined {
@@ -16,50 +24,48 @@ function bearerToken(req: Request): string | undefined {
   return header.slice('Bearer '.length).trim() || undefined;
 }
 
-async function signIn(req: Request, token: string): Promise<void> {
-  const identity = await authProvider.verifyAccessToken(token);
-  if (!identity) {
-    throw new HttpError(401, 'Invalid or expired token');
-  }
-
-  const user = await usersRepository.findOrCreateByIdentity(identity);
-  if (user.status === 'SUSPENDED') {
-    throw new HttpError(403, 'Account suspended', { code: 'ACCOUNT_SUSPENDED' });
-  }
-
-  req.user = user;
+async function authenticate(req: Request, token: string): Promise<void> {
+  const member = await authProvider.loadMember(token);
+  const isVerifiedPrive = member.tier === 'PRIVE' && member.kycStatus === 'APPROVED';
+  req.auth = member;
+  req.user = {
+    id: member.userPublicId,
+    tier: member.tier,
+    kycStatus: member.kycStatus,
+    fullName: member.fullName,
+    isVerifiedPrive,
+    hasFullAccess: isVerifiedPrive || member.tier === 'INSTITUTIONAL',
+  };
 }
 
-/** Requires a valid Bearer token and loads the matching GIG user onto `req.user` ("User" access). */
-export const requireUser: RequestHandler = async (req, _res, next) => {
+/** Attaches the user when a bearer token is sent; public routes still work without one. */
+export const optionalAuth: RequestHandler = async (req, _res, next) => {
   const token = bearerToken(req);
-  if (!token) {
-    throw new HttpError(401, 'Missing bearer token');
-  }
-  await signIn(req, token);
+  if (token) await authenticate(req, token);
   next();
 };
 
-/** Loads the user when a Bearer token is sent; public routes still work without one. */
-export const optionalUser: RequestHandler = async (req, _res, next) => {
+/** Any signed-in tier ("User" access). */
+export const requireAuth: RequestHandler = async (req, _res, next) => {
   const token = bearerToken(req);
-  if (token) await signIn(req, token);
+  if (!token) throw new HttpError(401, 'Sign in to continue');
+  await authenticate(req, token);
   next();
 };
 
-/** Prive membership with approved KYC ("Prive" access). Use after `requireUser`. */
+/** Prive membership with approved KYC ("Prive" access). Use after `requireAuth`. */
 export const requireVerifiedPrive: RequestHandler = (req, _res, next) => {
-  const user = currentUser(req);
+  const user = authUser(req);
   if (user.tier !== 'PRIVE') throw new HttpError(403, 'Prive membership required');
-  if (!isVerifiedPrive(user)) {
+  if (!user.isVerifiedPrive) {
     throw new HttpError(403, 'KYC verification required', { code: 'KYC_REQUIRED' });
   }
   next();
 };
 
-/** Institutional membership with approved KYC ("Inst." access). Use after `requireUser`. */
+/** Institutional membership with approved KYC ("Inst." access). Use after `requireAuth`. */
 export const requireInstitutional: RequestHandler = (req, _res, next) => {
-  const user = currentUser(req);
+  const user = authUser(req);
   if (user.tier !== 'INSTITUTIONAL') throw new HttpError(403, 'Institutional membership required');
   if (user.kycStatus !== 'APPROVED') {
     throw new HttpError(403, 'KYC verification required', { code: 'KYC_REQUIRED' });
@@ -67,16 +73,23 @@ export const requireInstitutional: RequestHandler = (req, _res, next) => {
   next();
 };
 
-/** Prive (verified) or Institutional ("Full" access). Use after `requireUser`. */
+/** Prive (verified) or Institutional ("Full" access). Use after `requireAuth`. */
 export const requireFullAccess: RequestHandler = (req, _res, next) => {
-  if (!hasFullAccess(currentUser(req))) {
+  const user = authUser(req);
+  if (!user.hasFullAccess) {
     throw new HttpError(403, 'Available to verified Prive and Institutional members');
   }
   next();
 };
 
-/** The signed-in user; only call from routes behind `requireUser`. */
-export function currentUser(req: Request): User {
-  if (!req.user) throw new HttpError(401, 'Not signed in');
+/** The signed-in session and user on routes guarded by `requireAuth`. */
+export function getAuth(req: Request): AuthContext {
+  if (!req.auth) throw new HttpError(401, 'Sign in to continue');
+  return req.auth;
+}
+
+/** The signed-in user on routes guarded by `requireAuth`. */
+export function authUser(req: Request): AuthUser {
+  if (!req.user) throw new HttpError(401, 'Sign in to continue');
   return req.user;
 }

@@ -4,7 +4,7 @@ import { PG_UNIQUE_VIOLATION, supabaseAdmin, unwrap } from '../../lib/supabase';
 import { HttpError } from '../../middleware/errorHandler';
 import { Constants, type Enums } from '../../types/database';
 import { getCreditBalance } from '../credits/credits.service';
-import type { User } from '../users/users.repository';
+import type { AuthUser } from '../../middleware/auth';
 import type { JoinPoolInput } from './roadshows.schemas';
 import { findPublishedRoadshow, type Currency } from './roadshows.service';
 
@@ -67,7 +67,7 @@ function inDisplayOrder(expectations: readonly Expectation[]): Expectation[] {
  * Already being in the pool under another key is a 409, as is reusing the key with another body.
  */
 async function existingMembership(
-  user: User,
+  user: AuthUser,
   roadshowId: string,
   idempotencyKey: string,
   hash: string,
@@ -80,7 +80,7 @@ async function existingMembership(
          roadshow:roadshows!inner(currency), roadshow_improvement_votes(expectation)`,
       )
       .eq('roadshow_id', roadshowId)
-      .eq('user_id', user.publicId)
+      .eq('user_id', user.id)
       .maybeSingle(),
   );
   if (!member) return null;
@@ -103,7 +103,7 @@ async function existingMembership(
       currency: member.roadshow.currency,
       expectations: inDisplayOrder(member.roadshow_improvement_votes.map((v) => v.expectation)),
       joinedAt: member.created_at,
-      creditsRemaining: await getCreditBalance(user.publicId),
+      creditsRemaining: await getCreditBalance(user.id),
     },
     replayed: true,
   };
@@ -135,7 +135,7 @@ function joinError(error: PostgrestError): Error {
  * Idempotency-Key and body returns the same membership without spending again.
  */
 export async function joinPool(
-  user: User,
+  user: AuthUser,
   roadshowId: string,
   input: JoinPoolInput,
   idempotencyKey: string,
@@ -147,7 +147,7 @@ export async function joinPool(
   const roadshow = await findPublishedRoadshow(roadshowId);
   const { data, error } = await supabaseAdmin
     .rpc('join_roadshow_pool', {
-      p_user_id: user.publicId,
+      p_user_id: user.id,
       p_roadshow_id: roadshowId,
       p_capital_interest: input.capitalInterest,
       p_expectations: input.expectations,

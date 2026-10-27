@@ -2,7 +2,7 @@
 -- "Engagement and ops" domain:
 --   learn_items, learn_ratings, webinars, webinar_registrations, saved_items, credit_ledger,
 --   notifications, device_tokens
--- Users are referenced by users.public_id, like reviews.
+-- Users are referenced by app.users.public_id, like reviews.
 
 -- ---------------------------------------------------------------------------------------------
 -- Enumerations
@@ -58,7 +58,7 @@ create index learn_items_title_trgm_idx on public.learn_items using gin (title e
 
 create table public.learn_ratings (
   learn_item_id  uuid not null references public.learn_items (id) on delete cascade,
-  user_id        uuid not null references public.users (public_id) on delete cascade,
+  user_id        uuid not null references app.users (public_id) on delete cascade,
   rating         smallint not null check (rating between 1 and 5),
   created_at     timestamptz not null default now(),
   updated_at     timestamptz not null default now(),
@@ -130,7 +130,7 @@ create index webinars_schedule_idx on public.webinars (status, ends_at);
 
 create table public.webinar_registrations (
   webinar_id  uuid not null references public.webinars (id) on delete cascade,
-  user_id     uuid not null references public.users (public_id) on delete cascade,
+  user_id     uuid not null references app.users (public_id) on delete cascade,
   created_at  timestamptz not null default now(),
   primary key (webinar_id, user_id)
 );
@@ -144,7 +144,7 @@ create index webinar_registrations_user_idx on public.webinar_registrations (use
 -- entity_id points at companies, issuers, roadshows or learn_items per entity_type; the API
 -- checks the entity exists before saving it.
 create table public.saved_items (
-  user_id      uuid not null references public.users (public_id) on delete cascade,
+  user_id      uuid not null references app.users (public_id) on delete cascade,
   entity_type  public.saved_entity_type not null,
   entity_id    uuid not null,
   created_at   timestamptz not null default now(),
@@ -158,12 +158,12 @@ create index saved_items_user_recent_idx on public.saved_items (user_id, created
 -- ---------------------------------------------------------------------------------------------
 
 -- Cached balance: always equal to the sum of the user's credit_ledger deltas.
-alter table public.users
+alter table app.users
   add column credit_balance integer not null default 0 check (credit_balance >= 0);
 
 create table public.credit_ledger (
   id             bigint generated always as identity primary key,
-  user_id        uuid not null references public.users (public_id) on delete cascade,
+  user_id        uuid not null references app.users (public_id) on delete cascade,
   delta          integer not null check (delta <> 0),
   balance_after  integer not null check (balance_after >= 0),
   reason         public.credit_reason not null,
@@ -209,13 +209,15 @@ create or replace function public.apply_credit_change(
 )
 returns setof public.credit_ledger
 language plpgsql
+-- Definer rights: the service role cannot read the private app schema directly.
+security definer
 set search_path = ''
 as $$
 declare
   v_balance integer;
 begin
   select u.credit_balance into v_balance
-  from public.users u
+  from app.users u
   where u.public_id = p_user_id
   for update;
 
@@ -226,7 +228,7 @@ begin
     raise exception 'INSUFFICIENT_CREDITS';
   end if;
 
-  update public.users u set credit_balance = v_balance + p_delta where u.public_id = p_user_id;
+  update app.users u set credit_balance = v_balance + p_delta where u.public_id = p_user_id;
 
   return query
   insert into public.credit_ledger (user_id, delta, balance_after, reason, ref_type, ref_id, note)
@@ -241,7 +243,7 @@ $$;
 
 create table public.notifications (
   id          uuid primary key default gen_random_uuid(),
-  user_id     uuid not null references public.users (public_id) on delete cascade,
+  user_id     uuid not null references app.users (public_id) on delete cascade,
   type        public.notification_type not null,
   title       text not null check (char_length(title) between 1 and 120),
   body        text not null check (char_length(body) <= 1000),
@@ -257,7 +259,7 @@ create index notifications_unread_idx on public.notifications (user_id) where re
 -- One row per push token. Registering a token again moves it to the signed-in user.
 create table public.device_tokens (
   token         text primary key check (char_length(token) between 16 and 4096),
-  user_id       uuid not null references public.users (public_id) on delete cascade,
+  user_id       uuid not null references app.users (public_id) on delete cascade,
   platform      public.device_platform not null,
   app_version   text check (char_length(app_version) <= 40),
   created_at    timestamptz not null default now(),
