@@ -19,7 +19,9 @@ export type AuditAction =
   | 'user.followed'
   | 'user.unfollowed'
   | 'file.upload_url.created'
-  | 'kyc.submitted';
+  | 'kyc.submitted'
+  | 'rating.submitted'
+  | 'representation.signed';
 
 // Append-only: the table rejects UPDATE and DELETE. Never put raw PII in metadata.
 // Multi-step operations write their audit entry inside their own database function.

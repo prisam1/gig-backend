@@ -21,4 +21,30 @@ export const filesStorage = {
   publicUrl(bucket: string, objectKey: string): string {
     return supabaseAdmin.storage.from(bucket).getPublicUrl(objectKey).data.publicUrl;
   },
+
+  /** Writes (or overwrites) an object, e.g. a generated receipt PDF. */
+  async upload(
+    bucket: string,
+    objectKey: string,
+    body: Uint8Array,
+    contentType: string,
+  ): Promise<void> {
+    const { error } = await supabaseAdmin.storage
+      .from(bucket)
+      .upload(objectKey, body, { contentType, upsert: true });
+    if (error) throw new Error(`Storage error: ${error.message}`);
+  },
+
+  /** A short-lived download URL for an object in a private bucket. */
+  async createDownloadUrl(
+    bucket: string,
+    objectKey: string,
+    expiresInSeconds: number,
+  ): Promise<string> {
+    const { data, error } = await supabaseAdmin.storage
+      .from(bucket)
+      .createSignedUrl(objectKey, expiresInSeconds);
+    if (error) throw new Error(`Storage error: ${error.message}`);
+    return data.signedUrl;
+  },
 };

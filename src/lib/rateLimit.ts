@@ -28,6 +28,8 @@ export const LIMITS = {
   uploadUrlPerUser: { name: 'upload-url:user', max: 30, windowSeconds: 3600 },
   kycSubmitPerUser: { name: 'kyc-submit:user', max: 5, windowSeconds: 3600 },
   followPerUser: { name: 'follow:user', max: 60, windowSeconds: 60 },
+  ratingSubmitPerUser: { name: 'rating-submit:user', max: 20, windowSeconds: 3600 },
+  signaturePerUser: { name: 'signature:user', max: 20, windowSeconds: 3600 },
   // Every API request (health checks excepted). The load balancer's WAF adds its own limit.
   apiPerIp: { name: 'api:ip', max: 300, windowSeconds: 60 },
 } satisfies Record<string, Limit>;

@@ -36,7 +36,7 @@ function assertWritten(result: WriteResult): asserts result is { ok: true; reque
   }
 }
 
-interface Option {
+export interface Option {
   code: string;
   label: string;
 }
