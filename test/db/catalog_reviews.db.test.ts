@@ -178,22 +178,24 @@ beforeEach(async () => {
 });
 
 describe('schema and seed', () => {
-  it("creates exactly the plan's 10 Catalog and Reviews tables, with row level security on", async () => {
+  it("creates the plan's 10 Catalog and Reviews tables, with row level security on", async () => {
     const tables = await rows<{ tablename: string; rowsecurity: boolean }>(
       `select tablename, rowsecurity from pg_tables where schemaname = 'public' order by tablename`,
     );
-    expect(tables.map((t) => t.tablename)).toEqual([
-      'companies',
-      'company_stats',
-      'company_tags',
-      'company_trend_points',
-      'issuer_tags',
-      'issuers',
-      'review_attachments',
-      'review_tags',
-      'review_versions',
-      'reviews',
-    ]);
+    expect(tables.map((t) => t.tablename)).toEqual(
+      expect.arrayContaining([
+        'companies',
+        'company_stats',
+        'company_tags',
+        'company_trend_points',
+        'issuer_tags',
+        'issuers',
+        'review_attachments',
+        'review_tags',
+        'review_versions',
+        'reviews',
+      ]),
+    );
     expect(tables.every((t) => t.rowsecurity)).toBe(true);
   });
 

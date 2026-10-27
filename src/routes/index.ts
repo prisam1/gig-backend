@@ -2,11 +2,17 @@ import { Router } from 'express';
 import { callDb } from '../lib/db';
 import { authRouter } from '../modules/auth/auth.routes';
 import { companiesRouter } from '../modules/catalog/catalog.routes';
+import { creditsRouter } from '../modules/credits/credits.routes';
 import { filesRouter } from '../modules/files/files.routes';
 import { kycRouter } from '../modules/kyc/kyc.routes';
+import { learnRouter } from '../modules/learn/learn.routes';
+import { devicesRouter, notificationsRouter } from '../modules/notifications/notifications.routes';
 import { reviewsRouter } from '../modules/reviews/reviews.routes';
+import { roadshowsRouter } from '../modules/roadshows/roadshows.routes';
+import { savedRouter } from '../modules/saved/saved.routes';
 import { lookupsRouter } from '../modules/users/lookups.routes';
 import { meRouter, usersRouter } from '../modules/users/users.routes';
+import { webinarsRouter } from '../modules/webinars/webinars.routes';
 import { apiRateLimit, noStore } from '../middleware/requestContext';
 import { issuersRouter, ratingsRouter } from '../modules/ratings/ratings.routes';
 import { representationsRouter } from '../modules/representations/representations.routes';
@@ -36,6 +42,21 @@ router.use(apiRateLimit, noStore);
 
 // ===== Auth and onboarding (Phase 1) =====
 router.use('/auth', authRouter);
+
+// ---------------------------------------------------------------------------------------------
+// Saved items, credits and notifications (the signed-in user's own data)
+//   GET / POST /me/saved                 saved companies, issuers, roadshows and learn content
+//   DELETE     /me/saved/:type/:id       remove a saved item
+//   GET        /me/credits               balance and ledger
+//   GET        /me/notifications         inbox (meta.unread = badge count)
+//   POST       /me/notifications/read    mark some or all read
+//   POST       /me/devices               register a push token
+// Mounted before /me so a request is authenticated once, by its own router.
+// ---------------------------------------------------------------------------------------------
+router.use('/me/saved', noStore, savedRouter);
+router.use('/me/credits', noStore, creditsRouter);
+router.use('/me/notifications', noStore, notificationsRouter);
+router.use('/me/devices', noStore, devicesRouter);
 
 // ===== Users, profile and KYC (Phase 1) =====
 router.use('/me', meRouter);
@@ -79,3 +100,27 @@ router.use('/ratings', ratingsRouter);
 //   GET   /representations/:id/submission  download the submitted petition pack
 // ---------------------------------------------------------------------------------------------
 router.use('/representations', representationsRouter);
+
+// Learn and webinars
+//   GET   /learn                         content list (PREMIUM items locked by tier)
+//   GET   /learn/:id                     content, report download (Full), own rating
+//   POST  /learn/:id/rating              rate 1-5
+//   GET   /webinars                      upcoming or past webinars
+//   POST  /webinars/:id/register         register
+// ---------------------------------------------------------------------------------------------
+router.use('/learn', learnRouter);
+router.use('/webinars', webinarsRouter);
+
+// ---------------------------------------------------------------------------------------------
+// Roadshows (Phase 2)
+//   GET   /roadshows                     list (open by default)
+//   GET   /roadshows/:id                 issue summary, terms, risk factors, documents
+//   GET   /roadshows/:id/financials      3-year financials in a chosen currency
+//   GET   /roadshows/:id/documents/:docId  5-minute DD document download (Prive, Inst.)
+//   GET   /roadshows/:id/questions       Ask Me Anything (Top Asked, Recently Added, categories)
+//   POST  /roadshows/:id/questions       ask a question (Prive)
+//   POST  /roadshows/:id/pool            join the Power Pool for 1 credit (Prive)
+//   GET   /roadshows/:id/pool-power      participants, capital interest, demand, heat map
+//   POST  /roadshows/:id/offers          post an offer (Inst.)
+// ---------------------------------------------------------------------------------------------
+router.use('/roadshows', roadshowsRouter);

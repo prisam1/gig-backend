@@ -13,9 +13,9 @@ export interface FakeResult {
 }
 
 export interface FakeCall {
-  kind: 'from' | 'rpc' | 'exists';
+  kind: 'from' | 'rpc' | 'exists' | 'signedUrl';
   name: string;
-  /** rpc: [args, options]; exists: [path] */
+  /** rpc: [args, options]; exists: [path]; signedUrl: [path, expiresIn, options] */
   args: unknown[];
   chain: { method: string; args: unknown[] }[];
 }
@@ -96,6 +96,8 @@ function createFakeSupabase() {
     storage: {
       from: (bucket: string) => ({
         exists: (path: string) => run(record('exists', bucket, [path])),
+        createSignedUrl: (path: string, expiresIn: number, options?: unknown) =>
+          run(record('signedUrl', bucket, [path, expiresIn, options])),
       }),
     },
   };
@@ -103,7 +105,7 @@ function createFakeSupabase() {
   return {
     client,
     calls,
-    /** Register the result for `from:<table>`, `rpc:<name>` or `exists:<bucket>`. */
+    /** Register the result for `from:<table>`, `rpc:<name>`, `exists:<bucket>` or `signedUrl:<bucket>`. */
     on(key: string, handler: Handler | FakeResult) {
       handlers.set(key, typeof handler === 'function' ? handler : () => handler);
     },

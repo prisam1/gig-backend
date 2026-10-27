@@ -913,7 +913,10 @@ describe('plan conventions', () => {
     ).toBe(4);
   });
 
-  it('adds nothing to the public schema (catalog and reviews keep their 10 tables)', async () => {
-    expect(await count(`select 1 from pg_tables where schemaname = 'public'`)).toBe(10);
+  it('adds nothing to the public schema (its tables live only in the private app schema)', async () => {
+    const tables = [...TABLES.ratings, ...TABLES.representations];
+    expect(
+      await count(`select 1 from pg_tables where schemaname = 'public' and tablename = any ($1)`, [tables]),
+    ).toBe(0);
   });
 });

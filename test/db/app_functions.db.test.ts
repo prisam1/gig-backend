@@ -78,6 +78,16 @@ describe('who may call the functions', () => {
     expect(r).toEqual({ anon: false, authenticated: false, service: true });
   });
 
+  it('lets the public roles run no function at all, including ones added by later migrations', async () => {
+    const { rows } = await db.query<{ fn: string }>(`
+      select n.nspname || '.' || p.proname as fn
+      from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname in ('public', 'app')
+        and (has_function_privilege('anon', p.oid, 'EXECUTE')
+             or has_function_privilege('authenticated', p.oid, 'EXECUTE'))`);
+    expect(rows).toEqual([]);
+  });
+
   it('gives no API role, not even the service role, direct access to the app schema', async () => {
     const r = await one<{ anon: boolean; authenticated: boolean; service: boolean }>(`
       select has_schema_privilege('anon', 'app', 'USAGE') as anon,

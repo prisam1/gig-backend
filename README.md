@@ -2,7 +2,7 @@
 
 REST API for the GIG (Global Investorz Group) mobile app. Node.js + TypeScript + Express, with Supabase (Postgres) as the database.
 
-> **Status:** Phase 1 "Auth and onboarding", "Users, profile and KYC", "Catalog and reviews", "Ratings" and "Representations" are implemented. Roadshows and admin are not built yet.
+> **Status:** Phase 1 "Auth and onboarding", "Users, profile and KYC", "Catalog and reviews", "Ratings", "Representations" and "Learn, saved items, credits and notifications", and Phase 2 "Roadshows", are implemented. Top-rated lists and admin are not built yet.
 
 ## Getting started
 
@@ -42,8 +42,8 @@ The server refuses to start if any required variable is missing or invalid.
 | Folder       | What it tests |
 | ------------ | ------------- |
 | `test/unit/` | Request validation: sign-up, login, OTP and onboarding rules; every review, rating and signing rule from the plan; list filters, compare ids, trend ranges |
-| `test/db/`   | All migrations and the seed in PGlite. The `app_*` functions: sign-up, OTP limits and decoys, sessions, refresh-token theft, password reset, tier, KYC, who may call them, append-only audit log. Ratings and Representations: their repositories call the same `app_*` functions against PGlite (rating and signature transactions, issuer stats, effective petition status, signer names, infected documents, counts). Catalog and reviews: constraints, review submission and receipt numbers, evidence checks, stats, trends, feed, search, resolution updates |
-| `test/api/`  | Every catalog, review, rating and representation endpoint through Express: access rules per tier and KYC, response shapes, filters and sorting, idempotency keys, evidence and signature-file errors, 400/401/403/404/409 errors |
+| `test/db/`   | All migrations and the seed in PGlite. The `app_*` functions: sign-up, OTP limits and decoys, sessions, refresh-token theft, password reset, tier, KYC, who may call them, append-only audit log. Ratings and Representations: their repositories call the same `app_*` functions against PGlite (rating and signature transactions, issuer stats, effective petition status, signer names, infected documents, counts). Roadshows and engagement: pool joins and credit spending, question rules, ledger append-only. Catalog and reviews: constraints, review submission and receipt numbers, evidence checks, stats, trends, feed, search, resolution updates |
+| `test/api/`  | Every catalog, review, rating, representation, learn, webinar, saved, credits, notifications and roadshow endpoint through Express: access rules per tier and KYC, response shapes, filters and sorting, idempotency keys, evidence and signature-file errors, 400/401/403/404/409 errors |
 
 ## Project structure
 
@@ -345,3 +345,48 @@ Tables (private `app` schema): `representations`, `representation_signatures`, `
 | Review-form `isKycVerified` / `isGenuine` as the 2 consents                                                                        | `consents.supportSubmission` / `consents.digitalEndorsement` |
 | `signedSignature`, `Goal`, `closeIn`, `totalSignature`                                                                             | `signatureCount`, `goal`, `daysLeft`, `progressPercent`      |
 | Petition opened without an id                                                                                                      | Petition `id` in the URL                                     |
+
+## Learn, saved items, credits and notifications
+
+| Method | Path                      | Access | Purpose                                                                                       |
+| ------ | ------------------------- | ------ | --------------------------------------------------------------------------------------------- |
+| GET    | `/learn`                  | Public | Content list. `q`, `sort` (`recent`, `top_rated`), `filter[format]`, `[category]`, `[access]` |
+| GET    | `/learn/:id`              | Public | `contentUrl` (null when `locked`), report `download` (Full only), `myRating`                  |
+| POST   | `/learn/:id/rating`       | User   | `{ rating: 1-5 }`; rating again replaces it. Returns the new average and count                |
+| GET    | `/webinars?when=upcoming` | User   | `upcoming` (incl. live) or `past`; `joinUrl` for registered members, delayed recordings       |
+| POST   | `/webinars/:id/register`  | User   | Register; PREMIUM webinars need Full access                                                   |
+| GET    | `/me/saved?type=COMPANY`  | User   | Saved items, newest first, each with a `{ name, subtitle, imageUrl }` summary                 |
+| POST   | `/me/saved`               | User   | `{ type, id }`; `type` is `COMPANY`, `ISSUER`, `ROADSHOW` or `LEARN_ITEM`                     |
+| DELETE | `/me/saved/:type/:id`     | User   | Remove a saved item                                                                           |
+| GET    | `/me/credits`             | User   | `{ balance, entries }` with the ledger paged in `meta`                                        |
+| GET    | `/me/notifications`       | User   | Inbox; `?unread=true`; `meta.unread` is the badge count                                       |
+| POST   | `/me/notifications/read`  | User   | `{ ids?: [...] }`; omit `ids` to mark all read                                                |
+| POST   | `/me/devices`             | User   | `{ token, platform: IOS / ANDROID / WEB, appVersion? }` push token                            |
+
+PREMIUM learn content and webinars are for Full members; others see them with `locked: true`. Report downloads are 5-minute signed URLs from the private `learn-reports` bucket.
+
+**Credits.** `credit_ledger` is append-only (updates and deletes are refused by a trigger); `app.users.credit_balance` caches the sum and can never go below 0. Every change goes through `public.apply_credit_change`. Until `/admin/credits/grant` exists, grant credits in the SQL editor:
+
+```sql
+select public.apply_credit_change('<user public_id>', 5, 'ADMIN_GRANT', null, null, 'Launch credits');
+```
+
+## Roadshows
+
+| Method | Path                              | Access | Purpose                                                                                                                      |
+| ------ | --------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/roadshows`                      | Public | `state` (`OPEN` default, `CLOSED`, `ALL`), `q`, `sort` (`closing_soon`, `recent`), `filter[poolEnabled]`, `filter[currency]` |
+| GET    | `/roadshows/:id`                  | Public | Issue summary and terms, risk factors, document list, `inPool` for signed-in users                                           |
+| GET    | `/roadshows/:id/financials`       | User   | Latest 3 fiscal years; `?currency=INR/USD/EUR/GBP/AED` converts with `fx_rates`                                              |
+| GET    | `/roadshows/:id/documents/:docId` | Full   | 5-minute signed download URL for a DD PDF                                                                                    |
+| GET    | `/roadshows/:id/questions`        | User   | Published questions with answers. `sort=top` (Top Asked) or `recent`; `category`; `q`                                        |
+| POST   | `/roadshows/:id/questions`        | Prive  | `{ question, category? }` while the roadshow is open; published after moderation                                             |
+| POST   | `/roadshows/:id/pool`             | Prive  | Join the Power Pool: `{ capitalInterest, expectations }` (3+ of 8). Costs 1 credit. Needs `Idempotency-Key`                  |
+| GET    | `/roadshows/:id/pool-power`       | User   | Participants, total and average capital interest, % per improvement, heat map                                                |
+| POST   | `/roadshows/:id/offers`           | Inst.  | Post an offer (price, ROI/IRR, loads, lock-in, allotment and payment terms); `PENDING_REVIEW`                                |
+
+- **Power Pool join** runs in one transaction (`public.join_roadshow_pool`): checks the roadshow is published, open and pool-enabled, spends 1 credit, stores the membership and expectations, and adds an inbox notification. Errors: `402 INSUFFICIENT_CREDITS`, `409 ALREADY_IN_POOL`, `409 POOL_NOT_ENABLED`, `409 ROADSHOW_CLOSED`. A retry with the same key and body returns the same membership with `Idempotent-Replayed: true`.
+- **Expectations:** `BETTER_ROI_IRR`, `SHORTER_LOCK_IN`, `LOWER_ENTRY_LOAD`, `LOWER_EXIT_LOAD`, `PRIORITY_ALLOTMENT`, `FLEXIBLE_PAYMENT_TERMS`, `DISCOUNTED_OFFER_PRICE`, `REGULAR_DISCLOSURES`.
+- **Heat map:** members are split into capital-interest quartile bands; each cell is the share of a band asking for an improvement.
+- **Top Asked** lists staff-featured questions first, then answered ones. Question answers, featuring and offer publishing are admin work (not built yet).
+- `fx_rates` holds units per 1 USD; the FX feed job (not built yet) should overwrite it. A missing rate returns `503 FX_RATE_UNAVAILABLE`.
