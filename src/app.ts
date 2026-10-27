@@ -10,6 +10,8 @@ export function createApp() {
   const app = express();
 
   app.set('trust proxy', env.TRUST_PROXY);
+  // Nested query params, e.g. ?filter[sentiment]=Positive,Neutral
+  app.set('query parser', 'extended');
   app.use(requestId);
   app.use(helmet());
   app.use(cors({ origin: env.CORS_ORIGIN === '*' ? true : env.CORS_ORIGIN.split(',') }));

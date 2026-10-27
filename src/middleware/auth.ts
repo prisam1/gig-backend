@@ -1,40 +1,72 @@
 import type { Request, RequestHandler } from 'express';
-import { sql } from '../lib/db';
-import { verifyAccessToken } from '../lib/tokens';
-import type { Tier } from '../modules/users/users.service';
-import { AppError } from './errorHandler';
+import { authProvider } from '../lib/auth';
+import { hasFullAccess, isVerifiedPrive } from '../lib/membership';
+import { usersRepository, type User } from '../modules/users/users.repository';
+import { HttpError } from './errorHandler';
 
-export interface AuthContext {
-  userId: string;
-  userPublicId: string;
-  sessionId: string;
-  sessionPublicId: string;
-  tier: Tier;
-  kycStatus: string;
+declare module 'express-serve-static-core' {
+  interface Request {
+    user?: User;
+  }
 }
 
-// Checks the JWT and then the database on every request, so logout, revoked devices, password
-// resets and suspensions take effect immediately instead of when the token expires.
-export const requireAuth: RequestHandler = async (req, _res, next) => {
-  const match = /^Bearer ([A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+)$/.exec(req.get('authorization') ?? '');
-  if (!match?.[1]) throw new AppError(401, 'UNAUTHORIZED', 'Sign in to continue');
+function bearerToken(req: Request): string | undefined {
+  const header = req.headers.authorization;
+  if (!header?.startsWith('Bearer ')) return undefined;
+  return header.slice('Bearer '.length).trim() || undefined;
+}
 
-  const claims = verifyAccessToken(match[1]);
-  const [row] = await sql<AuthContext[]>`
-    select u.id as user_id, u.public_id as user_public_id, s.id as session_id,
-           s.public_id as session_public_id, u.tier, u.kyc_status
-    from app.user_sessions s
-    join app.users u on u.id = s.user_id
-    where s.public_id = ${claims.sessionPublicId} and u.public_id = ${claims.userPublicId}
-      and s.revoked_at is null and s.expires_at > now() and s.absolute_expires_at > now()
-      and u.status = 'ACTIVE'`;
-  if (!row) throw new AppError(401, 'UNAUTHORIZED', 'Your session has ended. Please log in again.');
+async function signIn(req: Request, token: string): Promise<void> {
+  const identity = await authProvider.verifyAccessToken(token);
+  if (!identity) {
+    throw new HttpError(401, 'Invalid or expired token');
+  }
 
-  req.auth = row;
+  const user = await usersRepository.findOrCreateByIdentity(identity);
+  if (user.status === 'SUSPENDED') {
+    throw new HttpError(403, 'Account suspended', { code: 'ACCOUNT_SUSPENDED' });
+  }
+
+  req.user = user;
+}
+
+/** Requires a valid Bearer token and loads the matching GIG user onto `req.user` ("User" access). */
+export const requireUser: RequestHandler = async (req, _res, next) => {
+  const token = bearerToken(req);
+  if (!token) {
+    throw new HttpError(401, 'Missing bearer token');
+  }
+  await signIn(req, token);
   next();
 };
 
-export function getAuth(req: Request): AuthContext {
-  if (!req.auth) throw new AppError(401, 'UNAUTHORIZED', 'Sign in to continue');
-  return req.auth;
+/** Loads the user when a Bearer token is sent; public routes still work without one. */
+export const optionalUser: RequestHandler = async (req, _res, next) => {
+  const token = bearerToken(req);
+  if (token) await signIn(req, token);
+  next();
+};
+
+/** Prive membership with approved KYC ("Prive" access). Use after `requireUser`. */
+export const requireVerifiedPrive: RequestHandler = (req, _res, next) => {
+  const user = currentUser(req);
+  if (user.tier !== 'PRIVE') throw new HttpError(403, 'Prive membership required');
+  if (!isVerifiedPrive(user)) {
+    throw new HttpError(403, 'KYC verification required', { code: 'KYC_REQUIRED' });
+  }
+  next();
+};
+
+/** Prive (verified) or Institutional ("Full" access). Use after `requireUser`. */
+export const requireFullAccess: RequestHandler = (req, _res, next) => {
+  if (!hasFullAccess(currentUser(req))) {
+    throw new HttpError(403, 'Available to verified Prive and Institutional members');
+  }
+  next();
+};
+
+/** The signed-in user; only call from routes behind `requireUser`. */
+export function currentUser(req: Request): User {
+  if (!req.user) throw new HttpError(401, 'Not signed in');
+  return req.user;
 }
