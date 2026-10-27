@@ -1,10 +1,10 @@
 // In-memory stand-in for the Supabase client, used by the HTTP tests.
 // Every query builder chain (from().select().eq()...) is recorded, and the awaited result comes
 // from a handler registered per table / RPC, so tests control exactly what the database "returns".
-// Sign-in is faked separately by fakeAuthProvider and fakeUsersRepository.
+// Sign-in is faked separately by fakeLoadMember.
 
-import type { AuthIdentity } from '../../src/lib/auth';
-import type { Profile, User } from '../../src/modules/users/users.repository';
+import type { Member } from '../../src/lib/membership';
+import { HttpError } from '../../src/middleware/errorHandler';
 
 export interface FakeResult {
   data?: unknown;
@@ -38,46 +38,22 @@ export type TestUser = keyof typeof TEST_USERS;
 /** Bearer token for a test user; the fake auth accepts exactly these. */
 export const tokenFor = (user: TestUser) => `test-token-${user}`;
 
-const TEST_USER_KEYS = Object.keys(TEST_USERS) as TestUser[];
-
-/** Stand-in for authProvider in src/lib/auth.ts: accepts exactly the tokenFor() tokens. */
-export const fakeAuthProvider = {
-  async verifyAccessToken(token: string): Promise<AuthIdentity | null> {
-    const key = TEST_USER_KEYS.find((k) => tokenFor(k) === token);
-    return key ? { authUserId: `auth-${key}`, email: null, phone: null } : null;
-  },
-};
-
-/** Stand-ins for the usersRepository calls sign-in makes. Users get ids 1, 2, ... in TEST_USERS order. */
-export const fakeUsersRepository = {
-  async findOrCreateByIdentity(identity: AuthIdentity): Promise<User> {
-    const index = TEST_USER_KEYS.findIndex((k) => `auth-${k}` === identity.authUserId);
-    const user = TEST_USERS[TEST_USER_KEYS[index]!];
-    return {
-      id: index + 1,
-      publicId: user.id,
-      email: null,
-      phone: null,
-      tier: user.tier,
-      requestedTier: null,
-      kycStatus: user.kyc,
-      status: 'ACTIVE',
-      createdAt: '2026-01-01T00:00:00Z',
-    };
-  },
-
-  async findProfile(userId: number): Promise<Profile | null> {
-    const name = TEST_USER_KEYS[userId - 1] === 'prive' ? 'Shreya Mehta' : 'Test User';
-    return {
-      name,
-      experience: null,
-      jobProfile: null,
-      otherJob: null,
-      location: null,
-      avatar: null,
-    };
-  },
-};
+/** Stand-in for authProvider.loadMember in src/lib/auth.ts. */
+export async function fakeLoadMember(token: string): Promise<Member> {
+  const index = Object.keys(TEST_USERS).findIndex((key) => tokenFor(key as TestUser) === token);
+  if (index < 0) throw new HttpError(401, 'Invalid or expired access token');
+  const [key, user] = Object.entries(TEST_USERS)[index]!;
+  return {
+    userId: String(index + 1),
+    userPublicId: user.id,
+    sessionId: String(index + 1),
+    sessionPublicId: `00000000-0000-4000-8000-00000000000${index + 1}`,
+    tier: user.tier,
+    requestedTier: null,
+    kycStatus: user.kyc,
+    fullName: key === 'prive' ? 'Shreya Mehta' : 'Test User',
+  };
+}
 
 function createFakeSupabase() {
   const handlers = new Map<string, Handler>();

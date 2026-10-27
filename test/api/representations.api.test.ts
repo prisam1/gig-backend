@@ -1,11 +1,11 @@
 import { PDFDocument } from 'pdf-lib';
 import request from 'supertest';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DatabaseError, PG_UNIQUE_VIOLATION } from '../../src/lib/supabase';
+import type { Member } from '../../src/lib/membership';
 import { filesRepository } from '../../src/modules/files/files.repository';
 import { filesStorage } from '../../src/modules/files/files.storage';
-import { lookupsRepository } from '../../src/modules/lookups/lookups.repository';
 import {
+  representationClosed,
   representationsRepository,
   type NewSignature,
   type Representation,
@@ -17,14 +17,20 @@ import {
   SIGNATURE_CONSENT_VERSION,
   SIGNATURE_CONSENTS,
 } from '../../src/modules/representations/representations.service';
-import { usersRepository, type User } from '../../src/modules/users/users.repository';
+import { listOptions } from '../../src/modules/users/users.service';
 import { AUTH_HEADER, FILE_ID, USER_ID, app, makeFile, makeUser, signInAs } from '../helpers';
+import { uniqueViolation } from '../helpers/postgres';
+
+vi.mock('../../src/modules/users/users.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/modules/users/users.service')>()),
+  listOptions: vi.fn(),
+}));
 
 const REPRESENTATION_ID = '6c3e0000-0000-4000-8000-000000000001';
 const DOWNLOAD_URL = 'https://storage.test/signed/receipt.pdf?token=abc';
 
 const petition: Representation = {
-  internalId: 7,
+  internalId: '7',
   id: REPRESENTATION_ID,
   slug: 'mandatory-t1-settlement-disclosure',
   title: 'Mandatory T+1 Settlement Disclosure',
@@ -39,12 +45,12 @@ const petition: Representation = {
   signatureCount: 124,
   voteCount: 120,
   progressPercent: 12.4,
-  opensAt: '2026-10-01T00:00:00Z',
-  closesAt: '2026-11-02T00:00:00Z',
+  opensAt: new Date('2026-10-01T00:00:00.000Z'),
+  closesAt: new Date('2026-11-02T00:00:00.000Z'),
   daysLeft: 6,
   trackStatus: 'CLOSING_SOON',
   isOpenForSigning: true,
-  createdAt: '2026-09-30T00:00:00Z',
+  createdAt: new Date('2026-09-30T00:00:00.000Z'),
 };
 
 const evidence: StoredDocument = {
@@ -66,7 +72,7 @@ const mySignature: StoredSignature = {
   signerName: 'Shreya Mehta',
   investorType: 'RETAIL_EXPERIENCED',
   signerTier: 'PRIVE',
-  createdAt: '2026-10-27T10:24:07Z',
+  createdAt: new Date('2026-10-27T10:24:07.000Z'),
 };
 
 const validBody = {
@@ -76,7 +82,8 @@ const validBody = {
   consents: { supportSubmission: true, digitalEndorsement: true },
 };
 
-const verifiedPrive = () => makeUser({ tier: 'PRIVE', kycStatus: 'APPROVED' });
+const verifiedPrive = () =>
+  makeUser({ tier: 'PRIVE', kycStatus: 'APPROVED', fullName: 'Shreya Mehta' });
 
 function stubStorage() {
   const upload = vi.spyOn(filesStorage, 'upload').mockResolvedValue();
@@ -86,12 +93,9 @@ function stubStorage() {
 }
 
 function stubInvestorTypes() {
-  vi.spyOn(lookupsRepository, 'findActive').mockResolvedValue([
+  vi.mocked(listOptions).mockResolvedValue([
     { code: 'RETAIL_EXPERIENCED', label: 'Retail Investor (Experienced Investors)' },
   ]);
-  vi.spyOn(lookupsRepository, 'findActiveCodes').mockImplementation(async (_type, codes) =>
-    codes.filter((code) => code === 'RETAIL_EXPERIENCED'),
-  );
 }
 
 /** Everything a successful signature touches; returns the repository's sign() spy. */
@@ -100,20 +104,12 @@ function stubSigning() {
   vi.spyOn(representationsRepository, 'findById').mockResolvedValue(petition);
   vi.spyOn(filesRepository, 'findOwned').mockResolvedValue([
     makeFile({
-      id: 42,
+      id: '42',
       purpose: 'SIGNATURE',
       bucket: 'signatures',
       objectKey: `${USER_ID}/sig.png`,
     }),
   ]);
-  vi.spyOn(usersRepository, 'findProfile').mockResolvedValue({
-    name: 'Shreya Mehta',
-    experience: null,
-    jobProfile: null,
-    otherJob: null,
-    location: null,
-    avatar: null,
-  });
   stubInvestorTypes();
   const storage = stubStorage();
   const sign = vi
@@ -164,13 +160,13 @@ describe('GET /representations', () => {
       signatureCount: 124,
       voteCount: 120,
       progressPercent: 12.4,
-      opensAt: '2026-10-01T00:00:00Z',
-      closesAt: '2026-11-02T00:00:00Z',
+      opensAt: '2026-10-01T00:00:00.000Z',
+      closesAt: '2026-11-02T00:00:00.000Z',
       daysLeft: 6,
       trackStatus: 'CLOSING_SOON',
       trackLabel: 'Closing Soon',
       isOpenForSigning: true,
-      createdAt: '2026-09-30T00:00:00Z',
+      createdAt: '2026-09-30T00:00:00.000Z',
     });
     expect(find).toHaveBeenCalledWith({
       page: 1,
@@ -206,7 +202,7 @@ describe('GET /representations/:id', () => {
           label: 'Retail Investor (Experienced Investors)',
         },
         isVerified: true,
-        signedAt: '2026-10-27T10:24:07Z',
+        signedAt: new Date('2026-10-27T10:24:07.000Z'),
       },
       {
         id: 's2',
@@ -214,7 +210,7 @@ describe('GET /representations/:id', () => {
         isAnonymous: true,
         investorType: null,
         isVerified: true,
-        signedAt: '2026-10-26T09:00:00Z',
+        signedAt: new Date('2026-10-26T09:00:00.000Z'),
       },
     ]);
     stubInvestorTypes();
@@ -263,7 +259,7 @@ describe('GET /representations/:id', () => {
     expect(res.body.data.mySignature).toEqual({
       signatureId: 'GIG-ET7ZWDTZK',
       displayMode: 'INITIALS',
-      signedAt: '2026-10-27T10:24:07Z',
+      signedAt: '2026-10-27T10:24:07.000Z',
       receiptPdf: { url: DOWNLOAD_URL, expiresAt: expect.any(String) },
     });
     expect(upload).not.toHaveBeenCalled();
@@ -302,7 +298,7 @@ describe('GET /representations/:id/timeline', () => {
 
   beforeEach(() => {
     vi.useFakeTimers({ toFake: ['Date'] });
-    vi.setSystemTime(new Date('2026-12-15T00:00:00Z'));
+    vi.setSystemTime(new Date('2026-12-15T00:00:00.000Z'));
   });
   afterEach(() => vi.useRealTimers());
 
@@ -317,21 +313,21 @@ describe('GET /representations/:id/timeline', () => {
         fromStatus: null,
         toStatus: 'OPEN',
         note: null,
-        occurredAt: '2026-10-01T00:00:00Z',
+        occurredAt: new Date('2026-10-01T00:00:00.000Z'),
         documents: [],
       },
       {
         fromStatus: 'OPEN',
         toStatus: 'UNDER_REVIEW',
         note: 'Reviewing signatures',
-        occurredAt: '2026-11-05T00:00:00Z',
+        occurredAt: new Date('2026-11-05T00:00:00.000Z'),
         documents: [],
       },
       {
         fromStatus: 'UNDER_REVIEW',
         toStatus: 'SUBMITTED_TO_REGULATOR',
         note: 'Sent to SEBI',
-        occurredAt: '2026-11-20T00:00:00Z',
+        occurredAt: new Date('2026-11-20T00:00:00.000Z'),
         documents: [{ ...evidence, title: 'Submission pack', documentType: 'SUBMISSION_PACK' }],
       },
     ];
@@ -343,7 +339,7 @@ describe('GET /representations/:id/timeline', () => {
     expect(res.status).toBe(200);
     expect(res.body.data.currentStatus).toBe('SUBMITTED_TO_REGULATOR');
     expect(res.body.data.steps).toEqual([
-      { status: 'OPEN', label: 'Open', reachedAt: '2026-10-01T00:00:00Z', isCurrent: false },
+      { status: 'OPEN', label: 'Open', reachedAt: '2026-10-01T00:00:00.000Z', isCurrent: false },
       {
         status: 'CLOSING_SOON',
         label: 'Closing Soon',
@@ -359,13 +355,13 @@ describe('GET /representations/:id/timeline', () => {
       {
         status: 'UNDER_REVIEW',
         label: 'Under Review by GIG',
-        reachedAt: '2026-11-05T00:00:00Z',
+        reachedAt: '2026-11-05T00:00:00.000Z',
         isCurrent: false,
       },
       {
         status: 'SUBMITTED_TO_REGULATOR',
         label: 'Submitted to Reg.',
-        reachedAt: '2026-11-20T00:00:00Z',
+        reachedAt: '2026-11-20T00:00:00.000Z',
         isCurrent: true,
       },
       {
@@ -392,7 +388,7 @@ describe('GET /representations/:id/timeline', () => {
   });
 
   it('shows only Open as reached for a petition still collecting signatures', async () => {
-    vi.setSystemTime(new Date('2026-10-10T00:00:00Z'));
+    vi.setSystemTime(new Date('2026-10-10T00:00:00.000Z'));
     vi.spyOn(representationsRepository, 'findById').mockResolvedValue({
       ...petition,
       trackStatus: 'OPEN',
@@ -432,7 +428,7 @@ describe('GET /representations/:id/submission', () => {
   it.each([
     ['Observer', makeUser()],
     ['Prive without approved KYC', makeUser({ tier: 'PRIVE', kycStatus: 'PENDING' })],
-  ] as [string, User][])('is not available to %s', async (_label, user) => {
+  ] as [string, Member][])('is not available to %s', async (_label, user) => {
     signInAs(user);
     expect((await request(app).get(url).set(AUTH_HEADER)).status).toBe(403);
   });
@@ -440,7 +436,7 @@ describe('GET /representations/:id/submission', () => {
   it.each([
     ['verified Prive', verifiedPrive()],
     ['Institutional', makeUser({ tier: 'INSTITUTIONAL', kycStatus: 'APPROVED' })],
-  ] as [string, User][])('gives %s members a download link to the pack', async (_label, user) => {
+  ] as [string, Member][])('gives %s members a download link to the pack', async (_label, user) => {
     signInAs(user);
     vi.spyOn(representationsRepository, 'findLatestSubmissionPack').mockResolvedValue(pack);
     const { download } = stubStorage();
@@ -491,7 +487,7 @@ describe('POST /representations/:id/signatures: access and validation', () => {
       makeUser({ tier: 'PRIVE', kycStatus: 'PENDING' }),
       'KYC_REQUIRED',
     ],
-  ] as [string, User, string][])('is not open to %s', async (_label, user, code) => {
+  ] as [string, Member, string][])('is not open to %s', async (_label, user, code) => {
     signInAs(user);
     const res = await signPetition();
     expect(res.status).toBe(403);
@@ -567,19 +563,14 @@ describe('POST /representations/:id/signatures: rules', () => {
   });
 
   it('returns 409 when the investor already signed', async () => {
-    stubSigning().sign.mockRejectedValue(
-      new DatabaseError(
-        PG_UNIQUE_VIOLATION,
-        'duplicate key value violates unique constraint "representation_signatures_one_per_user"',
-      ),
-    );
+    stubSigning().sign.mockRejectedValue(uniqueViolation('representation_signatures_one_per_user'));
     const res = await signPetition();
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('ALREADY_SIGNED');
   });
 
-  it('maps a closing race in the database to 409', async () => {
-    stubSigning().sign.mockRejectedValue(new DatabaseError('P0001', 'REPRESENTATION_CLOSED'));
+  it('returns 409 when the petition closed between the check and the save', async () => {
+    stubSigning().sign.mockRejectedValue(representationClosed());
     expect((await signPetition()).body.error.code).toBe('REPRESENTATION_CLOSED');
   });
 });
@@ -593,20 +584,19 @@ describe('POST /representations/:id/signatures: signing', () => {
     const res = await signPetition();
 
     expect(res.status).toBe(201);
-    const saved = sign.mock.calls[0]![0];
+    const [saved, ctx] = sign.mock.calls[0]!;
+    expect(ctx).toMatchObject({ appVersion: '1.4.0', requestId: expect.any(String) });
     expect(saved).toEqual({
-      userId: 1,
+      userId: '1',
       representationId: REPRESENTATION_ID,
       signatureCode: expect.stringMatching(/^GIG-[A-Z0-9]{9}$/),
       displayMode: 'INITIALS',
       signerName: 'Shreya Mehta',
       investorType: 'RETAIL_EXPERIENCED',
-      signatureFileId: 42,
+      signatureFileId: '42',
       signerTier: 'PRIVE',
       consentTypes: ['PETITION_SUBMISSION_SUPPORT', 'PETITION_DIGITAL_ENDORSEMENT'],
       consentVersion: SIGNATURE_CONSENT_VERSION,
-      ipAddress: expect.any(String),
-      appVersion: '1.4.0',
       idempotencyKey: 'signature-key-0001',
       requestHash: expect.stringMatching(/^[0-9a-f]{64}$/),
     });
@@ -624,7 +614,7 @@ describe('POST /representations/:id/signatures: signing', () => {
         tier: 'PRIVE',
         countsAsVote: true,
       },
-      signedAt: '2026-10-27T10:24:07Z',
+      signedAt: '2026-10-27T10:24:07.000Z',
       consents: { version: SIGNATURE_CONSENT_VERSION, accepted: Object.values(SIGNATURE_CONSENTS) },
       receiptPdf: { url: DOWNLOAD_URL, expiresAt: expect.any(String) },
     });
@@ -641,10 +631,7 @@ describe('POST /representations/:id/signatures: signing', () => {
 
   it('retries with a new signature ID when a random ID is already taken', async () => {
     const { sign } = stubSigning();
-    const codeTaken = new DatabaseError(
-      PG_UNIQUE_VIOLATION,
-      'duplicate key value violates unique constraint "representation_signatures_code_key"',
-    );
+    const codeTaken = uniqueViolation('representation_signatures_code_key');
     const save = sign.getMockImplementation()!;
     sign.mockRejectedValueOnce(codeTaken).mockImplementation(save);
 

@@ -1,19 +1,27 @@
 import { randomInt } from 'node:crypto';
+import { isUniqueViolationOf } from '../../lib/db';
 import { displayNameFor } from '../../lib/displayName';
 import type { PageMeta } from '../../lib/http';
 import { hashRequest, type IdempotentResult } from '../../lib/idempotency';
-import { DatabaseError, PG_UNIQUE_VIOLATION } from '../../lib/supabase';
+import type { Member } from '../../lib/membership';
+import { consume, LIMITS } from '../../lib/rateLimit';
 import { HttpError, validationError } from '../../middleware/errorHandler';
-import type { DisplayMode, RepresentationTrackStatus, Tier } from '../../types/domain';
+import type { ClientContext } from '../../middleware/requestContext';
+import {
+  REPRESENTATION_TRACK_STATUSES,
+  type DisplayMode,
+  type RepresentationTrackStatus,
+  type Tier,
+} from '../../types/domain';
 import { filesRepository } from '../files/files.repository';
 import { filesStorage } from '../files/files.storage';
-import { lookupsRepository } from '../lookups/lookups.repository';
-import { lookupsService } from '../lookups/lookups.service';
-import { usersRepository, type User } from '../users/users.repository';
+import { listOptions } from '../users/users.service';
 import { renderSignatureReceipt } from './representations.receipt';
 import {
+  representationClosed,
   representationsRepository,
   SIGNATURE_CONSTRAINTS,
+  signatureFileInvalid,
   type Representation,
   type Signer,
   type StatusChange,
@@ -25,7 +33,7 @@ import type { ListRepresentationsQuery, SignRepresentationInput } from './repres
 /** Version of the two signing declarations shown in the app; bump it when the wording changes. */
 export const SIGNATURE_CONSENT_VERSION = '2026-10';
 
-/** The signing declarations, stored in the consents table under these types. */
+/** The signing declarations, stored in app.consents under these types. */
 export const SIGNATURE_CONSENTS = {
   PETITION_SUBMISSION_SUPPORT:
     'I support this representation being submitted to the regulator(s) listed.',
@@ -46,9 +54,7 @@ export const TRACK_LABELS: Record<RepresentationTrackStatus, string> = {
   RESOLVED: 'Resolved / Closed',
 };
 
-const TRACK_ORDER = Object.keys(TRACK_LABELS) as RepresentationTrackStatus[];
-
-/** Matches representation_closing_soon_window() in SQL. */
+/** Matches app.representation_effective_status() in SQL. */
 const CLOSING_SOON_DAYS = 7;
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -88,13 +94,13 @@ export interface DocumentLink {
 
 export interface SignatureReceiptLink {
   url: string;
-  expiresAt: string;
+  expiresAt: Date;
 }
 
 export interface MySignature {
   signatureId: string;
   displayMode: DisplayMode;
-  signedAt: string;
+  signedAt: Date;
   receiptPdf: SignatureReceiptLink;
 }
 
@@ -110,7 +116,7 @@ export interface TimelineStep {
   status: RepresentationTrackStatus;
   label: string;
   /** When the petition reached this step; null if it has not yet. */
-  reachedAt: string | null;
+  reachedAt: Date | null;
   isCurrent: boolean;
 }
 
@@ -122,7 +128,7 @@ export interface RepresentationTimeline {
     toStatus: RepresentationTrackStatus;
     label: string;
     note: string | null;
-    occurredAt: string;
+    occurredAt: Date;
     documents: DocumentLink[];
   }[];
 }
@@ -140,14 +146,9 @@ export interface SignatureReceipt {
     /** Only Prive signatures count as votes. */
     countsAsVote: boolean;
   };
-  signedAt: string;
+  signedAt: Date;
   consents: { version: string; accepted: string[] };
   receiptPdf: SignatureReceiptLink;
-}
-
-export interface RequestMeta {
-  ipAddress: string | null;
-  appVersion: string | null;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -191,23 +192,22 @@ function timelineSteps(
   history: StatusChange[],
   now: Date,
 ): TimelineStep[] {
-  const closesAt = new Date(representation.closesAt);
+  const closesAt = representation.closesAt;
   const closingSoonAt = new Date(closesAt.getTime() - CLOSING_SOON_DAYS * DAY_MS);
-  const firstReached = new Map<RepresentationTrackStatus, string>();
+  const firstReached = new Map<RepresentationTrackStatus, Date>();
   for (const change of history) {
     if (!firstReached.has(change.toStatus)) firstReached.set(change.toStatus, change.occurredAt);
   }
 
   const current = representation.trackStatus;
-  const currentIndex = TRACK_ORDER.indexOf(current);
+  const currentIndex = REPRESENTATION_TRACK_STATUSES.indexOf(current);
 
-  return TRACK_ORDER.map((status, index) => {
-    let reachedAt: string | null = null;
+  return REPRESENTATION_TRACK_STATUSES.map((status, index) => {
+    let reachedAt: Date | null = null;
     if (index <= currentIndex) {
       if (status === 'OPEN') reachedAt = representation.opensAt;
-      else if (status === 'CLOSING_SOON') {
-        reachedAt = now >= closingSoonAt ? closingSoonAt.toISOString() : null;
-      } else if (status === 'CLOSED') reachedAt = now >= closesAt ? closesAt.toISOString() : null;
+      else if (status === 'CLOSING_SOON') reachedAt = now >= closingSoonAt ? closingSoonAt : null;
+      else if (status === 'CLOSED') reachedAt = now >= closesAt ? closesAt : null;
       else reachedAt = firstReached.get(status) ?? null;
     }
     return { status, label: TRACK_LABELS[status], reachedAt, isCurrent: status === current };
@@ -222,26 +222,10 @@ function newSignatureCode(): string {
   return code;
 }
 
-function isUniqueViolationOf(error: unknown, name: string): boolean {
-  return (
-    error instanceof DatabaseError &&
-    error.code === PG_UNIQUE_VIOLATION &&
-    error.message.includes(name)
-  );
-}
-
-function raised(error: unknown, exception: string): boolean {
-  return error instanceof DatabaseError && error.message.includes(exception);
-}
-
 /** The signer's file, which must be their own SIGNATURE upload that has finished uploading. */
-async function resolveSignatureFile(user: User, fileId: string): Promise<number> {
-  const [file] = await filesRepository.findOwned(user.id, [fileId]);
-  if (!file || file.purpose !== 'SIGNATURE') {
-    throw validationError({
-      signatureFileId: 'Upload your signature with purpose SIGNATURE first',
-    });
-  }
+async function resolveSignatureFile(user: Member, fileId: string): Promise<string> {
+  const [file] = await filesRepository.findOwned(user.userId, [fileId]);
+  if (!file || file.purpose !== 'SIGNATURE') throw signatureFileInvalid();
   if (!(await filesStorage.exists(file.bucket, file.objectKey))) {
     throw validationError({ signatureFileId: 'Your signature upload has not finished' });
   }
@@ -252,14 +236,26 @@ async function investorTypeOption(
   code: string | null,
 ): Promise<{ code: string; label: string } | null> {
   if (!code) return null;
-  const options = await lookupsRepository.findActive('INVESTOR_TYPE');
-  const option = options.find((o) => o.code === code);
-  return option ? { code: option.code, label: option.label } : { code, label: code };
+  const option = (await listOptions('INVESTOR_TYPE')).find((o) => o.code === code);
+  return option ?? { code, label: code };
+}
+
+function receiptKey(user: Member, signature: StoredSignature): string {
+  return `${user.userPublicId}/${signature.signatureCode}.pdf`;
+}
+
+async function receiptDownloadLink(objectKey: string): Promise<SignatureReceiptLink> {
+  const url = await filesStorage.createDownloadUrl(
+    RECEIPT_BUCKET,
+    objectKey,
+    DOWNLOAD_URL_TTL_SECONDS,
+  );
+  return { url, expiresAt: new Date(Date.now() + DOWNLOAD_URL_TTL_SECONDS * 1000) };
 }
 
 /** Writes the receipt PDF to storage and returns a short-lived link to it. */
 async function publishReceipt(
-  user: User,
+  user: Member,
   representation: Representation,
   signature: StoredSignature,
   investorType: { code: string; label: string } | null,
@@ -271,7 +267,7 @@ async function publishReceipt(
     investorType: investorType?.label ?? null,
     membership:
       signature.signerTier === 'PRIVE' ? 'Prive (verified investor)' : signature.signerTier,
-    signedAt: new Date(signature.createdAt),
+    signedAt: signature.createdAt,
     regulators: representation.regulators,
     consents: Object.values(SIGNATURE_CONSENTS),
   });
@@ -281,22 +277,9 @@ async function publishReceipt(
   return receiptDownloadLink(objectKey);
 }
 
-function receiptKey(user: User, signature: StoredSignature): string {
-  return `${user.publicId}/${signature.signatureCode}.pdf`;
-}
-
-async function receiptDownloadLink(objectKey: string): Promise<SignatureReceiptLink> {
-  const url = await filesStorage.createDownloadUrl(
-    RECEIPT_BUCKET,
-    objectKey,
-    DOWNLOAD_URL_TTL_SECONDS,
-  );
-  return { url, expiresAt: new Date(Date.now() + DOWNLOAD_URL_TTL_SECONDS * 1000).toISOString() };
-}
-
 /** A link to the stored receipt; the PDF is regenerated only if it is missing. */
 async function existingReceiptLink(
-  user: User,
+  user: Member,
   representation: Representation,
   signature: StoredSignature,
 ): Promise<SignatureReceiptLink> {
@@ -311,7 +294,7 @@ async function existingReceiptLink(
 }
 
 async function signatureReceipt(
-  user: User,
+  user: Member,
   representation: Representation,
   signature: StoredSignature,
 ): Promise<SignatureReceipt> {
@@ -334,11 +317,14 @@ async function signatureReceipt(
 
 /** The signature this key already created, or null; a reused key with another body is a 409. */
 async function replay(
-  user: User,
+  user: Member,
   idempotencyKey: string,
   requestHash: string,
 ): Promise<IdempotentResult<SignatureReceipt> | null> {
-  const existing = await representationsRepository.findByIdempotencyKey(user.id, idempotencyKey);
+  const existing = await representationsRepository.findByIdempotencyKey(
+    user.userId,
+    idempotencyKey,
+  );
   if (!existing) return null;
   if (existing.requestHash !== requestHash) {
     throw new HttpError(409, 'Idempotency-Key was already used for a different request', {
@@ -346,7 +332,7 @@ async function replay(
     });
   }
   const representation = await requireRepresentation(existing.representationId);
-  const signature = await representationsRepository.findSignature(user.id, representation);
+  const signature = await representationsRepository.findSignature(user.userId, representation);
   if (!signature) throw new Error(`Signature for key ${idempotencyKey} could not be read back`);
   return { result: await signatureReceipt(user, representation, signature), replayed: true };
 }
@@ -366,12 +352,12 @@ export const representationsService = {
     };
   },
 
-  async get(id: string, viewer: User | undefined): Promise<RepresentationDetail> {
+  async get(id: string, viewer: Member | undefined): Promise<RepresentationDetail> {
     const representation = await requireRepresentation(id);
     const [evidence, recentSigners, mine] = await Promise.all([
       representationsRepository.findEvidence(representation),
       representationsRepository.findSigners(representation, SIGNER_PREVIEW_LIMIT),
-      viewer ? representationsRepository.findSignature(viewer.id, representation) : null,
+      viewer ? representationsRepository.findSignature(viewer.userId, representation) : null,
     ]);
 
     const mySignature: MySignature | null =
@@ -438,47 +424,46 @@ export const representationsService = {
    * Idempotency-Key and body returns the same receipt.
    */
   async sign(
-    user: User,
+    user: Member,
     id: string,
     input: SignRepresentationInput,
-    meta: RequestMeta,
     idempotencyKey: string,
+    ctx: ClientContext,
   ): Promise<IdempotentResult<SignatureReceipt>> {
     const requestHash = hashRequest({ id, ...input });
     const previous = await replay(user, idempotencyKey, requestHash);
     if (previous) return previous;
+    await consume(LIMITS.signaturePerUser, user.userPublicId);
 
     const representation = await requireRepresentation(id);
-    if (!representation.isOpenForSigning) {
-      throw new HttpError(409, 'This petition is no longer open for signatures', {
-        code: 'REPRESENTATION_CLOSED',
-      });
-    }
+    if (!representation.isOpenForSigning) throw representationClosed();
     if (input.investorType) {
-      const invalid = await lookupsService.findInvalidCodes('INVESTOR_TYPE', [input.investorType]);
-      if (invalid.length > 0) throw validationError({ investorType: 'Unknown investor type' });
+      const options = await listOptions('INVESTOR_TYPE');
+      if (!options.some((option) => option.code === input.investorType)) {
+        throw validationError({ investorType: 'Unknown investor type' });
+      }
     }
     const signatureFileId = await resolveSignatureFile(user, input.signatureFileId);
-    const profile = await usersRepository.findProfile(user.id);
 
     for (let attempt = 1; ; attempt++) {
       try {
-        await representationsRepository.sign({
-          userId: user.id,
-          representationId: representation.id,
-          signatureCode: newSignatureCode(),
-          displayMode: input.displayMode,
-          signerName: profile?.name?.trim() ?? '',
-          investorType: input.investorType,
-          signatureFileId,
-          signerTier: user.tier,
-          consentTypes: Object.keys(SIGNATURE_CONSENTS),
-          consentVersion: SIGNATURE_CONSENT_VERSION,
-          ipAddress: meta.ipAddress,
-          appVersion: meta.appVersion,
-          idempotencyKey,
-          requestHash,
-        });
+        await representationsRepository.sign(
+          {
+            userId: user.userId,
+            representationId: representation.id,
+            signatureCode: newSignatureCode(),
+            displayMode: input.displayMode,
+            signerName: user.fullName.trim(),
+            investorType: input.investorType,
+            signatureFileId,
+            signerTier: user.tier,
+            consentTypes: Object.keys(SIGNATURE_CONSENTS),
+            consentVersion: SIGNATURE_CONSENT_VERSION,
+            idempotencyKey,
+            requestHash,
+          },
+          ctx,
+        );
         break;
       } catch (error) {
         // A random signature code collided: try another one.
@@ -498,23 +483,11 @@ export const representationsService = {
           const raced = await replay(user, idempotencyKey, requestHash);
           if (raced) return raced;
         }
-        if (raised(error, 'REPRESENTATION_CLOSED')) {
-          throw new HttpError(409, 'This petition is no longer open for signatures', {
-            code: 'REPRESENTATION_CLOSED',
-          });
-        }
-        if (raised(error, 'REPRESENTATION_NOT_FOUND'))
-          throw new HttpError(404, 'Representation not found');
-        if (raised(error, 'SIGNATURE_FILE_INVALID')) {
-          throw validationError({
-            signatureFileId: 'Upload your signature with purpose SIGNATURE first',
-          });
-        }
         throw error;
       }
     }
 
-    const signature = await representationsRepository.findSignature(user.id, representation);
+    const signature = await representationsRepository.findSignature(user.userId, representation);
     if (!signature) throw new Error(`Signature on ${representation.id} could not be read back`);
     return { result: await signatureReceipt(user, representation, signature), replayed: false };
   },

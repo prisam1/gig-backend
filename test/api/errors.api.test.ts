@@ -9,14 +9,8 @@ vi.mock('../../src/lib/supabase', async () => {
   return { supabaseAdmin: fake.client };
 });
 vi.mock('../../src/lib/auth', async () => {
-  const { fakeAuthProvider } = await import('../helpers/fakeSupabase');
-  return { authProvider: fakeAuthProvider };
-});
-vi.mock('../../src/modules/users/users.repository', async (importOriginal) => {
-  const { fakeUsersRepository } = await import('../helpers/fakeSupabase');
-  const original =
-    await importOriginal<typeof import('../../src/modules/users/users.repository')>();
-  return { ...original, usersRepository: { ...original.usersRepository, ...fakeUsersRepository } };
+  const { fakeLoadMember } = await import('../helpers/fakeSupabase');
+  return { authProvider: { loadMember: fakeLoadMember } };
 });
 
 const app = createApp();
@@ -69,6 +63,8 @@ describe('API conventions', () => {
     spy.mockRestore();
     expect(res.status).toBe(500);
     expect(res.body.error.code).toBe('INTERNAL');
+    // The database message never reaches the client outside development.
+    expect(res.body.error.message).toBe('Internal server error');
   });
 
   it('sets security headers', async () => {

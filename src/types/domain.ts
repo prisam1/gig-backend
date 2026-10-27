@@ -1,46 +1,62 @@
+// Value lists of the users, files and KYC tables. They match the CHECK constraints in
+// supabase/migrations/20261027140000_files_kyc_follows.sql; change both together.
+
 import { Constants, type Enums } from './database';
 
-// Every enum comes from the database types, so a schema change shows up as a compile error.
-const DB_ENUMS = Constants.public.Enums;
+export type { KycStatus, Tier, VerifiedTier } from '../lib/membership';
 
-export const TIERS = DB_ENUMS.membership_tier;
-export type Tier = Enums<'membership_tier'>;
+// SIGNATURE (petition signatures) is added by 20261027160000_ratings_representations_support.sql.
+export const FILE_PURPOSES = ['AVATAR', 'KYC_DOCUMENT', 'REVIEW_EVIDENCE', 'SIGNATURE'] as const;
+export type FilePurpose = (typeof FILE_PURPOSES)[number];
 
-/** Tiers that require an approved KYC submission. */
-export type VerifiedTier = Enums<'verified_tier'>;
+export type FileScanStatus = 'PENDING' | 'CLEAN' | 'INFECTED';
 
-export type KycStatus = Enums<'kyc_status'>;
-export type UserStatus = Enums<'user_status'>;
+export const KYC_DOCUMENT_TYPES = [
+  'ID_PROOF',
+  'ADDRESS_PROOF',
+  'TAX_ID',
+  'INCORPORATION_CERTIFICATE',
+  'AUTHORISATION_LETTER',
+] as const;
+export type KycDocumentType = (typeof KYC_DOCUMENT_TYPES)[number];
 
-export const FILE_PURPOSES = DB_ENUMS.file_purpose;
-export type FilePurpose = Enums<'file_purpose'>;
-export type FileScanStatus = Enums<'file_scan_status'>;
+export type KycSubmissionStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 
-export const PREFERENCE_TYPES = DB_ENUMS.preference_type;
-export type PreferenceType = Enums<'preference_type'>;
-
-export const LOOKUP_TYPES = DB_ENUMS.lookup_type;
-export type LookupType = Enums<'lookup_type'>;
-
-export const KYC_DOCUMENT_TYPES = DB_ENUMS.kyc_document_type;
-export type KycDocumentType = Enums<'kyc_document_type'>;
-export type KycSubmissionStatus = Enums<'kyc_submission_status'>;
-
-export const MARKET_COUNTRIES = DB_ENUMS.market_country;
+// Shared with catalog and reviews, so they come from the public schema's enums.
+export const MARKET_COUNTRIES = Constants.public.Enums.market_country;
 export type MarketCountry = Enums<'market_country'>;
 
-export const DISPLAY_MODES = DB_ENUMS.display_mode;
+export const DISPLAY_MODES = Constants.public.Enums.display_mode;
 export type DisplayMode = Enums<'display_mode'>;
 
-// Ratings
-export const RATING_FLAGS = DB_ENUMS.rating_flag;
-export type RatingFlag = Enums<'rating_flag'>;
+// Ratings and Representations. They match the CHECK constraints in
+// supabase/migrations/20261027170000_ratings.sql and 20261027180000_representations.sql.
 
-export const RATING_STATUSES = DB_ENUMS.rating_status;
-export type RatingStatus = Enums<'rating_status'>;
+export const RATING_FLAGS = ['POSITIVE', 'NEUTRAL', 'NEGATIVE'] as const;
+export type RatingFlag = (typeof RATING_FLAGS)[number];
 
-// Representations
-export const REPRESENTATION_TRACK_STATUSES = DB_ENUMS.representation_track_status;
-export type RepresentationTrackStatus = Enums<'representation_track_status'>;
+export const RATING_STATUSES = [
+  'PENDING_MODERATION',
+  'PUBLISHED',
+  'CHANGES_REQUESTED',
+  'REJECTED',
+  'REMOVED',
+] as const;
+export type RatingStatus = (typeof RATING_STATUSES)[number];
 
-export type RepresentationDocumentType = Enums<'representation_document_type'>;
+/** The 9-step petition track, in order. */
+export const REPRESENTATION_TRACK_STATUSES = [
+  'OPEN',
+  'CLOSING_SOON',
+  'CLOSED',
+  'UNDER_REVIEW',
+  'SUBMITTED_TO_REGULATOR',
+  'MEETING_REQUESTED',
+  'MEETING_SCHEDULED',
+  'REGULATOR_RESPONDED',
+  'RESOLVED',
+] as const;
+export type RepresentationTrackStatus = (typeof REPRESENTATION_TRACK_STATUSES)[number];
+
+export type RepresentationDocumentType =
+  'EVIDENCE' | 'SUBMISSION_PACK' | 'REGULATOR_RESPONSE' | 'MEETING_MINUTES';

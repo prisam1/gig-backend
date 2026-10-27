@@ -1,7 +1,8 @@
 import { z } from 'zod';
-import { containsPattern, pageRange, RANGE_NOT_SATISFIABLE } from '../../lib/http';
-import { DatabaseError, supabaseAdmin, unwrap } from '../../lib/supabase';
-import type { Views } from '../../types/database';
+import { audit } from '../../lib/audit';
+import { sql, transaction } from '../../lib/db';
+import { containsPattern } from '../../lib/http';
+import type { ClientContext } from '../../middleware/requestContext';
 import type { RatingFlag, RatingStatus } from '../../types/domain';
 import type { IssuerSort, ListIssuersQuery, ListMyRatingsQuery } from './ratings.schemas';
 
@@ -29,13 +30,15 @@ export interface Issuer {
   assetType: string;
   exchange: string | null;
   isListed: boolean;
+  /** YYYY-MM-DD */
   openDate: string | null;
+  /** YYYY-MM-DD */
   closeDate: string | null;
   offer: IssuerOffer;
   tags: string[];
   ratingCount: number;
   averageScore: number;
-  createdAt: string;
+  createdAt: Date;
 }
 
 export type ScoreDistribution = Record<'1' | '2' | '3' | '4' | '5', number>;
@@ -50,17 +53,16 @@ export interface IssuerStats {
   factorBreakdown: Record<string, FlagShares>;
   /** Number of published ratings that picked each risk code. */
   riskCounts: Record<string, number>;
-  lastRatingAt: string | null;
+  lastRatingAt: Date | null;
 }
 
-// A type alias (not an interface) so it is assignable to the `Json` RPC argument.
-export type FactorFlag = {
+export interface FactorFlag {
   code: string;
   flag: RatingFlag;
-};
+}
 
 export interface NewRating {
-  userId: number;
+  userId: string;
   issuerId: string;
   overallScore: number;
   factors: FactorFlag[];
@@ -75,7 +77,7 @@ export interface StoredRating {
   status: RatingStatus;
   overallScore: number;
   moderationNote: string | null;
-  createdAt: string;
+  createdAt: Date;
   issuer: { id: string; name: string };
   factors: FactorFlag[];
   riskCodes: string[];
@@ -94,49 +96,90 @@ export const RATING_INDEXES = {
   idempotencyKey: 'issuer_ratings_idempotency_key_idx',
 } as const;
 
+export const EMPTY_DISTRIBUTION: ScoreDistribution = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
+
 // ---------------------------------------------------------------------------------------------
 // Mapping
 // ---------------------------------------------------------------------------------------------
 
-type IssuerCardRow = Views<'issuer_cards'>;
-
-/** View columns are typed nullable; these are guaranteed by the underlying table. */
-function required<T>(value: T | null, column: string): T {
-  if (value === null) throw new Error(`issuer_cards.${column} is unexpectedly null`);
-  return value;
+interface IssuerRow extends IssuerOffer {
+  id: string;
+  slug: string;
+  name: string;
+  instrument: string;
+  assetType: string;
+  exchange: string | null;
+  isListed: boolean;
+  openDate: string | null;
+  closeDate: string | null;
+  tags: string[];
+  ratingCount: number;
+  averageScore: number;
+  createdAt: Date;
 }
 
-function toIssuer(row: IssuerCardRow): Issuer {
+function toIssuer(row: IssuerRow): Issuer {
   return {
-    id: required(row.id, 'id'),
-    slug: required(row.slug, 'slug'),
-    name: required(row.name, 'name'),
-    instrument: required(row.instrument, 'instrument'),
-    assetType: required(row.asset_type, 'asset_type'),
+    id: row.id,
+    slug: row.slug,
+    name: row.name,
+    instrument: row.instrument,
+    assetType: row.assetType,
     exchange: row.exchange,
-    isListed: row.is_listed ?? false,
-    openDate: row.open_date,
-    closeDate: row.close_date,
+    isListed: row.isListed,
+    openDate: row.openDate,
+    closeDate: row.closeDate,
     offer: {
-      minLot: row.min_lot,
-      lotUnit: row.lot_unit ?? 'shares',
-      priceMin: row.price_min,
-      priceMax: row.price_max,
-      offerSize: row.offer_size,
-      currency: row.currency ?? 'INR',
-      useOfFunds: row.use_of_funds,
-      lockIn: row.lock_in,
-      prePostRatio: row.pre_post_ratio,
+      minLot: row.minLot,
+      lotUnit: row.lotUnit,
+      priceMin: row.priceMin,
+      priceMax: row.priceMax,
+      offerSize: row.offerSize,
+      currency: row.currency,
+      useOfFunds: row.useOfFunds,
+      lockIn: row.lockIn,
+      prePostRatio: row.prePostRatio,
     },
-    tags: row.tags ?? [],
-    ratingCount: row.rating_count ?? 0,
-    averageScore: row.average_score ?? 0,
-    createdAt: required(row.created_at, 'created_at'),
+    tags: row.tags,
+    ratingCount: row.ratingCount,
+    averageScore: row.averageScore,
+    createdAt: row.createdAt,
   };
 }
 
-// The jsonb columns of issuer_stats are written by recompute_issuer_stats(); parse them rather
-// than trusting their shape.
+// Dates as YYYY-MM-DD text and numerics as numbers (postgres.js returns numeric as a string).
+const issuerColumns = () => sql`
+  id, slug, name, instrument, asset_type, exchange, is_listed,
+  open_date::text as open_date, close_date::text as close_date,
+  min_lot, lot_unit, price_min::float8 as price_min, price_max::float8 as price_max,
+  offer_size::float8 as offer_size, currency, use_of_funds, lock_in, pre_post_ratio,
+  tags, rating_count, average_score::float8 as average_score, created_at`;
+
+function issuerOrder(sort: IssuerSort) {
+  switch (sort) {
+    case 'recent':
+      return sql`open_date desc nulls last, created_at desc`;
+    case 'closing_soon':
+      return sql`close_date asc nulls last`;
+    case 'top_rated':
+      return sql`average_score desc, rating_count desc`;
+    case 'most_rated':
+      return sql`rating_count desc, average_score desc`;
+  }
+}
+
+function issuerFilters(query: ListIssuersQuery) {
+  const { q, filter } = query;
+  return sql`
+    where true
+    ${q ? sql`and search_text like ${containsPattern(q)}` : sql``}
+    ${filter?.assetType?.length ? sql`and asset_type in ${sql(filter.assetType)}` : sql``}
+    ${filter?.listed !== undefined ? sql`and is_listed = ${filter.listed}` : sql``}`;
+}
+
+// The jsonb columns of issuer_stats are written by app.recompute_issuer_stats(); parse them rather
+// than trusting their shape. They are read as text because the camelCase transform would also
+// rename their keys (factor codes such as BUSINESS_OF_COMPANY).
 const scoreDistributionSchema = z.object({
   '1': z.number(),
   '2': z.number(),
@@ -152,190 +195,135 @@ const flagSharesSchema = z.object({
 const factorBreakdownSchema = z.record(z.string(), flagSharesSchema);
 const riskCountsSchema = z.record(z.string(), z.number().int());
 
-export const EMPTY_DISTRIBUTION: ScoreDistribution = { '1': 0, '2': 0, '3': 0, '4': 0, '5': 0 };
+const json = <S extends z.ZodType>(schema: S, text: string): z.output<S> =>
+  schema.parse(JSON.parse(text));
 
-const ISSUER_ORDER: Record<IssuerSort, [keyof IssuerCardRow & string, boolean][]> = {
-  recent: [
-    ['open_date', false],
-    ['created_at', false],
-  ],
-  closing_soon: [['close_date', true]],
-  top_rated: [
-    ['average_score', false],
-    ['rating_count', false],
-  ],
-  most_rated: [
-    ['rating_count', false],
-    ['average_score', false],
-  ],
-};
-
-const STORED_RATING_COLUMNS = `public_id, receipt_no, status, overall_score, moderation_note, created_at,
-  issuer:issuers!inner(id, name),
-  issuer_rating_factors(factor_code, flag),
-  issuer_rating_risks(risk_code)`;
+interface StatsRow {
+  ratingCount: number;
+  averageScore: number;
+  weightedScore: number;
+  scoreDistribution: string;
+  factorBreakdown: string;
+  riskCounts: string;
+  lastRatingAt: Date | null;
+}
 
 // ---------------------------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------------------------
 
-function isRangeError(error: unknown): boolean {
-  return error instanceof DatabaseError && error.code === RANGE_NOT_SATISFIABLE;
-}
-
 export const ratingsRepository = {
   async findIssuers(query: ListIssuersQuery): Promise<Page<Issuer>> {
-    const build = (head: boolean) => {
-      let q = supabaseAdmin.from('issuer_cards').select('*', { count: 'exact', head });
-      if (query.q) q = q.ilike('search_text', containsPattern(query.q));
-      if (query.filter?.assetType?.length) q = q.in('asset_type', query.filter.assetType);
-      if (query.filter?.listed !== undefined) q = q.eq('is_listed', query.filter.listed);
-      return q;
-    };
-
-    let request = build(false);
-    for (const [column, ascending] of ISSUER_ORDER[query.sort]) {
-      request = request.order(column, { ascending, nullsFirst: false });
-    }
-    const { from, to } = pageRange(query);
-    const result = await request.order('id').range(from, to);
-
-    try {
-      const rows = unwrap(result);
-      return { items: rows.map(toIssuer), total: result.count ?? rows.length };
-    } catch (error) {
-      if (!isRangeError(error)) throw error;
-      const head = await build(true);
-      unwrap(head);
-      return { items: [], total: head.count ?? 0 };
-    }
+    const offset = (query.page - 1) * query.pageSize;
+    const [rows, [count]] = await Promise.all([
+      sql<IssuerRow[]>`
+        select ${issuerColumns()} from app.issuer_cards
+        ${issuerFilters(query)}
+        order by ${issuerOrder(query.sort)}, id
+        limit ${query.pageSize} offset ${offset}`,
+      sql<{ total: number }[]>`
+        select count(*)::int as total from app.issuer_cards ${issuerFilters(query)}`,
+    ]);
+    return { items: rows.map(toIssuer), total: count?.total ?? 0 };
   },
 
   async findIssuer(id: string): Promise<Issuer | null> {
-    const row = unwrap(
-      await supabaseAdmin.from('issuer_cards').select('*').eq('id', id).maybeSingle(),
-    );
-    return row && toIssuer(row);
+    const [row] = await sql<IssuerRow[]>`
+      select ${issuerColumns()} from app.issuer_cards where id = ${id}`;
+    return row ? toIssuer(row) : null;
   },
 
   async findStats(issuerId: string): Promise<IssuerStats | null> {
-    const row = unwrap(
-      await supabaseAdmin.from('issuer_stats').select('*').eq('issuer_id', issuerId).maybeSingle(),
-    );
+    const [row] = await sql<StatsRow[]>`
+      select rating_count, average_score::float8 as average_score,
+             weighted_score::float8 as weighted_score,
+             score_distribution::text as score_distribution,
+             factor_breakdown::text as factor_breakdown,
+             risk_counts::text as risk_counts, last_rating_at
+      from app.issuer_stats where issuer_id = ${issuerId}`;
     if (!row) return null;
 
     return {
-      ratingCount: row.rating_count,
-      averageScore: row.average_score,
-      weightedScore: row.weighted_score,
-      scoreDistribution: scoreDistributionSchema.parse(row.score_distribution),
-      factorBreakdown: factorBreakdownSchema.parse(row.factor_breakdown),
-      riskCounts: riskCountsSchema.parse(row.risk_counts),
-      lastRatingAt: row.last_rating_at,
+      ratingCount: row.ratingCount,
+      averageScore: row.averageScore,
+      weightedScore: row.weightedScore,
+      scoreDistribution: json(scoreDistributionSchema, row.scoreDistribution),
+      factorBreakdown: json(factorBreakdownSchema, row.factorBreakdown),
+      riskCounts: json(riskCountsSchema, row.riskCounts),
+      lastRatingAt: row.lastRatingAt,
     };
   },
 
-  /** Saves the rating with its factor flags and risks in one transaction. */
-  async submit(rating: NewRating): Promise<{ publicId: string }> {
-    const row = unwrap(
-      await supabaseAdmin
-        .rpc('submit_issuer_rating', {
-          p_user_id: rating.userId,
-          p_issuer_id: rating.issuerId,
-          p_overall_score: rating.overallScore,
-          p_factors: rating.factors,
-          p_risk_codes: rating.riskCodes,
-          p_idempotency_key: rating.idempotencyKey,
-          p_request_hash: rating.requestHash,
-        })
-        .single(),
-    );
-    return { publicId: row.public_id };
+  /** Saves the rating with its factor flags and risks, and audits it, in one transaction. */
+  async submit(rating: NewRating, ctx: ClientContext): Promise<string> {
+    return transaction(async (tx) => {
+      const [created] = await tx<{ id: string; publicId: string }[]>`
+        insert into app.issuer_ratings (issuer_id, user_id, overall_score, idempotency_key, request_hash)
+        values (${rating.issuerId}, ${rating.userId}, ${rating.overallScore}, ${rating.idempotencyKey},
+                ${rating.requestHash})
+        returning id, public_id`;
+      const ratingId = created!.id;
+
+      const factors = rating.factors.map((f) => ({ ratingId, factorCode: f.code, flag: f.flag }));
+      await tx`insert into app.issuer_rating_factors ${tx(factors, 'ratingId', 'factorCode', 'flag')}`;
+      const risks = rating.riskCodes.map((riskCode) => ({ ratingId, riskCode }));
+      await tx`insert into app.issuer_rating_risks ${tx(risks, 'ratingId', 'riskCode')}`;
+
+      await audit(
+        ctx,
+        'rating.submitted',
+        { userId: rating.userId, metadata: { rating: created!.publicId, issuer: rating.issuerId } },
+        tx,
+      );
+      return created!.publicId;
+    });
   },
 
   /** The rating a user already created with this Idempotency-Key, if any. */
   async findByIdempotencyKey(
-    userId: number,
+    userId: string,
     idempotencyKey: string,
   ): Promise<{ publicId: string; requestHash: string | null } | null> {
-    const row = unwrap(
-      await supabaseAdmin
-        .from('issuer_ratings')
-        .select('public_id, request_hash')
-        .eq('user_id', userId)
-        .eq('idempotency_key', idempotencyKey)
-        .maybeSingle(),
-    );
-    return row && { publicId: row.public_id, requestHash: row.request_hash };
+    const [row] = await sql<{ publicId: string; requestHash: string | null }[]>`
+      select public_id, request_hash from app.issuer_ratings
+      where user_id = ${userId} and idempotency_key = ${idempotencyKey}`;
+    return row ?? null;
   },
 
-  /** One of the user's own ratings, with its factors and risks. */
-  async findOwn(userId: number, publicId: string): Promise<StoredRating | null> {
-    const row = unwrap(
-      await supabaseAdmin
-        .from('issuer_ratings')
-        .select(STORED_RATING_COLUMNS)
-        .eq('user_id', userId)
-        .eq('public_id', publicId)
-        .is('deleted_at', null)
-        .maybeSingle(),
-    );
-    if (!row) return null;
-
-    return {
-      publicId: row.public_id,
-      receiptNo: row.receipt_no,
-      status: row.status,
-      overallScore: row.overall_score,
-      moderationNote: row.moderation_note,
-      createdAt: row.created_at,
-      issuer: { id: row.issuer.id, name: row.issuer.name },
-      factors: row.issuer_rating_factors.map((f) => ({ code: f.factor_code, flag: f.flag })),
-      riskCodes: row.issuer_rating_risks.map((r) => r.risk_code),
-    };
+  /** One of the user's own, not-deleted ratings, with its factors and risks. */
+  async findOwn(userId: string, publicId: string): Promise<StoredRating | null> {
+    const [row] = await sql<StoredRating[]>`
+      select r.public_id, r.receipt_no, r.status, r.overall_score, r.moderation_note, r.created_at,
+             json_build_object('id', i.id, 'name', i.name) as issuer,
+             (select coalesce(json_agg(json_build_object('code', f.factor_code, 'flag', f.flag)), '[]')
+              from app.issuer_rating_factors f where f.rating_id = r.id) as factors,
+             array(select k.risk_code from app.issuer_rating_risks k where k.rating_id = r.id
+                   order by k.created_at, k.risk_code) as risk_codes
+      from app.issuer_ratings r
+      join public.issuers i on i.id = r.issuer_id
+      where r.user_id = ${userId} and r.public_id = ${publicId} and r.deleted_at is null`;
+    return row ?? null;
   },
 
-  async findMine(userId: number, query: ListMyRatingsQuery): Promise<Page<MyRating>> {
-    const build = (head: boolean) => {
-      let q = supabaseAdmin
-        .from('issuer_ratings')
-        .select(
-          'public_id, receipt_no, status, overall_score, created_at, issuer:issuers!inner(id, name)',
-          {
-            count: 'exact',
-            head,
-          },
-        )
-        .eq('user_id', userId)
-        .is('deleted_at', null);
-      if (query.status?.length) q = q.in('status', query.status);
-      return q;
-    };
+  async findMine(userId: string, query: ListMyRatingsQuery): Promise<Page<MyRating>> {
+    const offset = (query.page - 1) * query.pageSize;
+    const filters = () => sql`
+      where r.user_id = ${userId} and r.deleted_at is null
+      ${query.status?.length ? sql`and r.status in ${sql(query.status)}` : sql``}`;
 
-    const { from, to } = pageRange(query);
-    const result = await build(false)
-      .order('created_at', { ascending: false })
-      .order('id')
-      .range(from, to);
-
-    try {
-      const rows = unwrap(result);
-      return {
-        items: rows.map((row) => ({
-          publicId: row.public_id,
-          receiptNo: row.receipt_no,
-          status: row.status,
-          overallScore: row.overall_score,
-          createdAt: row.created_at,
-          issuer: { id: row.issuer.id, name: row.issuer.name },
-        })),
-        total: result.count ?? rows.length,
-      };
-    } catch (error) {
-      if (!isRangeError(error)) throw error;
-      const head = await build(true);
-      unwrap(head);
-      return { items: [], total: head.count ?? 0 };
-    }
+    const [rows, [count]] = await Promise.all([
+      sql<MyRating[]>`
+        select r.public_id, r.receipt_no, r.status, r.overall_score, r.created_at,
+               json_build_object('id', i.id, 'name', i.name) as issuer
+        from app.issuer_ratings r
+        join public.issuers i on i.id = r.issuer_id
+        ${filters()}
+        order by r.created_at desc, r.id
+        limit ${query.pageSize} offset ${offset}`,
+      sql<
+        { total: number }[]
+      >`select count(*)::int as total from app.issuer_ratings r ${filters()}`,
+    ]);
+    return { items: rows, total: count?.total ?? 0 };
   },
 };

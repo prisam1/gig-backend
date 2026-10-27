@@ -1,11 +1,13 @@
+import { isUniqueViolationOf } from '../../lib/db';
 import type { PageMeta } from '../../lib/http';
 import { hashRequest, type IdempotentResult } from '../../lib/idempotency';
-import { hasFullAccess } from '../../lib/membership';
-import { DatabaseError, PG_UNIQUE_VIOLATION } from '../../lib/supabase';
+import type { Member } from '../../lib/membership';
+import { consume, LIMITS } from '../../lib/rateLimit';
+import type { AuthUser } from '../../middleware/auth';
 import { HttpError, validationError, type FieldErrors } from '../../middleware/errorHandler';
+import type { ClientContext } from '../../middleware/requestContext';
 import type { RatingFlag, RatingStatus, Tier } from '../../types/domain';
-import { lookupsRepository, type LookupOption } from '../lookups/lookups.repository';
-import { usersRepository, type User } from '../users/users.repository';
+import { listOptions, type Option } from '../users/users.service';
 import {
   EMPTY_DISTRIBUTION,
   RATING_INDEXES,
@@ -59,7 +61,7 @@ export interface RatingSummary {
     distribution: ScoreDistribution;
     factors: FactorBreakdown[];
     riskFactors: RiskShare[];
-    lastRatedAt: string | null;
+    lastRatedAt: Date | null;
   } | null;
 }
 
@@ -73,7 +75,7 @@ export interface RatingReceipt {
   factors: { code: string; label: string; flag: RatingFlag }[];
   riskFactors: { code: string; label: string }[];
   rater: { name: string | null; tier: Tier };
-  createdAt: string;
+  createdAt: Date;
 }
 
 export interface MyRatingItem {
@@ -82,7 +84,7 @@ export interface MyRatingItem {
   status: RatingStatus;
   issuer: { id: string; name: string };
   overallScore: number;
-  createdAt: string;
+  createdAt: Date;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -96,7 +98,7 @@ function toIssuerSummary({ ratingCount, averageScore, ...issuer }: Issuer): Issu
   };
 }
 
-function labelLookup(options: LookupOption[]): (code: string) => string {
+function labelLookup(options: Option[]): (code: string) => string {
   const labels = new Map(options.map((option) => [option.code, option.label]));
   return (code) => labels.get(code) ?? code;
 }
@@ -110,8 +112,8 @@ async function requireIssuer(issuerId: string): Promise<Issuer> {
 /** Field errors for factor and risk codes that are not the active options. */
 function checkCodes(
   input: SubmitRatingInput,
-  factorOptions: LookupOption[],
-  riskOptions: LookupOption[],
+  factorOptions: Option[],
+  riskOptions: Option[],
 ): FieldErrors {
   const fields: FieldErrors = {};
   const factorCodes = new Set(factorOptions.map((o) => o.code));
@@ -134,8 +136,7 @@ function checkCodes(
 
 function toReceipt(
   rating: StoredRating,
-  user: User,
-  raterName: string | null,
+  user: Member,
   factorLabel: (code: string) => string,
   riskLabel: (code: string) => string,
   factorOrder: string[],
@@ -152,26 +153,18 @@ function toReceipt(
       .sort((a, b) => order(a.code) - order(b.code))
       .map((f) => ({ code: f.code, label: factorLabel(f.code), flag: f.flag })),
     riskFactors: rating.riskCodes.map((code) => ({ code, label: riskLabel(code) })),
-    rater: { name: raterName, tier: user.tier },
+    rater: { name: user.fullName.trim() || null, tier: user.tier },
     createdAt: rating.createdAt,
   };
 }
 
-function isUniqueViolationOf(error: unknown, index: string): boolean {
-  return (
-    error instanceof DatabaseError &&
-    error.code === PG_UNIQUE_VIOLATION &&
-    error.message.includes(index)
-  );
-}
-
 /** The rating this key already created, or null; a reused key with another body is a 409. */
 async function replay(
-  user: User,
+  user: Member,
   idempotencyKey: string,
   requestHash: string,
 ): Promise<IdempotentResult<RatingReceipt> | null> {
-  const existing = await ratingsRepository.findByIdempotencyKey(user.id, idempotencyKey);
+  const existing = await ratingsRepository.findByIdempotencyKey(user.userId, idempotencyKey);
   if (!existing) return null;
   if (existing.requestHash !== requestHash) {
     throw new HttpError(409, 'Idempotency-Key was already used for a different request', {
@@ -181,19 +174,17 @@ async function replay(
   return { result: await receipt(user, existing.publicId), replayed: true };
 }
 
-async function receipt(user: User, publicId: string): Promise<RatingReceipt> {
-  const [rating, profile, factorOptions, riskOptions] = await Promise.all([
-    ratingsRepository.findOwn(user.id, publicId),
-    usersRepository.findProfile(user.id),
-    lookupsRepository.findActive('RATING_FACTOR'),
-    lookupsRepository.findActive('RISK_FACTOR'),
+async function receipt(user: Member, publicId: string): Promise<RatingReceipt> {
+  const [rating, factorOptions, riskOptions] = await Promise.all([
+    ratingsRepository.findOwn(user.userId, publicId),
+    listOptions('RATING_FACTOR'),
+    listOptions('RISK_FACTOR'),
   ]);
   if (!rating) throw new Error(`Rating ${publicId} could not be read back`);
 
   return toReceipt(
     rating,
     user,
-    profile?.name?.trim() || null,
     labelLookup(factorOptions),
     labelLookup(riskOptions),
     factorOptions.map((o) => o.code),
@@ -218,11 +209,11 @@ export const ratingsService = {
   },
 
   /** Public aggregate score; verified Prive and Institutional members also get the breakdown. */
-  async getRatingSummary(issuerId: string, viewer: User | undefined): Promise<RatingSummary> {
+  async getRatingSummary(issuerId: string, viewer: AuthUser | undefined): Promise<RatingSummary> {
     await requireIssuer(issuerId);
     const stats = await ratingsRepository.findStats(issuerId);
     const ratingCount = stats?.ratingCount ?? 0;
-    const access: AccessLevel = viewer && hasFullAccess(viewer) ? 'FULL' : 'SUMMARY';
+    const access: AccessLevel = viewer?.hasFullAccess ? 'FULL' : 'SUMMARY';
 
     const summary = {
       issuerId,
@@ -233,8 +224,8 @@ export const ratingsService = {
     if (access === 'SUMMARY') return { ...summary, breakdown: null };
 
     const [factorOptions, riskOptions] = await Promise.all([
-      lookupsRepository.findActive('RATING_FACTOR'),
-      lookupsRepository.findActive('RISK_FACTOR'),
+      listOptions('RATING_FACTOR'),
+      listOptions('RISK_FACTOR'),
     ]);
     const riskCounts = stats?.riskCounts ?? {};
 
@@ -270,33 +261,38 @@ export const ratingsService = {
    * Idempotency-Key and body returns the same receipt.
    */
   async submitRating(
-    user: User,
+    user: Member,
     issuerId: string,
     input: SubmitRatingInput,
     idempotencyKey: string,
+    ctx: ClientContext,
   ): Promise<IdempotentResult<RatingReceipt>> {
     const requestHash = hashRequest({ issuerId, ...input });
     const previous = await replay(user, idempotencyKey, requestHash);
     if (previous) return previous;
+    await consume(LIMITS.ratingSubmitPerUser, user.userPublicId);
 
     await requireIssuer(issuerId);
     const [factorOptions, riskOptions] = await Promise.all([
-      lookupsRepository.findActive('RATING_FACTOR'),
-      lookupsRepository.findActive('RISK_FACTOR'),
+      listOptions('RATING_FACTOR'),
+      listOptions('RISK_FACTOR'),
     ]);
     const fields = checkCodes(input, factorOptions, riskOptions);
     if (Object.keys(fields).length > 0) throw validationError(fields);
 
     try {
-      const { publicId } = await ratingsRepository.submit({
-        userId: user.id,
-        issuerId,
-        overallScore: input.overallScore,
-        factors: input.factors,
-        riskCodes: input.riskFactors,
-        idempotencyKey,
-        requestHash,
-      });
+      const publicId = await ratingsRepository.submit(
+        {
+          userId: user.userId,
+          issuerId,
+          overallScore: input.overallScore,
+          factors: input.factors,
+          riskCodes: input.riskFactors,
+          idempotencyKey,
+          requestHash,
+        },
+        ctx,
+      );
       return { result: await receipt(user, publicId), replayed: false };
     } catch (error) {
       if (isUniqueViolationOf(error, RATING_INDEXES.onePerUser)) {
@@ -309,22 +305,15 @@ export const ratingsService = {
         const raced = await replay(user, idempotencyKey, requestHash);
         if (raced) return raced;
       }
-      // The factor or risk options changed between validation and saving.
-      if (error instanceof DatabaseError && error.message.includes('RATING_FACTORS_INCOMPLETE')) {
-        throw validationError({ factors: 'Flag every rating factor' });
-      }
-      if (error instanceof DatabaseError && error.message.includes('RATING_RISKS_INVALID')) {
-        throw validationError({ riskFactors: 'Select exactly 3 risk factors' });
-      }
       throw error;
     }
   },
 
   async listMyRatings(
-    user: User,
+    user: Member,
     query: ListMyRatingsQuery,
   ): Promise<{ items: MyRatingItem[]; meta: PageMeta }> {
-    const { items, total } = await ratingsRepository.findMine(user.id, query);
+    const { items, total } = await ratingsRepository.findMine(user.userId, query);
     return {
       items: items.map((rating) => ({
         id: rating.publicId,

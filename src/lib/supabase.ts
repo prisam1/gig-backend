@@ -1,33 +1,10 @@
-import { createClient, type PostgrestSingleResponse } from '@supabase/supabase-js';
+import { createClient } from '@supabase/supabase-js';
 import { env } from '../config/env';
 import type { Database } from '../types/database';
 
-// Server-side admin client: bypasses Row Level Security. Never expose this key to the app.
-export const supabaseAdmin = createClient<Database>(
-  env.SUPABASE_URL,
-  env.SUPABASE_SERVICE_ROLE_KEY,
-  {
-    auth: { autoRefreshToken: false, persistSession: false },
-  },
-);
-
-/** Postgres error codes the services react to. */
-export const PG_UNIQUE_VIOLATION = '23505';
-
-export class DatabaseError extends Error {
-  constructor(
-    public readonly code: string,
-    message: string,
-  ) {
-    super(`Database error: ${message}`);
-  }
-}
-
-/**
- * Returns query data, or throws a DatabaseError that keeps the Postgres error code.
- * The data type is inferred from the typed client, so callers need no annotations.
- */
-export function unwrap<T>(result: PostgrestSingleResponse<T>): T {
-  if (result.error) throw new DatabaseError(result.error.code, result.error.message);
-  return result.data;
-}
+// Server-side admin client for the catalog and reviews tables (public schema) and Supabase Storage.
+// Bypasses Row Level Security; never expose this key. The auth module's tables in the private
+// "app" schema go through src/lib/db.ts instead.
+export const supabaseAdmin = createClient<Database>(env.SUPABASE_URL, env.SUPABASE_SERVICE_ROLE_KEY, {
+  auth: { autoRefreshToken: false, persistSession: false },
+});

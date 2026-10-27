@@ -15,14 +15,8 @@ vi.mock('../../src/lib/supabase', async () => {
   return { supabaseAdmin: fake.client };
 });
 vi.mock('../../src/lib/auth', async () => {
-  const { fakeAuthProvider } = await import('../helpers/fakeSupabase');
-  return { authProvider: fakeAuthProvider };
-});
-vi.mock('../../src/modules/users/users.repository', async (importOriginal) => {
-  const { fakeUsersRepository } = await import('../helpers/fakeSupabase');
-  const original =
-    await importOriginal<typeof import('../../src/modules/users/users.repository')>();
-  return { ...original, usersRepository: { ...original.usersRepository, ...fakeUsersRepository } };
+  const { fakeLoadMember } = await import('../helpers/fakeSupabase');
+  return { authProvider: { loadMember: fakeLoadMember } };
 });
 
 const app = createApp();

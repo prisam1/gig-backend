@@ -1,21 +1,25 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { DatabaseError, PG_UNIQUE_VIOLATION } from '../../src/lib/supabase';
-import { lookupsRepository, type LookupOption } from '../../src/modules/lookups/lookups.repository';
+import type { Member } from '../../src/lib/membership';
 import {
   ratingsRepository,
   type Issuer,
   type IssuerStats,
   type StoredRating,
 } from '../../src/modules/ratings/ratings.repository';
-import { usersRepository } from '../../src/modules/users/users.repository';
-import type { User } from '../../src/modules/users/users.repository';
+import { listOptions, type Option } from '../../src/modules/users/users.service';
 import { AUTH_HEADER, app, makeUser, signInAs } from '../helpers';
+import { asJson, uniqueViolation } from '../helpers/postgres';
+
+vi.mock('../../src/modules/users/users.service', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../../src/modules/users/users.service')>()),
+  listOptions: vi.fn(),
+}));
 
 const ISSUER_ID = '9a1c0000-0000-4000-8000-000000000001';
 const RATING_ID = '7b2d0000-0000-4000-8000-000000000001';
 
-const FACTORS: LookupOption[] = [
+const FACTORS: Option[] = [
   ['GENERAL', 'General'],
   ['BUSINESS_OF_COMPANY', 'Business of the company'],
   ['INDUSTRY', 'Industry in which company operates'],
@@ -28,7 +32,7 @@ const FACTORS: LookupOption[] = [
   ['CONTINGENT_LIABILITIES', 'Contingent liabilities'],
 ].map(([code, label]) => ({ code: code!, label: label! }));
 
-const RISKS: LookupOption[] = ['Credit', 'Market', 'Liquidity', 'Legal', 'Fraud', 'Regulatory'].map(
+const RISKS: Option[] = ['Credit', 'Market', 'Liquidity', 'Legal', 'Fraud', 'Regulatory'].map(
   (label) => ({ code: label.toUpperCase(), label }),
 );
 
@@ -56,7 +60,7 @@ const issuer: Issuer = {
   tags: [],
   ratingCount: 2,
   averageScore: 3.5,
-  createdAt: '2026-10-01T00:00:00Z',
+  createdAt: new Date('2026-10-01T00:00:00.000Z'),
 };
 
 const stats: IssuerStats = {
@@ -66,7 +70,7 @@ const stats: IssuerStats = {
   scoreDistribution: { '1': 0, '2': 1, '3': 0, '4': 0, '5': 1 },
   factorBreakdown: { GENERAL: { POSITIVE: 50, NEUTRAL: 0, NEGATIVE: 50 } },
   riskCounts: { CREDIT: 2, LEGAL: 1 },
-  lastRatingAt: '2026-10-20T00:00:00Z',
+  lastRatingAt: new Date('2026-10-20T00:00:00.000Z'),
 };
 
 const validBody = {
@@ -81,17 +85,18 @@ const storedRating: StoredRating = {
   status: 'PENDING_MODERATION',
   overallScore: 4,
   moderationNote: null,
-  createdAt: '2026-10-27T10:00:00Z',
+  createdAt: new Date('2026-10-27T10:00:00.000Z'),
   issuer: { id: ISSUER_ID, name: 'Sovereign Alpha Yield' },
   // Stored order differs from the app's factor order; the receipt follows the app's order.
   factors: [...validBody.factors].reverse(),
   riskCodes: ['CREDIT', 'MARKET', 'LIQUIDITY'],
 };
 
-const verifiedPrive = () => makeUser({ tier: 'PRIVE', kycStatus: 'APPROVED' });
+const verifiedPrive = () =>
+  makeUser({ tier: 'PRIVE', kycStatus: 'APPROVED', fullName: 'Shreya Mehta' });
 
 function stubLookups() {
-  vi.spyOn(lookupsRepository, 'findActive').mockImplementation(async (type) =>
+  vi.mocked(listOptions).mockImplementation(async (type) =>
     type === 'RATING_FACTOR' ? FACTORS : type === 'RISK_FACTOR' ? RISKS : [],
   );
 }
@@ -100,16 +105,8 @@ function stubSubmission() {
   stubLookups();
   vi.spyOn(ratingsRepository, 'findByIdempotencyKey').mockResolvedValue(null);
   vi.spyOn(ratingsRepository, 'findIssuer').mockResolvedValue(issuer);
-  vi.spyOn(usersRepository, 'findProfile').mockResolvedValue({
-    name: 'Shreya Mehta',
-    experience: null,
-    jobProfile: null,
-    otherJob: null,
-    location: null,
-    avatar: null,
-  });
   vi.spyOn(ratingsRepository, 'findOwn').mockResolvedValue(storedRating);
-  return vi.spyOn(ratingsRepository, 'submit').mockResolvedValue({ publicId: RATING_ID });
+  return vi.spyOn(ratingsRepository, 'submit').mockResolvedValue(RATING_ID);
 }
 
 function submit(body: object = validBody, key: string | null = 'rating-key-0001') {
@@ -136,7 +133,9 @@ describe('GET /issuers', () => {
     expect(res.status).toBe(200);
     expect(res.body.meta).toEqual({ page: 1, pageSize: 20, total: 2 });
     const { ratingCount: _c, averageScore: _a, ...offerDetails } = issuer;
-    expect(res.body.data[0]).toEqual({ ...offerDetails, rating: { count: 2, averageScore: 3.5 } });
+    expect(res.body.data[0]).toEqual(
+      asJson({ ...offerDetails, rating: { count: 2, averageScore: 3.5 } }),
+    );
     // No average until the first published rating.
     expect(res.body.data[1].rating).toEqual({ count: 0, averageScore: null });
     expect(find).toHaveBeenCalledWith({
@@ -205,7 +204,7 @@ describe('GET /issuers/:id/rating-summary', () => {
   it.each([
     ['verified Prive', verifiedPrive()],
     ['Institutional', makeUser({ tier: 'INSTITUTIONAL', kycStatus: 'APPROVED' })],
-  ] as [string, User][])(
+  ] as [string, Member][])(
     'gives %s members the weighted score and full breakdown',
     async (_label, user) => {
       signInAs(user);
@@ -235,7 +234,7 @@ describe('GET /issuers/:id/rating-summary', () => {
         { code: 'CREDIT', label: 'Credit', count: 2, percent: 100 },
         { code: 'LEGAL', label: 'Legal', count: 1, percent: 50 },
       ]);
-      expect(breakdown.lastRatedAt).toBe('2026-10-20T00:00:00Z');
+      expect(breakdown.lastRatedAt).toBe('2026-10-20T00:00:00.000Z');
     },
   );
 
@@ -272,7 +271,7 @@ describe('POST /issuers/:id/ratings: access', () => {
       makeUser({ tier: 'PRIVE', kycStatus: 'PENDING' }),
       'KYC_REQUIRED',
     ],
-  ] as [string, User, string][])('is not open to %s', async (_label, user, code) => {
+  ] as [string, Member, string][])('is not open to %s', async (_label, user, code) => {
     signInAs(user);
     const res = await submit();
     expect(res.status).toBe(403);
@@ -331,15 +330,18 @@ describe('POST /issuers/:id/ratings: saving', () => {
 
     expect(res.status).toBe(201);
     expect(res.headers['idempotent-replayed']).toBeUndefined();
-    expect(save).toHaveBeenCalledWith({
-      userId: 1,
-      issuerId: ISSUER_ID,
-      overallScore: 4,
-      factors: validBody.factors,
-      riskCodes: ['CREDIT', 'MARKET', 'LIQUIDITY'],
-      idempotencyKey: 'rating-key-0001',
-      requestHash: expect.stringMatching(/^[0-9a-f]{64}$/),
-    });
+    expect(save).toHaveBeenCalledWith(
+      {
+        userId: '1',
+        issuerId: ISSUER_ID,
+        overallScore: 4,
+        factors: validBody.factors,
+        riskCodes: ['CREDIT', 'MARKET', 'LIQUIDITY'],
+        idempotencyKey: 'rating-key-0001',
+        requestHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+      expect.objectContaining({ appVersion: null, requestId: expect.any(String) }),
+    );
     expect(res.body.data).toMatchObject({
       id: RATING_ID,
       receiptNo: 'GIG-RT-2026-000001',
@@ -352,6 +354,7 @@ describe('POST /issuers/:id/ratings: saving', () => {
         { code: 'LIQUIDITY', label: 'Liquidity' },
       ],
       rater: { name: 'Shreya Mehta', tier: 'PRIVE' },
+      createdAt: '2026-10-27T10:00:00.000Z',
     });
     expect(res.body.data.factors.map((f: { code: string }) => f.code)).toEqual(
       FACTORS.map((f) => f.code),
@@ -364,12 +367,7 @@ describe('POST /issuers/:id/ratings: saving', () => {
   });
 
   it('returns 409 when the investor already rated this issuer', async () => {
-    stubSubmission().mockRejectedValue(
-      new DatabaseError(
-        PG_UNIQUE_VIOLATION,
-        'duplicate key value violates unique constraint "issuer_ratings_one_per_user_idx"',
-      ),
-    );
+    stubSubmission().mockRejectedValue(uniqueViolation('issuer_ratings_one_per_user_idx'));
     const res = await submit();
     expect(res.status).toBe(409);
     expect(res.body.error.code).toBe('RATING_ALREADY_SUBMITTED');
@@ -410,10 +408,7 @@ describe('POST /issuers/:id/ratings: saving', () => {
       .mockResolvedValueOnce(null);
     save.mockImplementation(async (rating) => {
       findByKey.mockResolvedValue({ publicId: RATING_ID, requestHash: rating.requestHash });
-      throw new DatabaseError(
-        PG_UNIQUE_VIOLATION,
-        'duplicate key value violates unique constraint "issuer_ratings_idempotency_key_idx"',
-      );
+      throw uniqueViolation('issuer_ratings_idempotency_key_idx');
     });
 
     const res = await submit();
@@ -438,7 +433,7 @@ describe('GET /ratings/me', () => {
           receiptNo: 'GIG-RT-2026-000001',
           status: 'PUBLISHED',
           overallScore: 4,
-          createdAt: '2026-10-27T10:00:00Z',
+          createdAt: new Date('2026-10-27T10:00:00.000Z'),
           issuer: { id: ISSUER_ID, name: 'Sovereign Alpha Yield' },
         },
       ],
@@ -457,11 +452,11 @@ describe('GET /ratings/me', () => {
           status: 'PUBLISHED',
           issuer: { id: ISSUER_ID, name: 'Sovereign Alpha Yield' },
           overallScore: 4,
-          createdAt: '2026-10-27T10:00:00Z',
+          createdAt: '2026-10-27T10:00:00.000Z',
         },
       ],
       meta: { page: 1, pageSize: 20, total: 1 },
     });
-    expect(find).toHaveBeenCalledWith(1, { page: 1, pageSize: 20, status: ['PUBLISHED'] });
+    expect(find).toHaveBeenCalledWith('1', { page: 1, pageSize: 20, status: ['PUBLISHED'] });
   });
 });

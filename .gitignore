@@ -7,3 +7,6 @@ coverage/
 *.log
 .DS_Store
 Global Investorz Group (GIG) — Backend Architecture & Delivery Plan.md
+
+# Supabase CLI local state (linked project, versions)
+supabase/.temp/

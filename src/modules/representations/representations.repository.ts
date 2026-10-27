@@ -1,9 +1,11 @@
-import { containsPattern, pageRange, RANGE_NOT_SATISFIABLE } from '../../lib/http';
-import { DatabaseError, supabaseAdmin, unwrap } from '../../lib/supabase';
-import type { Views } from '../../types/database';
+import { audit } from '../../lib/audit';
+import { sql, transaction } from '../../lib/db';
+import { displayNameFor } from '../../lib/displayName';
+import { containsPattern } from '../../lib/http';
+import { HttpError, validationError } from '../../middleware/errorHandler';
+import type { ClientContext } from '../../middleware/requestContext';
 import type {
   DisplayMode,
-  FileScanStatus,
   MarketCountry,
   RepresentationDocumentType,
   RepresentationTrackStatus,
@@ -17,7 +19,7 @@ import type { ListRepresentationsQuery, RepresentationSort } from './representat
 
 export interface Representation {
   /** Internal key, never returned by the API. */
-  internalId: number;
+  internalId: string;
   id: string;
   slug: string;
   title: string;
@@ -32,13 +34,13 @@ export interface Representation {
   signatureCount: number;
   voteCount: number;
   progressPercent: number;
-  opensAt: string;
-  closesAt: string;
+  opensAt: Date;
+  closesAt: Date;
   daysLeft: number;
   /** Effective status: Open / Closing Soon / Closed follow the signing window. */
   trackStatus: RepresentationTrackStatus;
   isOpenForSigning: boolean;
-  createdAt: string;
+  createdAt: Date;
 }
 
 export interface Signer {
@@ -48,7 +50,7 @@ export interface Signer {
   isAnonymous: boolean;
   investorType: { code: string; label: string } | null;
   isVerified: boolean;
-  signedAt: string;
+  signedAt: Date;
 }
 
 export interface StoredDocument {
@@ -62,7 +64,7 @@ export interface StatusChange {
   fromStatus: RepresentationTrackStatus | null;
   toStatus: RepresentationTrackStatus;
   note: string | null;
-  occurredAt: string;
+  occurredAt: Date;
   documents: StoredDocument[];
 }
 
@@ -73,22 +75,20 @@ export interface StoredSignature {
   signerName: string;
   investorType: string | null;
   signerTier: Tier;
-  createdAt: string;
+  createdAt: Date;
 }
 
 export interface NewSignature {
-  userId: number;
+  userId: string;
   representationId: string;
   signatureCode: string;
   displayMode: DisplayMode;
   signerName: string;
   investorType: string | null;
-  signatureFileId: number;
+  signatureFileId: string;
   signerTier: Tier;
   consentTypes: string[];
   consentVersion: string;
-  ipAddress: string | null;
-  appVersion: string | null;
   idempotencyKey: string;
   requestHash: string;
 }
@@ -105,293 +105,228 @@ export const SIGNATURE_CONSTRAINTS = {
   idempotencyKey: 'representation_signatures_idempotency_key_idx',
 } as const;
 
-// ---------------------------------------------------------------------------------------------
-// Mapping
-// ---------------------------------------------------------------------------------------------
-
-type CardRow = Views<'representation_cards'>;
-type SignerRow = Views<'representation_signers'>;
-
-/** View columns are typed nullable; these are guaranteed by the underlying tables. */
-function required<T>(value: T | null, view: string, column: string): T {
-  if (value === null) throw new Error(`${view}.${column} is unexpectedly null`);
-  return value;
+export function representationClosed(): HttpError {
+  return new HttpError(409, 'This petition is no longer open for signatures', {
+    code: 'REPRESENTATION_CLOSED',
+  });
 }
 
-function toRepresentation(row: CardRow): Representation {
-  const r = <T>(value: T | null, column: string) => required(value, 'representation_cards', column);
-  return {
-    internalId: r(row.internal_id, 'internal_id'),
-    id: r(row.id, 'id'),
-    slug: r(row.slug, 'slug'),
-    title: r(row.title, 'title'),
-    description: row.description ?? '',
-    asks: row.asks ?? [],
-    whyItMatters: row.why_it_matters ?? '',
-    category: row.category,
-    country: r(row.country, 'country'),
-    tags: row.tags ?? [],
-    regulators: row.regulators ?? [],
-    goal: r(row.goal, 'goal'),
-    signatureCount: row.signature_count ?? 0,
-    voteCount: row.vote_count ?? 0,
-    progressPercent: row.progress_pct ?? 0,
-    opensAt: r(row.opens_at, 'opens_at'),
-    closesAt: r(row.closes_at, 'closes_at'),
-    daysLeft: row.days_left ?? 0,
-    trackStatus: r(row.track_status, 'track_status'),
-    isOpenForSigning: row.is_open_for_signing ?? false,
-    createdAt: r(row.created_at, 'created_at'),
-  };
-}
-
-function toSigner(row: SignerRow): Signer {
-  return {
-    id: required(row.id, 'representation_signers', 'id'),
-    displayName: row.display_name,
-    isAnonymous: row.is_anonymous ?? false,
-    investorType:
-      row.investor_type && row.investor_type_label
-        ? { code: row.investor_type, label: row.investor_type_label }
-        : null,
-    isVerified: row.is_verified ?? false,
-    signedAt: required(row.signed_at, 'representation_signers', 'signed_at'),
-  };
-}
-
-type DocumentRow = {
-  public_id: string;
-  title: string;
-  document_type: RepresentationDocumentType;
-  file: {
-    bucket: string;
-    object_key: string;
-    mime_type: string;
-    size_bytes: number;
-    scan_status: FileScanStatus;
-  };
-};
-
-/** Files the virus scan flagged are never offered for download. */
-function visibleDocuments(rows: DocumentRow[]): StoredDocument[] {
-  return rows.filter((row) => row.file.scan_status !== 'INFECTED').map(toDocument);
-}
-
-function toDocument(row: DocumentRow): StoredDocument {
-  return {
-    id: row.public_id,
-    title: row.title,
-    documentType: row.document_type,
-    file: {
-      bucket: row.file.bucket,
-      objectKey: row.file.object_key,
-      mimeType: row.file.mime_type,
-      sizeBytes: row.file.size_bytes,
-    },
-  };
-}
-
-const DOCUMENT_COLUMNS =
-  'public_id, title, document_type, file:files!inner(bucket, object_key, mime_type, size_bytes, scan_status)';
-
-const SIGNATURE_COLUMNS =
-  'public_id, signature_code, display_mode, signer_name, investor_type, signer_tier, created_at';
-
-type SignatureRow = {
-  public_id: string;
-  signature_code: string;
-  display_mode: DisplayMode;
-  signer_name: string;
-  investor_type: string | null;
-  signer_tier: Tier;
-  created_at: string;
-};
-
-function toStoredSignature(row: SignatureRow): StoredSignature {
-  return {
-    publicId: row.public_id,
-    signatureCode: row.signature_code,
-    displayMode: row.display_mode,
-    signerName: row.signer_name,
-    investorType: row.investor_type,
-    signerTier: row.signer_tier,
-    createdAt: row.created_at,
-  };
-}
-
-const ORDER: Record<RepresentationSort, [keyof CardRow & string, boolean][]> = {
-  // Open petitions first, soonest deadline first.
-  closing_soon: [
-    ['is_open_for_signing', false],
-    ['closes_at', true],
-  ],
-  recent: [['opens_at', false]],
-  most_signed: [['signature_count', false]],
-  progress: [['progress_pct', false]],
-};
-
-function isRangeError(error: unknown): boolean {
-  return error instanceof DatabaseError && error.code === RANGE_NOT_SATISFIABLE;
+export function signatureFileInvalid(): HttpError {
+  return validationError({ signatureFileId: 'Upload your signature with purpose SIGNATURE first' });
 }
 
 // ---------------------------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------------------------
 
+const cardColumns = () => sql`
+  internal_id, id, slug, title, description, asks, why_it_matters, category, country, tags,
+  regulators, goal, signature_count, vote_count, progress_pct as progress_percent, opens_at,
+  closes_at, days_left, track_status, is_open_for_signing, created_at`;
+
+function cardOrder(sort: RepresentationSort) {
+  switch (sort) {
+    // Open petitions first, soonest deadline first.
+    case 'closing_soon':
+      return sql`is_open_for_signing desc, closes_at asc`;
+    case 'recent':
+      return sql`opens_at desc`;
+    case 'most_signed':
+      return sql`signature_count desc`;
+    case 'progress':
+      return sql`progress_pct desc`;
+  }
+}
+
+function cardFilters(query: ListRepresentationsQuery) {
+  const { q, filter } = query;
+  return sql`
+    where true
+    ${q ? sql`and search_text like ${containsPattern(q)}` : sql``}
+    ${filter?.status?.length ? sql`and track_status in ${sql(filter.status)}` : sql``}
+    ${filter?.country?.length ? sql`and country in ${sql(filter.country)}` : sql``}
+    ${filter?.openForSigning !== undefined ? sql`and is_open_for_signing = ${filter.openForSigning}` : sql``}`;
+}
+
+// Files the virus scan flagged are never offered for download.
+const documentJson = () => sql`
+  json_build_object(
+    'id', d.public_id, 'title', d.title, 'documentType', d.document_type,
+    'file', json_build_object('bucket', d.bucket, 'objectKey', d.object_key,
+                              'mimeType', d.mime_type, 'sizeBytes', d.size_bytes))`;
+
+const signatureColumns = () => sql`
+  public_id, signature_code, display_mode, signer_name, investor_type, signer_tier, created_at`;
+
+interface SignerRow {
+  id: string;
+  displayMode: DisplayMode;
+  signerName: string;
+  investorType: string | null;
+  investorTypeLabel: string | null;
+  signerTier: Tier;
+  signedAt: Date;
+}
+
+/** Signers as the public sees them: the name follows the signer's display choice. */
+function toSigner(row: SignerRow): Signer {
+  return {
+    id: row.id,
+    displayName: displayNameFor(row.signerName, row.displayMode),
+    isAnonymous: row.displayMode === 'ANONYMOUS',
+    investorType:
+      row.investorType && row.investorTypeLabel
+        ? { code: row.investorType, label: row.investorTypeLabel }
+        : null,
+    isVerified: row.signerTier === 'PRIVE',
+    signedAt: row.signedAt,
+  };
+}
+
 export const representationsRepository = {
   async findAll(query: ListRepresentationsQuery): Promise<Page<Representation>> {
-    const build = (head: boolean) => {
-      let q = supabaseAdmin.from('representation_cards').select('*', { count: 'exact', head });
-      if (query.q) q = q.ilike('search_text', containsPattern(query.q));
-      if (query.filter?.status?.length) q = q.in('track_status', query.filter.status);
-      if (query.filter?.country?.length) q = q.in('country', query.filter.country);
-      if (query.filter?.openForSigning !== undefined) {
-        q = q.eq('is_open_for_signing', query.filter.openForSigning);
-      }
-      return q;
-    };
-
-    let request = build(false);
-    for (const [column, ascending] of ORDER[query.sort]) {
-      request = request.order(column, { ascending });
-    }
-    const { from, to } = pageRange(query);
-    const result = await request.order('id').range(from, to);
-
-    try {
-      const rows = unwrap(result);
-      return { items: rows.map(toRepresentation), total: result.count ?? rows.length };
-    } catch (error) {
-      if (!isRangeError(error)) throw error;
-      const head = await build(true);
-      unwrap(head);
-      return { items: [], total: head.count ?? 0 };
-    }
+    const offset = (query.page - 1) * query.pageSize;
+    const [rows, [count]] = await Promise.all([
+      sql<Representation[]>`
+        select ${cardColumns()} from app.representation_cards
+        ${cardFilters(query)}
+        order by ${cardOrder(query.sort)}, id
+        limit ${query.pageSize} offset ${offset}`,
+      sql<{ total: number }[]>`
+        select count(*)::int as total from app.representation_cards ${cardFilters(query)}`,
+    ]);
+    return { items: rows, total: count?.total ?? 0 };
   },
 
   async findById(id: string): Promise<Representation | null> {
-    const row = unwrap(
-      await supabaseAdmin.from('representation_cards').select('*').eq('id', id).maybeSingle(),
-    );
-    return row && toRepresentation(row);
+    const [row] = await sql<Representation[]>`
+      select ${cardColumns()} from app.representation_cards where id = ${id}`;
+    return row ?? null;
   },
 
-  /** Most recent signers first. */
+  /** Most recent valid signers first. */
   async findSigners(representation: Representation, limit: number): Promise<Signer[]> {
-    const rows = unwrap(
-      await supabaseAdmin
-        .from('representation_signers')
-        .select('*')
-        .eq('representation_id', representation.internalId)
-        .order('signed_at', { ascending: false })
-        .limit(limit),
-    );
+    const rows = await sql<SignerRow[]>`
+      select s.public_id as id, s.display_mode, s.signer_name, s.investor_type,
+             o.label as investor_type_label, s.signer_tier, s.created_at as signed_at
+      from app.representation_signatures s
+      left join app.lookup_options o on o.type = s.investor_type_kind and o.code = s.investor_type
+      where s.representation_id = ${representation.internalId}
+        and s.status = 'VALID' and s.deleted_at is null
+      order by s.created_at desc, s.id desc
+      limit ${limit}`;
     return rows.map(toSigner);
   },
 
   /** Evidence documents shown on the petition's Evidence tab. */
   async findEvidence(representation: Representation): Promise<StoredDocument[]> {
-    const rows = unwrap(
-      await supabaseAdmin
-        .from('representation_documents')
-        .select(DOCUMENT_COLUMNS)
-        .eq('representation_id', representation.internalId)
-        .eq('document_type', 'EVIDENCE')
-        .order('sort_order')
-        .order('id'),
-    );
-    return visibleDocuments(rows);
+    const rows = await sql<{ document: StoredDocument }[]>`
+      select ${documentJson()} as document
+      from app.representation_documents d
+      where d.representation_id = ${representation.internalId}
+        and d.document_type = 'EVIDENCE' and d.scan_status <> 'INFECTED'
+      order by d.sort_order, d.id`;
+    return rows.map((row) => row.document);
   },
 
   /** Stored status changes, oldest first, with the documents attached to each. */
   async findStatusHistory(representation: Representation): Promise<StatusChange[]> {
-    const rows = unwrap(
-      await supabaseAdmin
-        .from('representation_status_history')
-        .select(
-          `from_status, to_status, note, occurred_at, representation_documents(${DOCUMENT_COLUMNS})`,
-        )
-        .eq('representation_id', representation.internalId)
-        .order('occurred_at')
-        .order('id'),
-    );
-    return rows.map((row) => ({
-      fromStatus: row.from_status,
-      toStatus: row.to_status,
-      note: row.note,
-      occurredAt: row.occurred_at,
-      documents: visibleDocuments(row.representation_documents),
-    }));
+    return sql<StatusChange[]>`
+      select h.from_status, h.to_status, h.note, h.occurred_at,
+             (select coalesce(json_agg(${documentJson()} order by d.sort_order, d.id), '[]')
+              from app.representation_documents d
+              where d.status_history_id = h.id and d.scan_status <> 'INFECTED') as documents
+      from app.representation_status_history h
+      where h.representation_id = ${representation.internalId}
+      order by h.occurred_at, h.id`;
   },
 
   /** The latest submitted petition pack (Phase 2 generates these; staff attach them). */
   async findLatestSubmissionPack(representation: Representation): Promise<StoredDocument | null> {
-    const rows = unwrap(
-      await supabaseAdmin
-        .from('representation_documents')
-        .select(DOCUMENT_COLUMNS)
-        .eq('representation_id', representation.internalId)
-        .eq('document_type', 'SUBMISSION_PACK')
-        .order('created_at', { ascending: false })
-        .order('id', { ascending: false }),
-    );
-    return visibleDocuments(rows)[0] ?? null;
+    const [row] = await sql<{ document: StoredDocument }[]>`
+      select ${documentJson()} as document
+      from app.representation_documents d
+      where d.representation_id = ${representation.internalId}
+        and d.document_type = 'SUBMISSION_PACK' and d.scan_status <> 'INFECTED'
+      order by d.created_at desc, d.id desc
+      limit 1`;
+    return row?.document ?? null;
   },
 
+  /** The user's valid, not-deleted signature on this petition. */
   async findSignature(
-    userId: number,
+    userId: string,
     representation: Representation,
   ): Promise<StoredSignature | null> {
-    const row = unwrap(
-      await supabaseAdmin
-        .from('representation_signatures')
-        .select(SIGNATURE_COLUMNS)
-        .eq('user_id', userId)
-        .eq('representation_id', representation.internalId)
-        .eq('status', 'VALID')
-        .is('deleted_at', null)
-        .maybeSingle(),
-    );
-    return row && toStoredSignature(row);
+    const [row] = await sql<StoredSignature[]>`
+      select ${signatureColumns()} from app.representation_signatures
+      where user_id = ${userId} and representation_id = ${representation.internalId}
+        and status = 'VALID' and deleted_at is null`;
+    return row ?? null;
   },
 
   /** The signature a user already created with this Idempotency-Key, if any. */
   async findByIdempotencyKey(
-    userId: number,
+    userId: string,
     idempotencyKey: string,
   ): Promise<{ representationId: string; requestHash: string | null } | null> {
-    const row = unwrap(
-      await supabaseAdmin
-        .from('representation_signatures')
-        .select('request_hash, representation:representations!inner(public_id)')
-        .eq('user_id', userId)
-        .eq('idempotency_key', idempotencyKey)
-        .maybeSingle(),
-    );
-    return row && { representationId: row.representation.public_id, requestHash: row.request_hash };
+    const [row] = await sql<{ representationId: string; requestHash: string | null }[]>`
+      select r.public_id as representation_id, s.request_hash
+      from app.representation_signatures s
+      join app.representations r on r.id = s.representation_id
+      where s.user_id = ${userId} and s.idempotency_key = ${idempotencyKey}`;
+    return row ?? null;
   },
 
-  /** Saves the signature and its consents in one transaction. */
-  async sign(signature: NewSignature): Promise<void> {
-    unwrap(
-      await supabaseAdmin
-        .rpc('sign_representation', {
-          p_user_id: signature.userId,
-          p_representation_id: signature.representationId,
-          p_signature_code: signature.signatureCode,
-          p_display_mode: signature.displayMode,
-          p_signer_name: signature.signerName,
-          p_investor_type: signature.investorType,
-          p_signature_file_id: signature.signatureFileId,
-          p_signer_tier: signature.signerTier,
-          p_consent_types: signature.consentTypes,
-          p_consent_version: signature.consentVersion,
-          p_ip_address: signature.ipAddress,
-          p_app_version: signature.appVersion,
-          p_idempotency_key: signature.idempotencyKey,
-          p_request_hash: signature.requestHash,
-        })
-        .single(),
-    );
+  /**
+   * Saves the signature and its consents, and audits it, in one transaction. The petition row is
+   * locked and re-checked, so a signature never lands after the window closed.
+   */
+  async sign(signature: NewSignature, ctx: ClientContext): Promise<void> {
+    await transaction(async (tx) => {
+      const [representation] = await tx<{ id: string; isOpen: boolean }[]>`
+        select id, (now() < closes_at and track_status in ('OPEN', 'CLOSING_SOON')) as is_open
+        from app.representations
+        where public_id = ${signature.representationId} and deleted_at is null and opens_at <= now()
+        for share`;
+      if (!representation) throw new HttpError(404, 'Representation not found');
+      if (!representation.isOpen) throw representationClosed();
+
+      const [file] = await tx`
+        select 1 from app.files
+        where id = ${signature.signatureFileId} and owner_id = ${signature.userId}
+          and purpose = 'SIGNATURE' and scan_status <> 'INFECTED'`;
+      if (!file) throw signatureFileInvalid();
+
+      await tx`
+        insert into app.representation_signatures (
+          signature_code, representation_id, user_id, display_mode, signer_name, investor_type,
+          signature_file_id, signer_tier, weight, consent_version, idempotency_key, request_hash
+        ) values (
+          ${signature.signatureCode}, ${representation.id}, ${signature.userId},
+          ${signature.displayMode}, ${signature.signerName}, ${signature.investorType},
+          ${signature.signatureFileId}, ${signature.signerTier},
+          ${signature.signerTier === 'PRIVE' ? 1 : 0}, ${signature.consentVersion},
+          ${signature.idempotencyKey}, ${signature.requestHash}
+        )`;
+
+      await tx`
+        insert into app.consents (user_id, type, version, accepted_at, ip, user_agent, app_version)
+        select ${signature.userId}, type, ${signature.consentVersion}, now(), ${ctx.ip}::inet,
+               ${ctx.userAgent}, ${ctx.appVersion}
+        from unnest(${tx.array(signature.consentTypes)}::text[]) as type`;
+      await audit(
+        ctx,
+        'representation.signed',
+        {
+          userId: signature.userId,
+          metadata: {
+            representation: signature.representationId,
+            signature: signature.signatureCode,
+          },
+        },
+        tx,
+      );
+    });
   },
 };

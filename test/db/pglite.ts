@@ -1,15 +1,17 @@
 // An in-memory Postgres (PGlite) with every migration and the seed applied, plus minimal
-// stand-ins for what Supabase provides (roles, auth.users, storage.buckets).
+// stand-ins for what Supabase provides (roles, auth and storage schemas). `serve` exposes it on a
+// local port, so the API's own postgres.js queries run against it.
 
 import { PGlite } from '@electric-sql/pglite';
 import { pg_trgm } from '@electric-sql/pglite/contrib/pg_trgm';
+import { PGLiteSocketServer } from '@electric-sql/pglite-socket';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
 const ROOT = join(__dirname, '..', '..');
 
 export async function createTestDatabase(): Promise<PGlite> {
-  // NUMERIC (oid 1700) as numbers, the way PostgREST returns them to the API.
+  // NUMERIC (oid 1700) as numbers in direct PGlite queries.
   const db = new PGlite({
     extensions: { pg_trgm },
     parsers: { 1700: (value: string) => Number(value) },
@@ -29,25 +31,34 @@ export async function createTestDatabase(): Promise<PGlite> {
   return db;
 }
 
-/** Creates a GIG user and returns its internal id. */
-export async function createUser(db: PGlite, publicId: string): Promise<number> {
-  await db.query('insert into auth.users (id) values ($1)', [publicId]);
-  const { rows } = await db.query<{ id: number }>(
-    'insert into public.users (auth_user_id, public_id) values ($1, $1) returning id',
+/** Serves the database on 127.0.0.1:`port` for postgres.js; call the result to stop. */
+export async function serve(db: PGlite, port: number): Promise<() => Promise<void>> {
+  const server = new PGLiteSocketServer({ db, port, host: '127.0.0.1' });
+  await server.start();
+  return () => server.stop();
+}
+
+/** Creates an auth-module user (app.users) and returns its internal id. */
+export async function createUser(db: PGlite, publicId: string): Promise<string> {
+  const { rows } = await db.query<{ id: string }>(
+    `insert into app.users (public_id, email_enc, email_hash, phone_country_code, phone_enc,
+                            phone_hash, password_hash, email_verified_at, phone_verified_at)
+     values ($1::uuid, 'x', $1::text, '+91', 'x', $1::text, 'x', now(), now())
+     returning id::text`,
     [publicId],
   );
   const row = rows[0];
   if (!row) throw new Error('user not created');
-  return Number(row.id);
+  return row.id;
 }
 
-/** Expects `promise` to fail with the given Postgres error code (and message, if given). */
+/** The error `promise` rejects with; fails if it resolves. */
 export async function dbError(
   promise: Promise<unknown>,
-): Promise<{ code?: string; message: string }> {
+): Promise<{ code?: string; message: string; constraint_name?: string }> {
   const error = await promise.then(
     () => null,
-    (e: { code?: string; message: string }) => e,
+    (e: { code?: string; message: string; constraint_name?: string }) => e,
   );
   if (!error) throw new Error('expected a database error');
   return error;

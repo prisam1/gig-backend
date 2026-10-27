@@ -1,42 +1,25 @@
-import { usersRepository, type User } from '../modules/users/users.repository';
-import type { KycStatus, Tier } from '../types/domain';
+// The signed-in member: session, tier, KYC status and name. Owned by the auth module; every
+// other module reads users through here. Tokens are resolved to a member by src/lib/auth.ts.
 
-// How the catalog and reviews modules see the signed-in user. Users, tiers and KYC belong to the
-// users module (public.users); these modules read them only through here.
+export const TIERS = ['OBSERVER', 'PRIVE', 'INSTITUTIONAL'] as const;
+export type Tier = (typeof TIERS)[number];
 
-export type { KycStatus, Tier };
+/** Tiers that are granted only after KYC approval. */
+export type VerifiedTier = Exclude<Tier, 'OBSERVER'>;
+
+export const KYC_STATUSES = ['NOT_STARTED', 'PENDING', 'APPROVED', 'REJECTED'] as const;
+export type KycStatus = (typeof KYC_STATUSES)[number];
 
 export interface Member {
-  /** users.public_id: stored as reviews.user_id and used as the evidence folder in Storage. */
-  id: string;
+  userId: string;
+  /** The user id other modules store (reviews.user_id, file folders, /users/:id). */
+  userPublicId: string;
+  sessionId: string;
+  sessionPublicId: string;
   tier: Tier;
+  /** Prive or Institutional chosen at sign-up and waiting for KYC approval. */
+  requestedTier: VerifiedTier | null;
   kycStatus: KycStatus;
-  /** Shown on reviews per the reviewer's display mode. Empty until the profile has a name. */
+  /** Shown on reviews per the reviewer's display mode. Empty until the profile step is done. */
   fullName: string;
-  /** Prive with approved KYC: the "Prive" access level in the API spec. */
-  isVerifiedPrive: boolean;
-  /** Prive (verified) or Institutional: may see full analytics and full reviews. */
-  hasFullAccess: boolean;
-}
-
-type Access = Pick<User, 'tier' | 'kycStatus'>;
-
-export function isVerifiedPrive(user: Access): boolean {
-  return user.tier === 'PRIVE' && user.kycStatus === 'APPROVED';
-}
-
-export function hasFullAccess(user: Access): boolean {
-  return isVerifiedPrive(user) || user.tier === 'INSTITUTIONAL';
-}
-
-export async function loadMember(user: User): Promise<Member> {
-  const profile = await usersRepository.findProfile(user.id);
-  return {
-    id: user.publicId,
-    tier: user.tier,
-    kycStatus: user.kycStatus,
-    fullName: profile?.name?.trim() ?? '',
-    isVerifiedPrive: isVerifiedPrive(user),
-    hasFullAccess: hasFullAccess(user),
-  };
 }

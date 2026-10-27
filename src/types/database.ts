@@ -1,5 +1,5 @@
-// Database types for supabase-js, in the format `supabase gen types typescript` produces.
-// Mirrors supabase/migrations. After changing the schema, regenerate instead of editing:
+// Database types in the `supabase gen types typescript` format, matching supabase/migrations.
+// Regenerate once the project is linked:
 //   npx supabase gen types typescript --project-id <ref> --schema public > src/types/database.ts
 
 export type Json = string | number | boolean | null | { [key: string]: Json | undefined } | Json[];
@@ -52,89 +52,6 @@ export type Database = {
         };
         Relationships: [];
       };
-      company_stats: {
-        Row: {
-          company_id: string;
-          review_count: number;
-          score: number;
-          relevance: number;
-          avg_transparency: number;
-          avg_responsiveness: number;
-          avg_ease_of_process: number;
-          avg_trustworthiness: number;
-          avg_overall_satisfaction: number;
-          positive_pct: number;
-          neutral_pct: number;
-          negative_pct: number;
-          dominant_sentiment: Database['public']['Enums']['sentiment'] | null;
-          resolved_pct: number;
-          in_progress_pct: number;
-          unresolved_pct: number;
-          not_contacted_pct: number;
-          dominant_resolution: Database['public']['Enums']['resolution_bucket'] | null;
-          reviews_30d: number;
-          score_change_12m: number;
-          last_review_at: string | null;
-          updated_at: string;
-        };
-        Insert: {
-          company_id: string;
-          review_count?: number;
-          score?: number;
-          relevance?: number;
-          avg_transparency?: number;
-          avg_responsiveness?: number;
-          avg_ease_of_process?: number;
-          avg_trustworthiness?: number;
-          avg_overall_satisfaction?: number;
-          positive_pct?: number;
-          neutral_pct?: number;
-          negative_pct?: number;
-          dominant_sentiment?: Database['public']['Enums']['sentiment'] | null;
-          resolved_pct?: number;
-          in_progress_pct?: number;
-          unresolved_pct?: number;
-          not_contacted_pct?: number;
-          dominant_resolution?: Database['public']['Enums']['resolution_bucket'] | null;
-          reviews_30d?: number;
-          score_change_12m?: number;
-          last_review_at?: string | null;
-          updated_at?: string;
-        };
-        Update: {
-          company_id?: string;
-          review_count?: number;
-          score?: number;
-          relevance?: number;
-          avg_transparency?: number;
-          avg_responsiveness?: number;
-          avg_ease_of_process?: number;
-          avg_trustworthiness?: number;
-          avg_overall_satisfaction?: number;
-          positive_pct?: number;
-          neutral_pct?: number;
-          negative_pct?: number;
-          dominant_sentiment?: Database['public']['Enums']['sentiment'] | null;
-          resolved_pct?: number;
-          in_progress_pct?: number;
-          unresolved_pct?: number;
-          not_contacted_pct?: number;
-          dominant_resolution?: Database['public']['Enums']['resolution_bucket'] | null;
-          reviews_30d?: number;
-          score_change_12m?: number;
-          last_review_at?: string | null;
-          updated_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'company_stats_company_id_fkey';
-            columns: ['company_id'];
-            isOneToOne: true;
-            referencedRelation: 'companies';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
       company_tags: {
         Row: {
           company_id: string;
@@ -157,365 +74,6 @@ export type Database = {
             columns: ['company_id'];
             isOneToOne: false;
             referencedRelation: 'companies';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      company_trend_points: {
-        Row: {
-          company_id: string;
-          month: string;
-          review_count: number;
-          overall_sum: number;
-          positive_count: number;
-        };
-        Insert: {
-          company_id: string;
-          month: string;
-          review_count: number;
-          overall_sum: number;
-          positive_count: number;
-        };
-        Update: {
-          company_id?: string;
-          month?: string;
-          review_count?: number;
-          overall_sum?: number;
-          positive_count?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'company_trend_points_company_id_fkey';
-            columns: ['company_id'];
-            isOneToOne: false;
-            referencedRelation: 'companies';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      consents: {
-        Row: {
-          accepted_at: string;
-          app_version: string | null;
-          id: number;
-          ip_address: string | null;
-          type: string;
-          user_id: number;
-          version: string;
-        };
-        Insert: {
-          accepted_at?: string;
-          app_version?: string | null;
-          id?: never;
-          ip_address?: string | null;
-          type: string;
-          user_id: number;
-          version: string;
-        };
-        Update: {
-          accepted_at?: string;
-          app_version?: string | null;
-          id?: never;
-          ip_address?: string | null;
-          type?: string;
-          user_id?: number;
-          version?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'consents_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      files: {
-        Row: {
-          bucket: string;
-          created_at: string;
-          id: number;
-          mime_type: string;
-          object_key: string;
-          owner_id: number;
-          public_id: string;
-          purpose: Database['public']['Enums']['file_purpose'];
-          scan_status: Database['public']['Enums']['file_scan_status'];
-          size_bytes: number;
-          updated_at: string;
-        };
-        Insert: {
-          bucket: string;
-          created_at?: string;
-          id?: never;
-          mime_type: string;
-          object_key: string;
-          owner_id: number;
-          public_id?: string;
-          purpose: Database['public']['Enums']['file_purpose'];
-          scan_status?: Database['public']['Enums']['file_scan_status'];
-          size_bytes: number;
-          updated_at?: string;
-        };
-        Update: {
-          bucket?: string;
-          created_at?: string;
-          id?: never;
-          mime_type?: string;
-          object_key?: string;
-          owner_id?: number;
-          public_id?: string;
-          purpose?: Database['public']['Enums']['file_purpose'];
-          scan_status?: Database['public']['Enums']['file_scan_status'];
-          size_bytes?: number;
-          updated_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'files_owner_id_fkey';
-            columns: ['owner_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      follows: {
-        Row: {
-          created_at: string;
-          followee_id: number;
-          follower_id: number;
-        };
-        Insert: {
-          created_at?: string;
-          followee_id: number;
-          follower_id: number;
-        };
-        Update: {
-          created_at?: string;
-          followee_id?: number;
-          follower_id?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'follows_followee_id_fkey';
-            columns: ['followee_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'follows_follower_id_fkey';
-            columns: ['follower_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      issuer_rating_factors: {
-        Row: {
-          created_at: string;
-          factor_code: string;
-          factor_type: Database['public']['Enums']['lookup_type'];
-          flag: Database['public']['Enums']['rating_flag'];
-          rating_id: number;
-          updated_at: string;
-        };
-        Insert: {
-          created_at?: string;
-          factor_code: string;
-          factor_type?: Database['public']['Enums']['lookup_type'];
-          flag: Database['public']['Enums']['rating_flag'];
-          rating_id: number;
-          updated_at?: string;
-        };
-        Update: {
-          created_at?: string;
-          factor_code?: string;
-          factor_type?: Database['public']['Enums']['lookup_type'];
-          flag?: Database['public']['Enums']['rating_flag'];
-          rating_id?: number;
-          updated_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'issuer_rating_factors_rating_id_fkey';
-            columns: ['rating_id'];
-            isOneToOne: false;
-            referencedRelation: 'issuer_ratings';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      issuer_rating_risks: {
-        Row: {
-          created_at: string;
-          rating_id: number;
-          risk_code: string;
-          risk_type: Database['public']['Enums']['lookup_type'];
-          updated_at: string;
-        };
-        Insert: {
-          created_at?: string;
-          rating_id: number;
-          risk_code: string;
-          risk_type?: Database['public']['Enums']['lookup_type'];
-          updated_at?: string;
-        };
-        Update: {
-          created_at?: string;
-          rating_id?: number;
-          risk_code?: string;
-          risk_type?: Database['public']['Enums']['lookup_type'];
-          updated_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'issuer_rating_risks_rating_id_fkey';
-            columns: ['rating_id'];
-            isOneToOne: false;
-            referencedRelation: 'issuer_ratings';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      issuer_ratings: {
-        Row: {
-          created_at: string;
-          deleted_at: string | null;
-          id: number;
-          idempotency_key: string | null;
-          issuer_id: string;
-          moderation_note: string | null;
-          overall_score: number;
-          public_id: string;
-          published_at: string | null;
-          receipt_no: string;
-          request_hash: string | null;
-          status: Database['public']['Enums']['rating_status'];
-          updated_at: string;
-          user_id: number;
-        };
-        Insert: {
-          created_at?: string;
-          deleted_at?: string | null;
-          id?: never;
-          idempotency_key?: string | null;
-          issuer_id: string;
-          moderation_note?: string | null;
-          overall_score: number;
-          public_id?: string;
-          published_at?: string | null;
-          receipt_no?: string;
-          request_hash?: string | null;
-          status?: Database['public']['Enums']['rating_status'];
-          updated_at?: string;
-          user_id: number;
-        };
-        Update: {
-          created_at?: string;
-          deleted_at?: string | null;
-          id?: never;
-          idempotency_key?: string | null;
-          issuer_id?: string;
-          moderation_note?: string | null;
-          overall_score?: number;
-          public_id?: string;
-          published_at?: string | null;
-          receipt_no?: string;
-          request_hash?: string | null;
-          status?: Database['public']['Enums']['rating_status'];
-          updated_at?: string;
-          user_id?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'issuer_ratings_issuer_id_fkey';
-            columns: ['issuer_id'];
-            isOneToOne: false;
-            referencedRelation: 'issuers';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'issuer_ratings_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      issuer_stats: {
-        Row: {
-          average_score: number;
-          created_at: string;
-          factor_breakdown: Json;
-          issuer_id: string;
-          last_rating_at: string | null;
-          rating_count: number;
-          risk_counts: Json;
-          score_distribution: Json;
-          updated_at: string;
-          weighted_score: number;
-        };
-        Insert: {
-          average_score?: number;
-          created_at?: string;
-          factor_breakdown?: Json;
-          issuer_id: string;
-          last_rating_at?: string | null;
-          rating_count?: number;
-          risk_counts?: Json;
-          score_distribution?: Json;
-          updated_at?: string;
-          weighted_score?: number;
-        };
-        Update: {
-          average_score?: number;
-          created_at?: string;
-          factor_breakdown?: Json;
-          issuer_id?: string;
-          last_rating_at?: string | null;
-          rating_count?: number;
-          risk_counts?: Json;
-          score_distribution?: Json;
-          updated_at?: string;
-          weighted_score?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'issuer_stats_issuer_id_fkey';
-            columns: ['issuer_id'];
-            isOneToOne: true;
-            referencedRelation: 'issuers';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      issuer_tags: {
-        Row: {
-          issuer_id: string;
-          tag: string;
-          sort_order: number;
-        };
-        Insert: {
-          issuer_id: string;
-          tag: string;
-          sort_order?: number;
-        };
-        Update: {
-          issuer_id?: string;
-          tag?: string;
-          sort_order?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'issuer_tags_issuer_id_fkey';
-            columns: ['issuer_id'];
-            isOneToOne: false;
-            referencedRelation: 'issuers';
             referencedColumns: ['id'];
           },
         ];
@@ -592,484 +150,28 @@ export type Database = {
         };
         Relationships: [];
       };
-      kyc_documents: {
+      issuer_tags: {
         Row: {
-          document_type: Database['public']['Enums']['kyc_document_type'];
-          file_id: number;
-          submission_id: number;
-        };
-        Insert: {
-          document_type: Database['public']['Enums']['kyc_document_type'];
-          file_id: number;
-          submission_id: number;
-        };
-        Update: {
-          document_type?: Database['public']['Enums']['kyc_document_type'];
-          file_id?: number;
-          submission_id?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'kyc_documents_file_id_fkey';
-            columns: ['file_id'];
-            isOneToOne: false;
-            referencedRelation: 'files';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'kyc_documents_submission_id_fkey';
-            columns: ['submission_id'];
-            isOneToOne: false;
-            referencedRelation: 'kyc_submissions';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      kyc_submissions: {
-        Row: {
-          created_at: string;
-          id: number;
-          provider: string;
-          public_id: string;
-          reason: string | null;
-          reference: string | null;
-          reviewed_at: string | null;
-          reviewer_id: number | null;
-          status: Database['public']['Enums']['kyc_submission_status'];
-          tier: Database['public']['Enums']['verified_tier'];
-          updated_at: string;
-          user_id: number;
-        };
-        Insert: {
-          created_at?: string;
-          id?: never;
-          provider?: string;
-          public_id?: string;
-          reason?: string | null;
-          reference?: string | null;
-          reviewed_at?: string | null;
-          reviewer_id?: number | null;
-          status?: Database['public']['Enums']['kyc_submission_status'];
-          tier: Database['public']['Enums']['verified_tier'];
-          updated_at?: string;
-          user_id: number;
-        };
-        Update: {
-          created_at?: string;
-          id?: never;
-          provider?: string;
-          public_id?: string;
-          reason?: string | null;
-          reference?: string | null;
-          reviewed_at?: string | null;
-          reviewer_id?: number | null;
-          status?: Database['public']['Enums']['kyc_submission_status'];
-          tier?: Database['public']['Enums']['verified_tier'];
-          updated_at?: string;
-          user_id?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'kyc_submissions_reviewer_id_fkey';
-            columns: ['reviewer_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'kyc_submissions_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      lookup_options: {
-        Row: {
-          active: boolean;
-          code: string;
-          label: string;
+          issuer_id: string;
+          tag: string;
           sort_order: number;
-          type: Database['public']['Enums']['lookup_type'];
         };
         Insert: {
-          active?: boolean;
-          code: string;
-          label: string;
+          issuer_id: string;
+          tag: string;
           sort_order?: number;
-          type: Database['public']['Enums']['lookup_type'];
         };
         Update: {
-          active?: boolean;
-          code?: string;
-          label?: string;
+          issuer_id?: string;
+          tag?: string;
           sort_order?: number;
-          type?: Database['public']['Enums']['lookup_type'];
-        };
-        Relationships: [];
-      };
-      representation_documents: {
-        Row: {
-          created_at: string;
-          document_type: Database['public']['Enums']['representation_document_type'];
-          file_id: number;
-          id: number;
-          public_id: string;
-          representation_id: number;
-          sort_order: number;
-          status_history_id: number | null;
-          title: string;
-          updated_at: string;
-        };
-        Insert: {
-          created_at?: string;
-          document_type: Database['public']['Enums']['representation_document_type'];
-          file_id: number;
-          id?: never;
-          public_id?: string;
-          representation_id: number;
-          sort_order?: number;
-          status_history_id?: number | null;
-          title: string;
-          updated_at?: string;
-        };
-        Update: {
-          created_at?: string;
-          document_type?: Database['public']['Enums']['representation_document_type'];
-          file_id?: number;
-          id?: never;
-          public_id?: string;
-          representation_id?: number;
-          sort_order?: number;
-          status_history_id?: number | null;
-          title?: string;
-          updated_at?: string;
         };
         Relationships: [
           {
-            foreignKeyName: 'representation_documents_file_id_fkey';
-            columns: ['file_id'];
+            foreignKeyName: 'issuer_tags_issuer_id_fkey';
+            columns: ['issuer_id'];
             isOneToOne: false;
-            referencedRelation: 'files';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'representation_documents_representation_id_fkey';
-            columns: ['representation_id'];
-            isOneToOne: false;
-            referencedRelation: 'representations';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'representation_documents_status_history_id_fkey';
-            columns: ['status_history_id'];
-            isOneToOne: false;
-            referencedRelation: 'representation_status_history';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      representation_signatures: {
-        Row: {
-          consent_version: string;
-          created_at: string;
-          deleted_at: string | null;
-          display_mode: Database['public']['Enums']['display_mode'];
-          id: number;
-          idempotency_key: string | null;
-          investor_type: string | null;
-          investor_type_kind: Database['public']['Enums']['lookup_type'];
-          public_id: string;
-          representation_id: number;
-          request_hash: string | null;
-          signature_code: string;
-          signature_file_id: number;
-          signer_name: string;
-          signer_tier: Database['public']['Enums']['membership_tier'];
-          status: Database['public']['Enums']['signature_status'];
-          updated_at: string;
-          user_id: number;
-          weight: number;
-        };
-        Insert: {
-          consent_version: string;
-          created_at?: string;
-          deleted_at?: string | null;
-          display_mode: Database['public']['Enums']['display_mode'];
-          id?: never;
-          idempotency_key?: string | null;
-          investor_type?: string | null;
-          investor_type_kind?: Database['public']['Enums']['lookup_type'];
-          public_id?: string;
-          representation_id: number;
-          request_hash?: string | null;
-          signature_code: string;
-          signature_file_id: number;
-          signer_name?: string;
-          signer_tier: Database['public']['Enums']['membership_tier'];
-          status?: Database['public']['Enums']['signature_status'];
-          updated_at?: string;
-          user_id: number;
-          weight: number;
-        };
-        Update: {
-          consent_version?: string;
-          created_at?: string;
-          deleted_at?: string | null;
-          display_mode?: Database['public']['Enums']['display_mode'];
-          id?: never;
-          idempotency_key?: string | null;
-          investor_type?: string | null;
-          investor_type_kind?: Database['public']['Enums']['lookup_type'];
-          public_id?: string;
-          representation_id?: number;
-          request_hash?: string | null;
-          signature_code?: string;
-          signature_file_id?: number;
-          signer_name?: string;
-          signer_tier?: Database['public']['Enums']['membership_tier'];
-          status?: Database['public']['Enums']['signature_status'];
-          updated_at?: string;
-          user_id?: number;
-          weight?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'representation_signatures_representation_id_fkey';
-            columns: ['representation_id'];
-            isOneToOne: false;
-            referencedRelation: 'representations';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'representation_signatures_signature_file_id_fkey';
-            columns: ['signature_file_id'];
-            isOneToOne: false;
-            referencedRelation: 'files';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'representation_signatures_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      representation_status_history: {
-        Row: {
-          actor_id: number | null;
-          created_at: string;
-          from_status: Database['public']['Enums']['representation_track_status'] | null;
-          id: number;
-          note: string | null;
-          occurred_at: string;
-          representation_id: number;
-          to_status: Database['public']['Enums']['representation_track_status'];
-          updated_at: string;
-        };
-        Insert: {
-          actor_id?: number | null;
-          created_at?: string;
-          from_status?: Database['public']['Enums']['representation_track_status'] | null;
-          id?: never;
-          note?: string | null;
-          occurred_at?: string;
-          representation_id: number;
-          to_status: Database['public']['Enums']['representation_track_status'];
-          updated_at?: string;
-        };
-        Update: {
-          actor_id?: number | null;
-          created_at?: string;
-          from_status?: Database['public']['Enums']['representation_track_status'] | null;
-          id?: never;
-          note?: string | null;
-          occurred_at?: string;
-          representation_id?: number;
-          to_status?: Database['public']['Enums']['representation_track_status'];
-          updated_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'representation_status_history_actor_id_fkey';
-            columns: ['actor_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'representation_status_history_representation_id_fkey';
-            columns: ['representation_id'];
-            isOneToOne: false;
-            referencedRelation: 'representations';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      representations: {
-        Row: {
-          asks: string[];
-          category: string | null;
-          closes_at: string;
-          country: Database['public']['Enums']['market_country'];
-          created_at: string;
-          deleted_at: string | null;
-          goal: number;
-          id: number;
-          opens_at: string;
-          public_id: string;
-          regulators: string[];
-          signature_count: number;
-          slug: string;
-          description: string;
-          tags: string[];
-          title: string;
-          track_status: Database['public']['Enums']['representation_track_status'];
-          updated_at: string;
-          vote_count: number;
-          why_it_matters: string;
-        };
-        Insert: {
-          asks?: string[];
-          category?: string | null;
-          closes_at: string;
-          country: Database['public']['Enums']['market_country'];
-          created_at?: string;
-          deleted_at?: string | null;
-          goal: number;
-          id?: never;
-          opens_at?: string;
-          public_id?: string;
-          regulators?: string[];
-          signature_count?: number;
-          slug: string;
-          description?: string;
-          tags?: string[];
-          title: string;
-          track_status?: Database['public']['Enums']['representation_track_status'];
-          updated_at?: string;
-          vote_count?: number;
-          why_it_matters?: string;
-        };
-        Update: {
-          asks?: string[];
-          category?: string | null;
-          closes_at?: string;
-          country?: Database['public']['Enums']['market_country'];
-          created_at?: string;
-          deleted_at?: string | null;
-          goal?: number;
-          id?: never;
-          opens_at?: string;
-          public_id?: string;
-          regulators?: string[];
-          signature_count?: number;
-          slug?: string;
-          description?: string;
-          tags?: string[];
-          title?: string;
-          track_status?: Database['public']['Enums']['representation_track_status'];
-          updated_at?: string;
-          vote_count?: number;
-          why_it_matters?: string;
-        };
-        Relationships: [];
-      };
-      review_attachments: {
-        Row: {
-          review_id: string;
-          storage_path: string;
-          doc_type: string;
-          created_at: string;
-        };
-        Insert: {
-          review_id: string;
-          storage_path: string;
-          doc_type: string;
-          created_at?: string;
-        };
-        Update: {
-          review_id?: string;
-          storage_path?: string;
-          doc_type?: string;
-          created_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'review_attachments_review_id_fkey';
-            columns: ['review_id'];
-            isOneToOne: false;
-            referencedRelation: 'reviews';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      review_tags: {
-        Row: {
-          review_id: string;
-          tag_type: string;
-          code: string;
-        };
-        Insert: {
-          review_id: string;
-          tag_type: string;
-          code: string;
-        };
-        Update: {
-          review_id?: string;
-          tag_type?: string;
-          code?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'review_tags_review_id_fkey';
-            columns: ['review_id'];
-            isOneToOne: false;
-            referencedRelation: 'reviews';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      review_versions: {
-        Row: {
-          id: number;
-          review_id: string;
-          change_type: Database['public']['Enums']['review_change_type'];
-          from_value: string | null;
-          to_value: string | null;
-          note: string | null;
-          actor_id: string | null;
-          created_at: string;
-        };
-        Insert: {
-          id?: number;
-          review_id: string;
-          change_type: Database['public']['Enums']['review_change_type'];
-          from_value?: string | null;
-          to_value?: string | null;
-          note?: string | null;
-          actor_id?: string | null;
-          created_at?: string;
-        };
-        Update: {
-          id?: number;
-          review_id?: string;
-          change_type?: Database['public']['Enums']['review_change_type'];
-          from_value?: string | null;
-          to_value?: string | null;
-          note?: string | null;
-          actor_id?: string | null;
-          created_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'review_versions_review_id_fkey';
-            columns: ['review_id'];
-            isOneToOne: false;
-            referencedRelation: 'reviews';
+            referencedRelation: 'issuers';
             referencedColumns: ['id'];
           },
         ];
@@ -1193,159 +295,216 @@ export type Database = {
           },
         ];
       };
-      tier_history: {
+      review_tags: {
         Row: {
+          review_id: string;
+          tag_type: string;
+          code: string;
+        };
+        Insert: {
+          review_id: string;
+          tag_type: string;
+          code: string;
+        };
+        Update: {
+          review_id?: string;
+          tag_type?: string;
+          code?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'review_tags_review_id_fkey';
+            columns: ['review_id'];
+            isOneToOne: false;
+            referencedRelation: 'reviews';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      review_attachments: {
+        Row: {
+          review_id: string;
+          storage_path: string;
+          doc_type: string;
           created_at: string;
-          from_tier: Database['public']['Enums']['membership_tier'];
+        };
+        Insert: {
+          review_id: string;
+          storage_path: string;
+          doc_type: string;
+          created_at?: string;
+        };
+        Update: {
+          review_id?: string;
+          storage_path?: string;
+          doc_type?: string;
+          created_at?: string;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'review_attachments_review_id_fkey';
+            columns: ['review_id'];
+            isOneToOne: false;
+            referencedRelation: 'reviews';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
+      review_versions: {
+        Row: {
           id: number;
-          to_tier: Database['public']['Enums']['membership_tier'];
-          user_id: number;
+          review_id: string;
+          change_type: Database['public']['Enums']['review_change_type'];
+          from_value: string | null;
+          to_value: string | null;
+          note: string | null;
+          actor_id: string | null;
+          created_at: string;
         };
         Insert: {
+          id?: number;
+          review_id: string;
+          change_type: Database['public']['Enums']['review_change_type'];
+          from_value?: string | null;
+          to_value?: string | null;
+          note?: string | null;
+          actor_id?: string | null;
           created_at?: string;
-          from_tier: Database['public']['Enums']['membership_tier'];
-          id?: never;
-          to_tier: Database['public']['Enums']['membership_tier'];
-          user_id: number;
         };
         Update: {
+          id?: number;
+          review_id?: string;
+          change_type?: Database['public']['Enums']['review_change_type'];
+          from_value?: string | null;
+          to_value?: string | null;
+          note?: string | null;
+          actor_id?: string | null;
           created_at?: string;
-          from_tier?: Database['public']['Enums']['membership_tier'];
-          id?: never;
-          to_tier?: Database['public']['Enums']['membership_tier'];
-          user_id?: number;
         };
         Relationships: [
           {
-            foreignKeyName: 'tier_history_user_id_fkey';
-            columns: ['user_id'];
+            foreignKeyName: 'review_versions_review_id_fkey';
+            columns: ['review_id'];
             isOneToOne: false;
-            referencedRelation: 'users';
+            referencedRelation: 'reviews';
             referencedColumns: ['id'];
           },
         ];
       };
-      user_preferences: {
+      company_stats: {
         Row: {
-          created_at: string;
-          option_code: string;
-          type: Database['public']['Enums']['preference_type'];
-          user_id: number;
-        };
-        Insert: {
-          created_at?: string;
-          option_code: string;
-          type: Database['public']['Enums']['preference_type'];
-          user_id: number;
-        };
-        Update: {
-          created_at?: string;
-          option_code?: string;
-          type?: Database['public']['Enums']['preference_type'];
-          user_id?: number;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'user_preferences_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['id'];
-          },
-        ];
-      };
-      user_profiles: {
-        Row: {
-          avatar_file_id: number | null;
-          created_at: string;
-          experience: string | null;
-          job_profile: string | null;
-          location: string | null;
-          name: string | null;
-          other_job: string | null;
+          company_id: string;
+          review_count: number;
+          score: number;
+          relevance: number;
+          avg_transparency: number;
+          avg_responsiveness: number;
+          avg_ease_of_process: number;
+          avg_trustworthiness: number;
+          avg_overall_satisfaction: number;
+          positive_pct: number;
+          neutral_pct: number;
+          negative_pct: number;
+          dominant_sentiment: Database['public']['Enums']['sentiment'] | null;
+          resolved_pct: number;
+          in_progress_pct: number;
+          unresolved_pct: number;
+          not_contacted_pct: number;
+          dominant_resolution: Database['public']['Enums']['resolution_bucket'] | null;
+          reviews_30d: number;
+          score_change_12m: number;
+          last_review_at: string | null;
           updated_at: string;
-          user_id: number;
         };
         Insert: {
-          avatar_file_id?: number | null;
-          created_at?: string;
-          experience?: string | null;
-          job_profile?: string | null;
-          location?: string | null;
-          name?: string | null;
-          other_job?: string | null;
+          company_id: string;
+          review_count?: number;
+          score?: number;
+          relevance?: number;
+          avg_transparency?: number;
+          avg_responsiveness?: number;
+          avg_ease_of_process?: number;
+          avg_trustworthiness?: number;
+          avg_overall_satisfaction?: number;
+          positive_pct?: number;
+          neutral_pct?: number;
+          negative_pct?: number;
+          dominant_sentiment?: Database['public']['Enums']['sentiment'] | null;
+          resolved_pct?: number;
+          in_progress_pct?: number;
+          unresolved_pct?: number;
+          not_contacted_pct?: number;
+          dominant_resolution?: Database['public']['Enums']['resolution_bucket'] | null;
+          reviews_30d?: number;
+          score_change_12m?: number;
+          last_review_at?: string | null;
           updated_at?: string;
-          user_id: number;
         };
         Update: {
-          avatar_file_id?: number | null;
-          created_at?: string;
-          experience?: string | null;
-          job_profile?: string | null;
-          location?: string | null;
-          name?: string | null;
-          other_job?: string | null;
+          company_id?: string;
+          review_count?: number;
+          score?: number;
+          relevance?: number;
+          avg_transparency?: number;
+          avg_responsiveness?: number;
+          avg_ease_of_process?: number;
+          avg_trustworthiness?: number;
+          avg_overall_satisfaction?: number;
+          positive_pct?: number;
+          neutral_pct?: number;
+          negative_pct?: number;
+          dominant_sentiment?: Database['public']['Enums']['sentiment'] | null;
+          resolved_pct?: number;
+          in_progress_pct?: number;
+          unresolved_pct?: number;
+          not_contacted_pct?: number;
+          dominant_resolution?: Database['public']['Enums']['resolution_bucket'] | null;
+          reviews_30d?: number;
+          score_change_12m?: number;
+          last_review_at?: string | null;
           updated_at?: string;
-          user_id?: number;
         };
         Relationships: [
           {
-            foreignKeyName: 'user_profiles_avatar_file_id_fkey';
-            columns: ['avatar_file_id'];
-            isOneToOne: false;
-            referencedRelation: 'files';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'user_profiles_user_id_fkey';
-            columns: ['user_id'];
+            foreignKeyName: 'company_stats_company_id_fkey';
+            columns: ['company_id'];
             isOneToOne: true;
-            referencedRelation: 'users';
+            referencedRelation: 'companies';
             referencedColumns: ['id'];
           },
         ];
       };
-      users: {
+      company_trend_points: {
         Row: {
-          auth_user_id: string;
-          created_at: string;
-          email: string | null;
-          id: number;
-          kyc_status: Database['public']['Enums']['kyc_status'];
-          phone: string | null;
-          public_id: string;
-          requested_tier: Database['public']['Enums']['verified_tier'] | null;
-          status: Database['public']['Enums']['user_status'];
-          tier: Database['public']['Enums']['membership_tier'];
-          updated_at: string;
+          company_id: string;
+          month: string;
+          review_count: number;
+          overall_sum: number;
+          positive_count: number;
         };
         Insert: {
-          auth_user_id: string;
-          created_at?: string;
-          email?: string | null;
-          id?: never;
-          kyc_status?: Database['public']['Enums']['kyc_status'];
-          phone?: string | null;
-          public_id?: string;
-          requested_tier?: Database['public']['Enums']['verified_tier'] | null;
-          status?: Database['public']['Enums']['user_status'];
-          tier?: Database['public']['Enums']['membership_tier'];
-          updated_at?: string;
+          company_id: string;
+          month: string;
+          review_count: number;
+          overall_sum: number;
+          positive_count: number;
         };
         Update: {
-          auth_user_id?: string;
-          created_at?: string;
-          email?: string | null;
-          id?: never;
-          kyc_status?: Database['public']['Enums']['kyc_status'];
-          phone?: string | null;
-          public_id?: string;
-          requested_tier?: Database['public']['Enums']['verified_tier'] | null;
-          status?: Database['public']['Enums']['user_status'];
-          tier?: Database['public']['Enums']['membership_tier'];
-          updated_at?: string;
+          company_id?: string;
+          month?: string;
+          review_count?: number;
+          overall_sum?: number;
+          positive_count?: number;
         };
-        Relationships: [];
+        Relationships: [
+          {
+            foreignKeyName: 'company_trend_points_company_id_fkey';
+            columns: ['company_id'];
+            isOneToOne: false;
+            referencedRelation: 'companies';
+            referencedColumns: ['id'];
+          },
+        ];
       };
     };
     Views: {
@@ -1383,82 +542,6 @@ export type Database = {
           last_review_at: string | null;
         };
         Relationships: [];
-      };
-      issuer_cards: {
-        Row: {
-          asset_type: string | null;
-          average_score: number | null;
-          close_date: string | null;
-          created_at: string | null;
-          currency: string | null;
-          exchange: string | null;
-          id: string | null;
-          instrument: string | null;
-          is_listed: boolean | null;
-          lock_in: string | null;
-          lot_unit: string | null;
-          min_lot: number | null;
-          name: string | null;
-          offer_size: number | null;
-          open_date: string | null;
-          pre_post_ratio: string | null;
-          price_max: number | null;
-          price_min: number | null;
-          rating_count: number | null;
-          slug: string | null;
-          search_text: string | null;
-          tags: string[] | null;
-          use_of_funds: string | null;
-        };
-        Relationships: [];
-      };
-      representation_cards: {
-        Row: {
-          asks: string[] | null;
-          category: string | null;
-          closes_at: string | null;
-          country: Database['public']['Enums']['market_country'] | null;
-          created_at: string | null;
-          days_left: number | null;
-          goal: number | null;
-          id: string | null;
-          internal_id: number | null;
-          is_open_for_signing: boolean | null;
-          opens_at: string | null;
-          progress_pct: number | null;
-          regulators: string[] | null;
-          signature_count: number | null;
-          slug: string | null;
-          search_text: string | null;
-          description: string | null;
-          tags: string[] | null;
-          title: string | null;
-          track_status: Database['public']['Enums']['representation_track_status'] | null;
-          vote_count: number | null;
-          why_it_matters: string | null;
-        };
-        Relationships: [];
-      };
-      representation_signers: {
-        Row: {
-          display_name: string | null;
-          id: string | null;
-          investor_type: string | null;
-          investor_type_label: string | null;
-          is_anonymous: boolean | null;
-          is_verified: boolean | null;
-          representation_id: number | null;
-          signed_at: string | null;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'representation_signatures_representation_id_fkey';
-            columns: ['representation_id'];
-            isOneToOne: false;
-            referencedRelation: 'representations';
-            referencedColumns: ['id'];
-          },
-        ];
       };
       review_feed: {
         Row: {
@@ -1511,32 +594,9 @@ export type Database = {
         Args: never;
         Returns: undefined;
       };
-      recompute_all_issuer_stats: {
-        Args: never;
-        Returns: undefined;
-      };
       recompute_company_stats: {
         Args: { p_company_id: string };
         Returns: undefined;
-      };
-      recompute_issuer_stats: {
-        Args: { p_issuer_id: string };
-        Returns: undefined;
-      };
-      replace_user_preferences: {
-        Args: { p_preferences: Json; p_user_id: number };
-        Returns: undefined;
-      };
-      representation_closing_soon_window: {
-        Args: never;
-        Returns: unknown;
-      };
-      representation_effective_status: {
-        Args: {
-          p_closes_at: string;
-          p_status: Database['public']['Enums']['representation_track_status'];
-        };
-        Returns: Database['public']['Enums']['representation_track_status'];
       };
       search_companies: {
         Args: {
@@ -1557,55 +617,6 @@ export type Database = {
           isOneToOne: false;
           isSetofReturn: true;
         };
-      };
-      sign_representation: {
-        Args: {
-          p_app_version: string | null;
-          p_consent_types: string[];
-          p_consent_version: string;
-          p_display_mode: Database['public']['Enums']['display_mode'];
-          p_idempotency_key: string | null;
-          p_investor_type: string | null;
-          p_ip_address: string | null;
-          p_representation_id: string;
-          p_request_hash: string | null;
-          p_signature_code: string;
-          p_signature_file_id: number;
-          p_signer_name: string;
-          p_signer_tier: Database['public']['Enums']['membership_tier'];
-          p_user_id: number;
-        };
-        Returns: {
-          created_at: string;
-          public_id: string;
-          signature_code: string;
-        }[];
-      };
-      submit_issuer_rating: {
-        Args: {
-          p_factors: Json;
-          p_idempotency_key: string | null;
-          p_issuer_id: string;
-          p_overall_score: number;
-          p_request_hash: string | null;
-          p_risk_codes: string[];
-          p_user_id: number;
-        };
-        Returns: {
-          created_at: string;
-          public_id: string;
-          receipt_no: string;
-          status: Database['public']['Enums']['rating_status'];
-        }[];
-      };
-      submit_kyc: {
-        Args: {
-          p_consent: Json;
-          p_documents: Json;
-          p_tier: Database['public']['Enums']['verified_tier'];
-          p_user_id: number;
-        };
-        Returns: string;
       };
       submit_review: {
         Args: {
@@ -1666,32 +677,8 @@ export type Database = {
     Enums: {
       asset_class: 'EQ' | 'MF' | 'INS' | 'BND' | 'PMS' | 'BRK' | 'RE' | 'CRY';
       display_mode: 'FULL_NAME' | 'INITIALS' | 'ANONYMOUS';
-      file_purpose: 'AVATAR' | 'KYC_DOCUMENT' | 'REVIEW_EVIDENCE' | 'SIGNATURE';
-      file_scan_status: 'PENDING' | 'CLEAN' | 'INFECTED';
       investment_status: 'CURRENTLY_INVESTED' | 'EXITED' | 'NEVER_INVESTED';
-      kyc_document_type:
-        | 'ID_PROOF'
-        | 'ADDRESS_PROOF'
-        | 'TAX_ID'
-        | 'INCORPORATION_CERTIFICATE'
-        | 'AUTHORISATION_LETTER';
-      kyc_status: 'NOT_STARTED' | 'PENDING' | 'APPROVED' | 'REJECTED';
-      kyc_submission_status: 'PENDING' | 'APPROVED' | 'REJECTED';
-      lookup_type:
-        | 'JOB_PROFILE'
-        | 'FOCUS'
-        | 'RISK'
-        | 'STYLE'
-        | 'SECTOR'
-        | 'ASSET_CLASS'
-        | 'APPRECIATION_TAG'
-        | 'CONCERN_TAG'
-        | 'RATING_FACTOR'
-        | 'RISK_FACTOR'
-        | 'INVESTOR_TYPE';
       market_country: 'IN' | 'AE' | 'OTHER';
-      membership_tier: 'OBSERVER' | 'PRIVE' | 'INSTITUTIONAL';
-      preference_type: 'FOCUS' | 'RISK' | 'STYLE' | 'SECTOR';
       reinvest_status: 'YES' | 'MAYBE' | 'NO';
       resolution_bucket: 'RESOLVED' | 'IN_PROGRESS' | 'UNRESOLVED' | 'NOT_CONTACTED';
       resolution_status:
@@ -1711,24 +698,6 @@ export type Database = {
       review_status:
         'PENDING_MODERATION' | 'PUBLISHED' | 'CHANGES_REQUESTED' | 'REJECTED' | 'REMOVED';
       sentiment: 'Positive' | 'Neutral' | 'Negative';
-      signature_status: 'VALID' | 'REMOVED';
-      user_status: 'ACTIVE' | 'SUSPENDED';
-      verified_tier: 'PRIVE' | 'INSTITUTIONAL';
-      rating_flag: 'POSITIVE' | 'NEUTRAL' | 'NEGATIVE';
-      rating_status:
-        'PENDING_MODERATION' | 'PUBLISHED' | 'CHANGES_REQUESTED' | 'REJECTED' | 'REMOVED';
-      representation_document_type:
-        'EVIDENCE' | 'SUBMISSION_PACK' | 'REGULATOR_RESPONSE' | 'MEETING_MINUTES';
-      representation_track_status:
-        | 'OPEN'
-        | 'CLOSING_SOON'
-        | 'CLOSED'
-        | 'UNDER_REVIEW'
-        | 'SUBMITTED_TO_REGULATOR'
-        | 'MEETING_REQUESTED'
-        | 'MEETING_SCHEDULED'
-        | 'REGULATOR_RESPONDED'
-        | 'RESOLVED';
     };
     CompositeTypes: {
       [_ in never]: never;
@@ -1739,10 +708,6 @@ export type Database = {
 type PublicSchema = Database['public'];
 
 export type Tables<T extends keyof PublicSchema['Tables']> = PublicSchema['Tables'][T]['Row'];
-export type TablesInsert<T extends keyof PublicSchema['Tables']> =
-  PublicSchema['Tables'][T]['Insert'];
-export type TablesUpdate<T extends keyof PublicSchema['Tables']> =
-  PublicSchema['Tables'][T]['Update'];
 export type Views<T extends keyof PublicSchema['Views']> = PublicSchema['Views'][T]['Row'];
 export type Enums<T extends keyof PublicSchema['Enums']> = PublicSchema['Enums'][T];
 
@@ -1752,60 +717,9 @@ export const Constants = {
     Enums: {
       asset_class: ['EQ', 'MF', 'INS', 'BND', 'PMS', 'BRK', 'RE', 'CRY'],
       display_mode: ['FULL_NAME', 'INITIALS', 'ANONYMOUS'],
-      file_purpose: ['AVATAR', 'KYC_DOCUMENT', 'REVIEW_EVIDENCE', 'SIGNATURE'],
-      file_scan_status: ['PENDING', 'CLEAN', 'INFECTED'],
       investment_status: ['CURRENTLY_INVESTED', 'EXITED', 'NEVER_INVESTED'],
-      kyc_document_type: [
-        'ID_PROOF',
-        'ADDRESS_PROOF',
-        'TAX_ID',
-        'INCORPORATION_CERTIFICATE',
-        'AUTHORISATION_LETTER',
-      ],
-      kyc_status: ['NOT_STARTED', 'PENDING', 'APPROVED', 'REJECTED'],
-      kyc_submission_status: ['PENDING', 'APPROVED', 'REJECTED'],
-      lookup_type: [
-        'JOB_PROFILE',
-        'FOCUS',
-        'RISK',
-        'STYLE',
-        'SECTOR',
-        'ASSET_CLASS',
-        'APPRECIATION_TAG',
-        'CONCERN_TAG',
-        'RATING_FACTOR',
-        'RISK_FACTOR',
-        'INVESTOR_TYPE',
-      ],
       market_country: ['IN', 'AE', 'OTHER'],
-      membership_tier: ['OBSERVER', 'PRIVE', 'INSTITUTIONAL'],
-      preference_type: ['FOCUS', 'RISK', 'STYLE', 'SECTOR'],
-      rating_flag: ['POSITIVE', 'NEUTRAL', 'NEGATIVE'],
-      rating_status: [
-        'PENDING_MODERATION',
-        'PUBLISHED',
-        'CHANGES_REQUESTED',
-        'REJECTED',
-        'REMOVED',
-      ],
       reinvest_status: ['YES', 'MAYBE', 'NO'],
-      representation_document_type: [
-        'EVIDENCE',
-        'SUBMISSION_PACK',
-        'REGULATOR_RESPONSE',
-        'MEETING_MINUTES',
-      ],
-      representation_track_status: [
-        'OPEN',
-        'CLOSING_SOON',
-        'CLOSED',
-        'UNDER_REVIEW',
-        'SUBMITTED_TO_REGULATOR',
-        'MEETING_REQUESTED',
-        'MEETING_SCHEDULED',
-        'REGULATOR_RESPONDED',
-        'RESOLVED',
-      ],
       resolution_bucket: ['RESOLVED', 'IN_PROGRESS', 'UNRESOLVED', 'NOT_CONTACTED'],
       resolution_status: [
         'NOT_CONTACTED',
@@ -1823,9 +737,6 @@ export const Constants = {
         'REMOVED',
       ],
       sentiment: ['Positive', 'Neutral', 'Negative'],
-      signature_status: ['VALID', 'REMOVED'],
-      user_status: ['ACTIVE', 'SUSPENDED'],
-      verified_tier: ['PRIVE', 'INSTITUTIONAL'],
     },
   },
 } as const satisfies {

@@ -1,13 +1,8 @@
 import { Router } from 'express';
 import { sendData, sendPage } from '../../lib/http';
 import { readIdempotencyKey, REPLAYED_HEADER } from '../../lib/idempotency';
-import {
-  currentUser,
-  optionalUser,
-  requireUser,
-  requireVerifiedPrive,
-} from '../../middleware/auth';
-import { noStore } from '../../middleware/requestContext';
+import { getAuth, optionalAuth, requireAuth, requireVerifiedPrive } from '../../middleware/auth';
+import { clientContext } from '../../middleware/requestContext';
 import { parse } from '../../middleware/validate';
 import {
   issuerIdParams,
@@ -33,23 +28,24 @@ issuersRouter.get('/:id', async (req, res) => {
 
 // GET /issuers/:id/rating-summary — Public: aggregate score; verified Prive / Institutional also
 // get the weighted score and the full breakdown.
-issuersRouter.get('/:id/rating-summary', optionalUser, async (req, res) => {
+issuersRouter.get('/:id/rating-summary', optionalAuth, async (req, res) => {
   const { id } = parse(issuerIdParams, req.params);
   sendData(res, await ratingsService.getRatingSummary(id, req.user));
 });
 
 // POST /issuers/:id/ratings — Prive (KYC verified): overall 1-5, all factor flags, exactly 3 risk
 // factors. Needs an Idempotency-Key header; returns the receipt.
-issuersRouter.post('/:id/ratings', requireUser, requireVerifiedPrive, async (req, res) => {
+issuersRouter.post('/:id/ratings', requireAuth, requireVerifiedPrive, async (req, res) => {
   const { id } = parse(issuerIdParams, req.params);
   const idempotencyKey = readIdempotencyKey(req);
   const input = parse(submitRatingBody, req.body);
 
   const { result, replayed } = await ratingsService.submitRating(
-    currentUser(req),
+    getAuth(req),
     id,
     input,
     idempotencyKey,
+    clientContext(req),
   );
   if (replayed) res.set(REPLAYED_HEADER, 'true');
   sendData(res, result, 201);
@@ -58,9 +54,9 @@ issuersRouter.post('/:id/ratings', requireUser, requireVerifiedPrive, async (req
 export const ratingsRouter = Router();
 
 // GET /ratings/me — User: my ratings with moderation status.
-ratingsRouter.get('/me', noStore, requireUser, async (req, res) => {
+ratingsRouter.get('/me', requireAuth, async (req, res) => {
   const { items, meta } = await ratingsService.listMyRatings(
-    currentUser(req),
+    getAuth(req),
     parse(listMyRatingsQuery, req.query),
   );
   sendPage(res, items, meta);

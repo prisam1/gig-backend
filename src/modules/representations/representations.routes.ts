@@ -2,13 +2,13 @@ import { Router } from 'express';
 import { sendData, sendPage } from '../../lib/http';
 import { readIdempotencyKey, REPLAYED_HEADER } from '../../lib/idempotency';
 import {
-  currentUser,
-  optionalUser,
-  requireUser,
+  getAuth,
+  optionalAuth,
+  requireAuth,
   requireFullAccess,
   requireVerifiedPrive,
 } from '../../middleware/auth';
-import { noStore } from '../../middleware/requestContext';
+import { clientContext } from '../../middleware/requestContext';
 import { parse } from '../../middleware/validate';
 import {
   listRepresentationsQuery,
@@ -28,10 +28,10 @@ representationsRouter.get('/', async (req, res) => {
 });
 
 // GET /representations/:id — Public: overview, evidence, signers; plus your own signature and its
-// receipt when signed in. The response is per user, so it is never cached.
-representationsRouter.get('/:id', noStore, optionalUser, async (req, res) => {
+// receipt when signed in.
+representationsRouter.get('/:id', optionalAuth, async (req, res) => {
   const { id } = parse(representationIdParams, req.params);
-  sendData(res, await representationsService.get(id, req.user));
+  sendData(res, await representationsService.get(id, req.auth));
 });
 
 // GET /representations/:id/timeline — Public: the 9-step track and its status history.
@@ -42,24 +42,17 @@ representationsRouter.get('/:id/timeline', async (req, res) => {
 
 // GET /representations/:id/submission — Prive (KYC verified) and Institutional: download link for
 // the submitted petition pack.
-representationsRouter.get(
-  '/:id/submission',
-  noStore,
-  requireUser,
-  requireFullAccess,
-  async (req, res) => {
-    const { id } = parse(representationIdParams, req.params);
-    sendData(res, await representationsService.submissionPack(id));
-  },
-);
+representationsRouter.get('/:id/submission', requireAuth, requireFullAccess, async (req, res) => {
+  const { id } = parse(representationIdParams, req.params);
+  sendData(res, await representationsService.submissionPack(id));
+});
 
 // POST /representations/:id/signatures — Prive (KYC verified): sign with a display choice, an
 // optional investor type, a signature file and both consents. Needs an Idempotency-Key header;
 // returns the signature ID (GIG-XXXXXXXXX) and a link to the receipt PDF.
 representationsRouter.post(
   '/:id/signatures',
-  noStore,
-  requireUser,
+  requireAuth,
   requireVerifiedPrive,
   async (req, res) => {
     const { id } = parse(representationIdParams, req.params);
@@ -67,11 +60,11 @@ representationsRouter.post(
     const input = parse(signRepresentationBody, req.body);
 
     const { result, replayed } = await representationsService.sign(
-      currentUser(req),
+      getAuth(req),
       id,
       input,
-      { ipAddress: req.ip ?? null, appVersion: req.get('x-app-version') ?? null },
       idempotencyKey,
+      clientContext(req),
     );
     if (replayed) res.set(REPLAYED_HEADER, 'true');
     sendData(res, result, 201);

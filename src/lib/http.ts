@@ -45,9 +45,6 @@ export function pageRange({ page, pageSize }: { page: number; pageSize: number }
   return { from, to: from + pageSize - 1 };
 }
 
-/** PostgREST's answer when a page starts past the last row; callers return an empty page. */
-export const RANGE_NOT_SATISFIABLE = 'PGRST103';
-
 /** Escapes LIKE wildcards so user input matches literally. */
 export function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
