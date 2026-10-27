@@ -156,12 +156,11 @@ beforeAll(async () => {
     await db.exec(readFileSync(join(dir, file), 'utf8'));
   }
   await db.exec(readFileSync(join(ROOT, 'supabase', 'seed.sql'), 'utf8'));
-  // Reviewers are auth-module users, identified by app.users.public_id.
+  // Reviewers are GIG users, identified by users.public_id (here equal to their auth id).
   await db.exec(`
-    insert into app.users (public_id, email_enc, email_hash, phone_country_code, phone_enc, phone_hash,
-                           password_hash, email_verified_at, phone_verified_at)
-    values ('${ALICE}', 'x', 'alice', '+91', 'x', 'alice', 'x', now(), now()),
-           ('${BOB}', 'x', 'bob', '+91', 'x', 'bob', 'x', now(), now())`);
+    insert into auth.users (id) values ('${ALICE}'), ('${BOB}');
+    insert into public.users (auth_user_id, public_id) values ('${ALICE}', '${ALICE}'), ('${BOB}', '${BOB}');
+  `);
 });
 
 afterAll(async () => {
@@ -178,23 +177,25 @@ beforeEach(async () => {
 });
 
 describe('schema and seed', () => {
-  it("creates exactly the plan's 10 Catalog and Reviews tables, with row level security on", async () => {
+  it("creates the plan's 10 Catalog and Reviews tables, with row level security on every table", async () => {
     const tables = await rows<{ tablename: string; rowsecurity: boolean }>(
       `select tablename, rowsecurity from pg_tables where schemaname = 'public' order by tablename`,
     );
-    expect(tables.map((t) => t.tablename)).toEqual([
-      'companies',
-      'company_stats',
-      'company_tags',
-      'company_trend_points',
-      'issuer_tags',
-      'issuers',
-      'review_attachments',
-      'review_tags',
-      'review_versions',
-      'reviews',
-    ]);
-    expect(tables.every((t) => t.rowsecurity)).toBe(true);
+    expect(tables.map((t) => t.tablename)).toEqual(
+      expect.arrayContaining([
+        'companies',
+        'company_stats',
+        'company_tags',
+        'company_trend_points',
+        'issuer_tags',
+        'issuers',
+        'review_attachments',
+        'review_tags',
+        'review_versions',
+        'reviews',
+      ]),
+    );
+    expect(tables.filter((t) => !t.rowsecurity).map((t) => t.tablename)).toEqual([]);
   });
 
   it('does not depend on a profiles table (owned by the auth module)', async () => {

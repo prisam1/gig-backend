@@ -2,54 +2,45 @@ import type { ErrorRequestHandler, RequestHandler } from 'express';
 import { z } from 'zod';
 import { env } from '../config/env';
 
-// Every error response has the shape { error: { code, message, fields? } } so the app can show
-// its existing field messages.
-export class AppError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly code: string,
-    message: string,
-    public readonly fields?: Record<string, string>,
-    public readonly headers?: Record<string, string>,
-  ) {
-    super(message);
-  }
-}
+export type FieldErrors = Record<string, string>;
 
-// Shared codes from the API spec. Modules add their own where the app needs to tell cases apart
-// (for example INVALID_CREDENTIALS).
-export type ErrorCode =
-  | 'VALIDATION_FAILED'
-  | 'UNAUTHENTICATED'
-  | 'FORBIDDEN'
-  | 'KYC_REQUIRED'
-  | 'NOT_FOUND'
-  | 'CONFLICT'
-  | 'IDEMPOTENCY_CONFLICT'
-  | 'INTERNAL';
-
-const defaultCodes: Record<number, ErrorCode> = {
+// Codes from the API spec. Modules add their own where the app must tell cases apart
+// (for example KYC_REQUIRED, KYC_PENDING or ACCOUNT_SUSPENDED).
+const DEFAULT_CODES: Record<number, string> = {
   400: 'VALIDATION_FAILED',
   401: 'UNAUTHENTICATED',
   403: 'FORBIDDEN',
   404: 'NOT_FOUND',
   409: 'CONFLICT',
+  413: 'PAYLOAD_TOO_LARGE',
+  415: 'UNSUPPORTED_MEDIA_TYPE',
 };
 
-/** An AppError whose code defaults from the status. */
-export class HttpError extends AppError {
+// Every error response has the shape { error: { code, message, fields? } } so the app can show
+// field messages next to each input.
+export class HttpError extends Error {
+  public readonly code: string;
+  public readonly fields: FieldErrors | undefined;
+
   constructor(
-    status: number,
+    public readonly status: number,
     message: string,
-    options: { code?: ErrorCode; fields?: Record<string, string> } = {},
+    options: { code?: string; fields?: FieldErrors } = {},
   ) {
-    super(status, options.code ?? defaultCodes[status] ?? 'INTERNAL', message, options.fields);
+    super(message);
+    this.code = options.code ?? DEFAULT_CODES[status] ?? 'INTERNAL';
+    this.fields = options.fields;
   }
 }
 
+/** 400 with per-field messages the app can show next to each input. */
+export function validationError(fields: FieldErrors): HttpError {
+  return new HttpError(400, 'Request validation failed', { fields });
+}
+
 /** Flattens a zod error into `{ "metrics.transparency": "message" }`, first message per field. */
-export function zodFields(error: z.ZodError): Record<string, string> {
-  const fields: Record<string, string> = {};
+export function zodFields(error: z.ZodError): FieldErrors {
+  const fields: FieldErrors = {};
   for (const issue of error.issues) {
     const key = issue.path.length > 0 ? issue.path.join('.') : '_';
     fields[key] ??= issue.message;
@@ -58,34 +49,32 @@ export function zodFields(error: z.ZodError): Record<string, string> {
 }
 
 /** Throws a 400 VALIDATION_FAILED when business-rule checks produced any field errors. */
-export function assertNoFieldErrors(fields: Record<string, string>): void {
+export function assertNoFieldErrors(fields: FieldErrors): void {
   if (Object.keys(fields).length > 0) {
     throw new HttpError(400, 'Validation failed', { fields });
   }
 }
 
 export const notFound: RequestHandler = (req, _res, next) => {
-  next(new AppError(404, 'NOT_FOUND', `Route not found: ${req.method} ${req.path}`));
+  next(new HttpError(404, `Route not found: ${req.method} ${req.path}`));
 };
 
-// Errors raised by express.json() before a route runs.
-function bodyParserError(err: unknown): AppError | undefined {
-  const type = (err as { type?: string } | null)?.type;
-  if (type === 'entity.parse.failed') return new AppError(400, 'VALIDATION_FAILED', 'Malformed JSON body');
-  if (type === 'entity.too.large') return new AppError(413, 'PAYLOAD_TOO_LARGE', 'Request body is too large');
-  if (type === 'charset.unsupported' || type === 'encoding.unsupported') {
-    return new AppError(415, 'UNSUPPORTED_ENCODING', 'Unsupported request encoding');
-  }
+// Errors raised by Express itself (e.g. by express.json()) carry their own 4xx status.
+function expressError(err: unknown): HttpError | undefined {
+  const { status, type, message } = (err ?? {}) as { status?: unknown; type?: string; message?: string };
+  if (type === 'entity.parse.failed') return new HttpError(400, 'Malformed JSON body');
+  const code = Number(status);
+  if (code >= 400 && code < 500) return new HttpError(code, message ?? 'Bad request');
   return undefined;
 }
 
 export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   const known =
-    err instanceof AppError
+    err instanceof HttpError
       ? err
       : err instanceof z.ZodError
-        ? new AppError(400, 'VALIDATION_FAILED', 'Validation failed', zodFields(err))
-        : bodyParserError(err);
+        ? new HttpError(400, 'Validation failed', { fields: zodFields(err) })
+        : expressError(err);
 
   if (!known) {
     console.error(`[${req.requestId}]`, err);
@@ -98,7 +87,6 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     return;
   }
 
-  if (known.headers) res.set(known.headers);
   res.status(known.status).json({
     error: { code: known.code, message: known.message, ...(known.fields && { fields: known.fields }) },
   });

@@ -2,9 +2,8 @@ import { createHash } from 'node:crypto';
 import type { PostgrestError } from '@supabase/supabase-js';
 import type { PageMeta } from '../../lib/http';
 import { pageRange } from '../../lib/http';
-import type { Tier } from '../../lib/membership';
+import type { Member, Tier } from '../../lib/membership';
 import { supabaseAdmin } from '../../lib/supabase';
-import type { AuthUser } from '../../middleware/auth';
 import { assertNoFieldErrors, HttpError } from '../../middleware/errorHandler';
 import type { Enums, Tables, Views } from '../../types/database';
 import { accessLevel, assertCompanyExists } from '../catalog/catalog.service';
@@ -334,7 +333,7 @@ function requestHash(input: SubmitReviewInput): string {
  * is a client bug and gets 409.
  */
 async function replayedReview(
-  user: AuthUser,
+  user: Member,
   idempotencyKey: string,
   hash: string,
 ): Promise<SubmitResult | null> {
@@ -364,7 +363,7 @@ async function replayedReview(
  * Returns field errors keyed like `evidence.0.path`.
  */
 async function checkEvidence(
-  user: AuthUser,
+  user: Member,
   evidence: SubmitReviewInput['evidence'],
 ): Promise<Record<string, string>> {
   const fields: Record<string, string> = {};
@@ -402,7 +401,7 @@ async function checkEvidence(
 }
 
 export async function submitReview(
-  user: AuthUser,
+  user: Member,
   input: SubmitReviewInput,
   idempotencyKey: string,
 ): Promise<SubmitResult> {
@@ -477,7 +476,7 @@ export async function submitReview(
 // ---------------------------------------------------------------------------------------------
 
 export async function updateResolution(
-  user: AuthUser,
+  user: Member,
   reviewId: string,
   input: UpdateResolutionInput,
 ): Promise<ResolutionUpdate> {
@@ -526,7 +525,7 @@ const reviewSortOrders: Record<ReviewSort, ['created_at' | 'avg_rating', boolean
 export async function listCompanyReviews(
   companyId: string,
   query: ListCompanyReviewsQuery,
-  user: AuthUser | undefined,
+  user: Member | undefined,
 ): Promise<{ items: PublicReview[]; meta: PageMeta }> {
   await assertCompanyExists(companyId);
   const f = query.filter ?? {};
@@ -564,7 +563,7 @@ export async function listCompanyReviews(
 }
 
 export async function listMyReviews(
-  user: AuthUser,
+  user: Member,
   query: ListMyReviewsQuery,
 ): Promise<{ items: MyReviewItem[]; meta: PageMeta }> {
   const build = (head: boolean) => {
@@ -612,7 +611,7 @@ export async function listMyReviews(
   };
 }
 
-async function findOwnReview(user: AuthUser, reviewId: string): Promise<ReviewReceipt | null> {
+async function findOwnReview(user: Member, reviewId: string): Promise<ReviewReceipt | null> {
   const { data: row, error } = await supabaseAdmin
     .from('reviews')
     .select(
@@ -683,7 +682,7 @@ async function findOwnReview(user: AuthUser, reviewId: string): Promise<ReviewRe
 
 /** The owner gets the full receipt; anyone else sees the published review at their access level. */
 export async function getReview(
-  user: AuthUser,
+  user: Member,
   reviewId: string,
 ): Promise<ReviewReceipt | PublicReview> {
   const own = await findOwnReview(user, reviewId);
