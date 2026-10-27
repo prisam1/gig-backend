@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { sql } from '../lib/db';
+import { callDb } from '../lib/db';
 import { authRouter } from '../modules/auth/auth.routes';
 import { companiesRouter } from '../modules/catalog/catalog.routes';
 import { filesRouter } from '../modules/files/files.routes';
@@ -22,7 +22,7 @@ router.get('/health/live', (_req, res) => {
 
 router.get('/health/ready', async (_req, res) => {
   try {
-    await sql`select 1`;
+    await callDb('app_ping');
     res.json({ status: 'ok', database: 'ok' });
   } catch {
     res.status(503).json({ status: 'unavailable', database: 'unreachable' });

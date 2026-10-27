@@ -1,5 +1,5 @@
 import type { ClientContext } from '../middleware/requestContext';
-import { sql, type Db } from './db';
+import { callDb } from './db';
 
 export type AuditAction =
   | 'auth.register.started'
@@ -22,14 +22,16 @@ export type AuditAction =
   | 'kyc.submitted';
 
 // Append-only: the table rejects UPDATE and DELETE. Never put raw PII in metadata.
+// Multi-step operations write their audit entry inside their own database function.
 export async function audit(
   ctx: ClientContext,
   action: AuditAction,
   details: { userId?: string | null; metadata?: Record<string, unknown> } = {},
-  db: Db = sql,
 ): Promise<void> {
-  await db`
-    insert into app.audit_logs (action, actor_user_id, ip, user_agent, request_id, metadata)
-    values (${action}, ${details.userId ?? null}, ${ctx.ip}, ${ctx.userAgent}, ${ctx.requestId},
-            ${db.json((details.metadata ?? {}) as never)})`;
+  await callDb('app_audit', {
+    p_ctx: ctx,
+    p_action: action,
+    p_user_id: details.userId ?? null,
+    p_metadata: details.metadata ?? {},
+  });
 }

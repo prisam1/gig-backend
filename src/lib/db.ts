@@ -1,26 +1,28 @@
-import postgres from 'postgres';
-import { env } from '../config/env';
+import { supabaseAdmin } from './supabase';
 
-// Direct Postgres connection (Supabase session pooler). All app tables live in the private
-// "app" schema, which the Supabase Data API and the publishable key cannot reach.
-export const sql = postgres(env.DATABASE_URL, {
-  ssl: 'require',
-  max: 10,
-  idle_timeout: 20,
-  connect_timeout: 10,
-  // Works with both the session and the transaction pooler.
-  prepare: false,
-  transform: postgres.camel,
-  onnotice: () => {},
-});
+// The only way into the database is supabase-js with the service-role key. The private "app"
+// schema (accounts, sessions, OTP codes, profiles, files, KYC, audit log, rate limits) is not
+// exposed by the Supabase API: it is reached through the public.app_* database functions in
+// supabase/migrations/20261027160000_app_functions.sql, which only the service role may call.
 
-export type Db = postgres.Sql;
+export class DatabaseError extends Error {
+  constructor(
+    /** Postgres SQLSTATE, e.g. 23505 for a unique violation. */
+    public readonly code: string,
+    message: string,
+  ) {
+    super(`Database error: ${message}`);
+  }
+}
 
-// postgres.js types the transaction handle without call signatures; it is callable at runtime.
-export function transaction<T>(fn: (tx: Db) => Promise<T>): Promise<T> {
-  return sql.begin((tx) => fn(tx as unknown as Db)) as Promise<T>;
+/** Calls one app_* database function. Each call is a single transaction. */
+export async function callDb<T>(fn: `app_${string}`, args: Record<string, unknown> = {}): Promise<T> {
+  // The app_* functions are not in the generated public types; their results are typed by the caller.
+  const { data, error } = await supabaseAdmin.rpc(fn as never, args as never);
+  if (error) throw new DatabaseError(error.code, error.message);
+  return data as T;
 }
 
 export function isUniqueViolation(err: unknown): boolean {
-  return err instanceof postgres.PostgresError && err.code === '23505';
+  return err instanceof DatabaseError && err.code === '23505';
 }

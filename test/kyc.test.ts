@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import postgres from 'postgres';
+import { DatabaseError } from '../src/lib/db';
 import { filesRepository } from '../src/modules/files/files.repository';
 import { filesStorage } from '../src/modules/files/files.storage';
 import { kycRepository } from '../src/modules/kyc/kyc.repository';
@@ -90,7 +90,7 @@ describe('POST /kyc/submissions', () => {
     signInAs(makeUser({ requestedTier: 'PRIVE' }));
     vi.spyOn(filesRepository, 'findOwned').mockResolvedValue([makeFile()]);
     vi.spyOn(kycRepository, 'submit').mockRejectedValue(
-      new postgres.PostgresError({ code: '23505', message: 'duplicate key value' } as never),
+      new DatabaseError('23505', 'duplicate key value'),
     );
 
     const res = await submitKyc();

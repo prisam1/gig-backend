@@ -1,4 +1,4 @@
-import { sql, type Db } from '../../lib/db';
+import { callDb } from '../../lib/db';
 import type { FilePurpose } from '../../types/domain';
 
 export interface StoredFile {
@@ -14,21 +14,20 @@ export interface StoredFile {
 export type NewFile = Omit<StoredFile, 'id' | 'publicId'> & { ownerId: string };
 
 export const filesRepository = {
-  async create(file: NewFile, db: Db = sql): Promise<StoredFile> {
-    const [row] = await db<StoredFile[]>`
-      insert into app.files (owner_id, purpose, bucket, object_key, mime_type, size_bytes)
-      values (${file.ownerId}, ${file.purpose}, ${file.bucket}, ${file.objectKey}, ${file.mimeType},
-              ${file.sizeBytes})
-      returning id, public_id, purpose, bucket, object_key, mime_type, size_bytes`;
-    return row!;
+  create(file: NewFile): Promise<StoredFile> {
+    return callDb('app_create_file', {
+      p_owner_id: file.ownerId,
+      p_purpose: file.purpose,
+      p_bucket: file.bucket,
+      p_object_key: file.objectKey,
+      p_mime_type: file.mimeType,
+      p_size_bytes: file.sizeBytes,
+    });
   },
 
   /** Files with the given public IDs that belong to `ownerId`; unknown or foreign IDs are omitted. */
-  async findOwned(ownerId: string, publicIds: string[], db: Db = sql): Promise<StoredFile[]> {
+  async findOwned(ownerId: string, publicIds: string[]): Promise<StoredFile[]> {
     if (publicIds.length === 0) return [];
-    return db<StoredFile[]>`
-      select id, public_id, purpose, bucket, object_key, mime_type, size_bytes
-      from app.files
-      where owner_id = ${ownerId} and public_id in ${db(publicIds)}`;
+    return callDb('app_find_owned_files', { p_owner_id: ownerId, p_public_ids: publicIds });
   },
 };

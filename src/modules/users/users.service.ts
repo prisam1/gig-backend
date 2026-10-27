@@ -1,8 +1,8 @@
 import type { z } from 'zod';
 import { audit } from '../../lib/audit';
 import { decrypt } from '../../lib/crypto';
-import { sql, transaction, type Db } from '../../lib/db';
-import type { Member, Tier } from '../../lib/membership';
+import { callDb } from '../../lib/db';
+import type { KycStatus, Member, Tier } from '../../lib/membership';
 import { consume, LIMITS } from '../../lib/rateLimit';
 import { AppError } from '../../middleware/errorHandler';
 import type { ClientContext } from '../../middleware/requestContext';
@@ -14,6 +14,26 @@ import type { LookupType, preferencesSchema, tierSchema, updateMeSchema } from '
 // Avatars live in the public "avatars" bucket; every other file stays private.
 function avatarUrl(bucket: string | null, objectKey: string | null): string | null {
   return bucket && objectKey ? filesStorage.publicUrl(bucket, objectKey) : null;
+}
+
+const fieldErrors = (fields: Record<string, string>) =>
+  new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', fields);
+
+const userNotFound = () => new AppError(404, 'NOT_FOUND', 'User not found');
+
+// Results of the app_* write functions: { ok } on success, otherwise an error code or field errors.
+type WriteResult = { ok: true; requestedTier?: Tier | null } | { error: string } | { fields: Record<string, string> };
+
+function assertWritten(result: WriteResult): asserts result is { ok: true; requestedTier?: Tier | null } {
+  if ('fields' in result) throw fieldErrors(result.fields);
+  if ('error' in result) {
+    if (result.error === 'NOT_FOUND') throw userNotFound();
+    if (result.error === 'KYC_PENDING') throw new AppError(409, 'KYC_PENDING', 'Tier cannot change while KYC is under review');
+    if (result.error === 'ONBOARDING_INCOMPLETE') {
+      throw new AppError(409, 'ONBOARDING_INCOMPLETE', 'Complete your professional and investment details first');
+    }
+    throw new Error(`Unexpected database result: ${result.error}`);
+  }
 }
 
 interface Option {
@@ -28,60 +48,35 @@ const PREFERENCE_KEYS = {
   INVESTMENT_SECTOR: 'sector',
 } as const;
 
-export async function listOptions(type: LookupType, db: Db = sql): Promise<Option[]> {
-  return db<Option[]>`
-    select code, label from app.lookup_options
-    where type = ${type} and active
-    order by sort_order, label`;
+export function listOptions(type: LookupType): Promise<Option[]> {
+  return callDb<Option[]>('app_list_options', { p_type: type });
 }
 
-// Throws a field error naming the first code that is unknown or no longer offered.
-async function assertOptions(db: Db, type: LookupType, codes: string[], field: string): Promise<void> {
-  const rows = await db<{ code: string }[]>`
-    select code from app.lookup_options where type = ${type} and active and code in ${db(codes)}`;
-  const found = new Set(rows.map((r) => r.code));
-  const missing = codes.find((c) => !found.has(c));
-  if (missing) throw new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', { [field]: `Unknown option: ${missing}` });
+interface UserRow {
+  publicId: string;
+  emailEnc: string;
+  phoneEnc: string;
+  tier: Tier;
+  requestedTier: Tier | null;
+  kycStatus: KycStatus;
+  tierSelectedAt: string | null;
+  createdAt: string;
+  name: string;
+  experienceYears: number | null;
+  jobProfileCode: string | null;
+  jobProfileLabel: string | null;
+  otherJob: string | null;
+  location: string | null;
+  avatarBucket: string | null;
+  avatarObjectKey: string | null;
+  followers: number;
+  following: number;
+  preferences: { type: keyof typeof PREFERENCE_KEYS; code: string; label: string }[];
 }
 
-export async function loadUser(userId: string, db: Db = sql) {
-  const [row] = await db<
-    {
-      publicId: string;
-      emailEnc: string;
-      phoneEnc: string;
-      tier: Tier;
-      requestedTier: Tier | null;
-      kycStatus: string;
-      tierSelectedAt: Date | null;
-      createdAt: Date;
-      name: string;
-      experienceYears: number | null;
-      jobProfileCode: string | null;
-      jobProfileLabel: string | null;
-      otherJob: string | null;
-      location: string | null;
-      avatarBucket: string | null;
-      avatarObjectKey: string | null;
-    }[]
-  >`
-    select u.public_id, u.email_enc, u.phone_enc, u.tier, u.requested_tier, u.kyc_status,
-           u.tier_selected_at, u.created_at, p.name, p.experience_years, p.job_profile_code,
-           jl.label as job_profile_label, p.other_job, p.location,
-           f.bucket as avatar_bucket, f.object_key as avatar_object_key
-    from app.users u
-    join app.user_profiles p on p.user_id = u.id
-    left join app.lookup_options jl on jl.type = 'JOB_PROFILE' and jl.code = p.job_profile_code
-    left join app.files f on f.id = p.avatar_file_id
-    where u.id = ${userId}`;
-  if (!row) throw new AppError(404, 'NOT_FOUND', 'User not found');
-
-  const prefs = await db<{ type: keyof typeof PREFERENCE_KEYS; code: string; label: string }[]>`
-    select up.type, up.option_code as code, l.label
-    from app.user_preferences up
-    join app.lookup_options l on l.type = up.type and l.code = up.option_code
-    where up.user_id = ${userId}
-    order by l.sort_order`;
+export async function loadUser(userId: string) {
+  const row = await callDb<UserRow | null>('app_get_user', { p_user_id: userId });
+  if (!row) throw userNotFound();
 
   const preferences: Record<(typeof PREFERENCE_KEYS)[keyof typeof PREFERENCE_KEYS], Option[]> = {
     focus: [],
@@ -89,12 +84,11 @@ export async function loadUser(userId: string, db: Db = sql) {
     style: [],
     sector: [],
   };
-  for (const p of prefs) preferences[PREFERENCE_KEYS[p.type]].push({ code: p.code, label: p.label });
+  for (const p of row.preferences) preferences[PREFERENCE_KEYS[p.type]].push({ code: p.code, label: p.label });
 
   const profileCompleted = row.experienceYears !== null && row.jobProfileCode !== null && row.location !== null;
   const preferencesCompleted = Object.values(preferences).every((list) => list.length > 0);
   const tierSelected = row.tierSelectedAt !== null;
-  const follows = await usersRepository.countFollows(userId, db);
 
   return {
     id: row.publicId,
@@ -102,7 +96,8 @@ export async function loadUser(userId: string, db: Db = sql) {
     email: decrypt(row.emailEnc, 'email'),
     phone: decrypt(row.phoneEnc, 'phone'),
     avatarUrl: avatarUrl(row.avatarBucket, row.avatarObjectKey),
-    ...follows,
+    followers: row.followers,
+    following: row.following,
     tier: row.tier,
     requestedTier: row.requestedTier,
     kycStatus: row.kycStatus,
@@ -119,131 +114,62 @@ export async function loadUser(userId: string, db: Db = sql) {
       tierSelected,
       completed: profileCompleted && preferencesCompleted && tierSelected,
     },
-    createdAt: row.createdAt,
+    createdAt: new Date(row.createdAt),
   };
 }
 export type UserDto = Awaited<ReturnType<typeof loadUser>>;
 
 export async function updateMe(userId: string, input: z.infer<typeof updateMeSchema>, ctx: ClientContext) {
-  return transaction(async (tx) => {
-    const [current] = await tx<{ jobProfileCode: string | null; otherJob: string | null }[]>`
-      select job_profile_code, other_job from app.user_profiles where user_id = ${userId} for update`;
-    if (!current) throw new AppError(404, 'NOT_FOUND', 'User not found');
+  const { avatarFileId, ...changes } = input;
 
-    if (input.jobProfile !== undefined) {
-      await assertOptions(tx, 'JOB_PROFILE', [input.jobProfile], 'jobProfile');
+  // The avatar must be the user's own upload, made with purpose AVATAR, and actually uploaded.
+  let avatar: string | undefined;
+  if (avatarFileId !== undefined) {
+    const [file] = await filesRepository.findOwned(userId, [avatarFileId]);
+    if (!file || file.purpose !== 'AVATAR') {
+      throw fieldErrors({ avatarFileId: 'Upload the avatar with purpose AVATAR first' });
     }
-    const jobProfile = input.jobProfile ?? current.jobProfileCode;
-    let otherJob: string | null;
-    if (jobProfile === 'OTHERS') {
-      otherJob = input.otherJob ?? current.otherJob;
-      if (!otherJob) {
-        throw new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', { otherJob: 'Specify your job profile' });
-      }
-    } else {
-      if (input.otherJob !== undefined) {
-        throw new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', {
-          otherJob: 'Only allowed when the job profile is Others',
-        });
-      }
-      otherJob = null;
+    if (!(await filesStorage.exists(file.bucket, file.objectKey))) {
+      throw fieldErrors({ avatarFileId: 'File has not been uploaded yet' });
     }
+    avatar = file.id;
+  }
 
-    // The avatar must be the user's own upload, made with purpose AVATAR.
-    let avatarFileId: string | null = null;
-    if (input.avatarFileId !== undefined) {
-      const [file] = await filesRepository.findOwned(userId, [input.avatarFileId], tx);
-      if (!file || file.purpose !== 'AVATAR') {
-        throw new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', {
-          avatarFileId: 'Upload the avatar with purpose AVATAR first',
-        });
-      }
-      if (!(await filesStorage.exists(file.bucket, file.objectKey))) {
-        throw new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', {
-          avatarFileId: 'File has not been uploaded yet',
-        });
-      }
-      avatarFileId = file.id;
-    }
-
-    await tx`
-      update app.user_profiles set
-        name = coalesce(${input.name ?? null}, name),
-        experience_years = coalesce(${input.experienceYears ?? null}::smallint, experience_years),
-        job_profile_code = ${jobProfile},
-        other_job = ${otherJob},
-        location = coalesce(${input.location ?? null}, location),
-        avatar_file_id = coalesce(${avatarFileId}::bigint, avatar_file_id)
-      where user_id = ${userId}`;
-    await audit(ctx, 'user.profile.updated', { userId, metadata: { fields: Object.keys(input) } }, tx);
-    return loadUser(userId, tx);
+  const result = await callDb<WriteResult>('app_update_profile', {
+    p_user_id: userId,
+    p_changes: { ...changes, ...(avatar && { avatarFileId: avatar }) },
+    p_ctx: ctx,
   });
+  assertWritten(result);
+  return loadUser(userId);
 }
 
 export async function setPreferences(userId: string, input: z.infer<typeof preferencesSchema>, ctx: ClientContext) {
-  return transaction(async (tx) => {
-    // Serialises concurrent updates for the same user.
-    await tx`select id from app.users where id = ${userId} for update`;
-
-    const groups = [
-      ['INVESTMENT_FOCUS', input.focus, 'focus'],
-      ['RISK_LEVEL', input.risk, 'risk'],
-      ['INVESTMENT_STYLE', input.style, 'style'],
-      ['INVESTMENT_SECTOR', input.sector, 'sector'],
-    ] as const;
-    for (const [type, codes, field] of groups) await assertOptions(tx, type, [...codes], field);
-
-    await tx`delete from app.user_preferences where user_id = ${userId}`;
-    const rows = groups.flatMap(([type, codes]) => codes.map((code) => ({ userId, type, optionCode: code })));
-    await tx`insert into app.user_preferences ${tx(rows, 'userId', 'type', 'optionCode')}`;
-
-    await audit(ctx, 'user.preferences.updated', { userId }, tx);
-    return loadUser(userId, tx);
+  const result = await callDb<WriteResult>('app_set_preferences', {
+    p_user_id: userId,
+    p_groups: [
+      { type: 'INVESTMENT_FOCUS', field: 'focus', codes: input.focus },
+      { type: 'RISK_LEVEL', field: 'risk', codes: input.risk },
+      { type: 'INVESTMENT_STYLE', field: 'style', codes: input.style },
+      { type: 'INVESTMENT_SECTOR', field: 'sector', codes: input.sector },
+    ],
+    p_ctx: ctx,
   });
+  assertWritten(result);
+  return loadUser(userId);
 }
 
 // Observer is granted at once. Prive and Institutional are recorded as requested and granted
 // only when KYC is approved (KYC workstream), never by this endpoint.
 export async function selectTier(userId: string, input: z.infer<typeof tierSchema>, ctx: ClientContext) {
-  return transaction(async (tx) => {
-    const [user] = await tx<
-      { tier: Tier; requestedTier: Tier | null; tierSelectedAt: Date | null; kycStatus: string }[]
-    >`
-      select tier, requested_tier, tier_selected_at, kyc_status from app.users where id = ${userId} for update`;
-    if (!user) throw new AppError(404, 'NOT_FOUND', 'User not found');
-    // The documents under review were submitted for the requested tier.
-    if (user.kycStatus === 'PENDING' && input.tier !== (user.requestedTier ?? user.tier)) {
-      throw new AppError(409, 'KYC_PENDING', 'Tier cannot change while KYC is under review');
-    }
-
-    const before = await loadUser(userId, tx);
-    if (!before.onboarding.profileCompleted || !before.onboarding.preferencesCompleted) {
-      throw new AppError(409, 'ONBOARDING_INCOMPLETE', 'Complete your professional and investment details first');
-    }
-
-    const target = input.tier;
-    const toTier: Tier = target === 'OBSERVER' ? 'OBSERVER' : user.tier;
-    const requested: Tier | null = target === 'OBSERVER' || target === user.tier ? null : target;
-    const changed = toTier !== user.tier || requested !== user.requestedTier || !user.tierSelectedAt;
-
-    if (changed) {
-      await tx`
-        update app.users set tier = ${toTier}, requested_tier = ${requested},
-          tier_selected_at = coalesce(tier_selected_at, now())
-        where id = ${userId}`;
-      await tx`
-        insert into app.tier_history (user_id, from_tier, to_tier, requested_tier, reason)
-        values (${userId}, ${user.tier}, ${toTier}, ${requested}, 'USER_SELECTED')`;
-      await audit(ctx, 'user.tier.selected', { userId, metadata: { from: user.tier, to: toTier, requested } }, tx);
-    }
-
-    return { user: await loadUser(userId, tx), nextStep: requested ? 'KYC_REQUIRED' : 'NONE' };
-  });
+  const result = await callDb<WriteResult>('app_select_tier', { p_user_id: userId, p_tier: input.tier, p_ctx: ctx });
+  assertWritten(result);
+  return { user: await loadUser(userId), nextStep: result.requestedTier ? 'KYC_REQUIRED' : 'NONE' };
 }
 
 async function findActiveUser(publicId: string): Promise<PublicUser> {
   const user = await usersRepository.findActiveByPublicId(publicId);
-  if (!user) throw new AppError(404, 'NOT_FOUND', 'User not found');
+  if (!user) throw userNotFound();
   return user;
 }
 

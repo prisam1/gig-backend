@@ -16,8 +16,6 @@ const envSchema = z
 
     SUPABASE_URL: z.url(),
     SUPABASE_SERVICE_ROLE_KEY: z.string().min(1),
-    // Postgres connection string from Supabase: Connect -> Session pooler.
-    DATABASE_URL: z.url().refine((v) => /^postgres(ql)?:\/\//.test(v), 'Must be a postgres:// URL'),
 
     JWT_ACCESS_SECRET: key32,
     JWT_ISSUER: z.string().default('gig-backend'),
