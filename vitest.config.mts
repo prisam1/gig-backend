@@ -1,4 +1,8 @@
+import { randomBytes } from 'node:crypto';
 import { defineConfig } from 'vitest/config';
+
+// Fresh keys for every test run, so no key material is ever stored in the repository.
+const testKey = () => randomBytes(32).toString('base64');
 
 export default defineConfig({
   test: {
@@ -11,9 +15,9 @@ export default defineConfig({
       NODE_ENV: 'test',
       SUPABASE_URL: 'https://test-project.supabase.co',
       SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
-      JWT_ACCESS_SECRET: 'YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE=',
-      DATA_ENCRYPTION_KEY: 'YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI=',
-      BLIND_INDEX_KEY: 'Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M=',
+      JWT_ACCESS_SECRET: testKey(),
+      DATA_ENCRYPTION_KEY: testKey(),
+      BLIND_INDEX_KEY: testKey(),
     },
     // PGlite boots a full Postgres in WASM; give the database suite time to start.
     testTimeout: 30_000,
