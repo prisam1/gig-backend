@@ -1,8 +1,8 @@
 import { vi } from 'vitest';
 import { createApp } from '../src/app';
 import { authProvider } from '../src/lib/auth';
+import type { Member } from '../src/lib/membership';
 import type { StoredFile } from '../src/modules/files/files.repository';
-import { usersRepository, type User } from '../src/modules/users/users.repository';
 
 export const app = createApp();
 
@@ -12,24 +12,23 @@ export const USER_ID = '11111111-1111-4111-8111-111111111111';
 export const OTHER_USER_ID = '22222222-2222-4222-8222-222222222222';
 export const FILE_ID = '33333333-3333-4333-8333-333333333333';
 
-export function makeUser(overrides: Partial<User> = {}): User {
+export function makeUser(overrides: Partial<Member> = {}): Member {
   return {
-    id: 1,
-    publicId: USER_ID,
-    email: 'asha@example.com',
-    phone: '9876543210',
+    userId: '1',
+    userPublicId: USER_ID,
+    sessionId: '7',
+    sessionPublicId: '66666666-6666-4666-8666-666666666666',
     tier: 'OBSERVER',
     requestedTier: null,
     kycStatus: 'NOT_STARTED',
-    status: 'ACTIVE',
-    createdAt: '2026-10-01T00:00:00.000Z',
+    fullName: 'Asha Rao',
     ...overrides,
   };
 }
 
 export function makeFile(overrides: Partial<StoredFile> = {}): StoredFile {
   return {
-    id: 10,
+    id: '10',
     publicId: FILE_ID,
     purpose: 'KYC_DOCUMENT',
     bucket: 'kyc-documents',
@@ -40,13 +39,8 @@ export function makeFile(overrides: Partial<StoredFile> = {}): StoredFile {
   };
 }
 
-/** Makes `AUTH_HEADER` authenticate as the given user. */
-export function signInAs(user: User = makeUser()): User {
-  vi.spyOn(authProvider, 'verifyAccessToken').mockResolvedValue({
-    authUserId: 'auth-uuid',
-    email: user.email,
-    phone: user.phone,
-  });
-  vi.spyOn(usersRepository, 'findOrCreateByIdentity').mockResolvedValue(user);
+/** Makes `AUTH_HEADER` authenticate as the given member (the JWT and session checks are stubbed). */
+export function signInAs(user: Member = makeUser()): Member {
+  vi.spyOn(authProvider, 'loadMember').mockResolvedValue(user);
   return user;
 }

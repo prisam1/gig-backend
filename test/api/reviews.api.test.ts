@@ -26,13 +26,8 @@ vi.mock('../../src/lib/supabase', async () => {
   return { supabaseAdmin: fake.client };
 });
 vi.mock('../../src/lib/auth', async () => {
-  const { fakeAuthProvider } = await import('../helpers/fakeSupabase');
-  return { authProvider: fakeAuthProvider };
-});
-vi.mock('../../src/modules/users/users.repository', async (importOriginal) => {
-  const { fakeUsersRepository } = await import('../helpers/fakeSupabase');
-  const original = await importOriginal<typeof import('../../src/modules/users/users.repository')>();
-  return { ...original, usersRepository: { ...original.usersRepository, ...fakeUsersRepository } };
+  const { fakeLoadMember } = await import('../helpers/fakeSupabase');
+  return { authProvider: { loadMember: fakeLoadMember } };
 });
 
 const app = createApp();
@@ -108,7 +103,7 @@ describe('POST /api/v1/reviews: access', () => {
       .set('Authorization', 'Bearer forged')
       .send(positiveBody);
     expect(res.status).toBe(401);
-    expect(res.body.error.message).toBe('Invalid or expired token');
+    expect(res.body.error.message).toBe('Invalid or expired access token');
   });
 
   it.each(['observer', 'institutional'] as const)('is not open to %s members', async (user) => {

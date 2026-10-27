@@ -1,6 +1,6 @@
 import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
-import { DatabaseError, PG_UNIQUE_VIOLATION } from '../src/lib/supabase';
+import postgres from 'postgres';
 import { filesRepository } from '../src/modules/files/files.repository';
 import { kycRepository } from '../src/modules/kyc/kyc.repository';
 import { KYC_CONSENT_VERSION } from '../src/modules/kyc/kyc.service';
@@ -23,24 +23,22 @@ function submitKyc(body: object = validBody) {
 describe('POST /kyc/submissions', () => {
   it('submits documents and consent for the requested tier', async () => {
     signInAs(makeUser({ requestedTier: 'PRIVE' }));
-    vi.spyOn(filesRepository, 'findOwned').mockResolvedValue([makeFile({ id: 10 })]);
+    vi.spyOn(filesRepository, 'findOwned').mockResolvedValue([makeFile({ id: '10' })]);
     const submit = vi.spyOn(kycRepository, 'submit').mockResolvedValue(SUBMISSION_ID);
 
     const res = await submitKyc();
 
     expect(res.status).toBe(201);
     expect(res.body.data).toEqual({ id: SUBMISSION_ID, tier: 'PRIVE', status: 'PENDING' });
-    expect(submit).toHaveBeenCalledWith({
-      userId: 1,
-      tier: 'PRIVE',
-      documents: [{ fileId: 10, documentType: 'ID_PROOF' }],
-      consent: {
-        type: 'KYC',
-        version: KYC_CONSENT_VERSION,
-        ipAddress: expect.any(String),
-        appVersion: '1.4.0',
+    expect(submit).toHaveBeenCalledWith(
+      {
+        userId: '1',
+        tier: 'PRIVE',
+        documents: [{ fileId: '10', documentType: 'ID_PROOF' }],
+        consentVersion: KYC_CONSENT_VERSION,
       },
-    });
+      expect.objectContaining({ ip: expect.any(String), appVersion: '1.4.0' }),
+    );
   });
 
   it('does not require consent for Institutional', async () => {
@@ -51,7 +49,7 @@ describe('POST /kyc/submissions', () => {
     const res = await submitKyc({ documents: validBody.documents });
 
     expect(res.status).toBe(201);
-    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ consent: null }));
+    expect(submit).toHaveBeenCalledWith(expect.objectContaining({ consentVersion: null }), expect.anything());
   });
 
   it('requires consent for Prive', async () => {
@@ -87,7 +85,7 @@ describe('POST /kyc/submissions', () => {
     signInAs(makeUser({ requestedTier: 'PRIVE' }));
     vi.spyOn(filesRepository, 'findOwned').mockResolvedValue([makeFile()]);
     vi.spyOn(kycRepository, 'submit').mockRejectedValue(
-      new DatabaseError(PG_UNIQUE_VIOLATION, 'duplicate key value'),
+      new postgres.PostgresError({ code: '23505', message: 'duplicate key value' } as never),
     );
 
     const res = await submitKyc();
@@ -145,8 +143,8 @@ describe('GET /kyc/submissions/me', () => {
       tier: 'PRIVE',
       status: 'REJECTED',
       reason: 'ID photo is blurred',
-      submittedAt: '2026-10-20T10:00:00.000Z',
-      reviewedAt: '2026-10-21T09:00:00.000Z',
+      submittedAt: new Date('2026-10-20T10:00:00.000Z'),
+      reviewedAt: new Date('2026-10-21T09:00:00.000Z'),
       documents: [{ fileId: FILE_ID, documentType: 'ID_PROOF' }],
     });
 

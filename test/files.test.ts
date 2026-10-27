@@ -23,6 +23,7 @@ describe('POST /files/upload-url', () => {
     expect(res.status).toBe(201);
     expect(res.body.data).toEqual({
       fileId: makeFile().publicId,
+      path: expect.stringMatching(new RegExp(`^${USER_ID}/[0-9a-f-]{36}\\.pdf$`)),
       uploadUrl: 'https://storage.example/upload?token=abc',
       method: 'PUT',
       contentType: 'application/pdf',
@@ -32,7 +33,7 @@ describe('POST /files/upload-url', () => {
     expect(bucket).toBe('kyc-documents');
     expect(objectKey).toMatch(new RegExp(`^${USER_ID}/[0-9a-f-]{36}\\.pdf$`));
     expect(create).toHaveBeenCalledWith(
-      expect.objectContaining({ ownerId: 1, purpose: 'KYC_DOCUMENT', objectKey, sizeBytes: 2048 }),
+      expect.objectContaining({ ownerId: '1', purpose: 'KYC_DOCUMENT', objectKey, sizeBytes: 2048 }),
     );
   });
 
