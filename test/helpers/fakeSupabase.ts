@@ -39,11 +39,11 @@ export type TestUser = keyof typeof TEST_USERS;
 export const tokenFor = (user: TestUser) => `test-token-${user}`;
 
 /** Stand-in for authProvider.loadMember in src/lib/auth.ts. */
-export async function fakeLoadMember(token: string): Promise<Member> {
+export function fakeLoadMember(token: string): Promise<Member> {
   const index = Object.keys(TEST_USERS).findIndex((key) => tokenFor(key as TestUser) === token);
-  if (index < 0) throw new HttpError(401, 'Invalid or expired access token');
+  if (index < 0) return Promise.reject(new HttpError(401, 'Invalid or expired access token'));
   const [key, user] = Object.entries(TEST_USERS)[index]!;
-  return {
+  return Promise.resolve({
     userId: String(index + 1),
     userPublicId: user.id,
     sessionId: String(index + 1),
@@ -52,7 +52,7 @@ export async function fakeLoadMember(token: string): Promise<Member> {
     requestedTier: null,
     kycStatus: user.kyc,
     fullName: key === 'prive' ? 'Shreya Mehta' : 'Test User',
-  };
+  });
 }
 
 function createFakeSupabase() {

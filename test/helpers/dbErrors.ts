@@ -9,6 +9,6 @@ export function uniqueViolation(constraint: string): DatabaseError {
 }
 
 /** The value as it appears in a JSON response (dates become ISO strings). */
-export function asJson<T>(value: T): unknown {
+export function asJson(value: unknown): unknown {
   return JSON.parse(JSON.stringify(value));
 }

@@ -3,6 +3,7 @@ import { env } from '../../config/env';
 import { audit } from '../../lib/audit';
 import { decrypt, encrypt, keyedHash, randomToken, sha256 } from '../../lib/crypto';
 import { callDb } from '../../lib/db';
+import type { DbResult } from '../../lib/dbFunctions';
 import { maskDestination, sendNotice, sendOtp, type Channel, type OtpPurpose } from '../../lib/notifier';
 import { burnPasswordCheck, hashPassword, verifyPassword } from '../../lib/password';
 import { LIMITS, consume, limitArg, reset, tooMany } from '../../lib/rateLimit';
@@ -45,12 +46,9 @@ const fieldError = (field: string, message: string) =>
 
 // Database functions report expected failures as { error } instead of raising, so the state that
 // must be kept (a counted OTP attempt, a revoked session) is committed.
-interface DbFailure {
-  error: string;
-  retryAfter?: number;
-  remaining?: number;
-}
-const failed = <T extends object>(result: T | DbFailure): result is DbFailure => 'error' in result;
+type DbFailure = Extract<DbResult<'app_otp_verify'>, { error: string }>;
+/** Narrows a database result to its { error } case; the other cases remain after the check. */
+const failed = <T extends object>(result: T): result is Extract<T, DbFailure> => 'error' in result;
 
 const signupExpired = () => new AppError(410, 'SIGNUP_EXPIRED', 'This sign-up has expired. Please register again.');
 const invalidCode = () => new AppError(400, 'OTP_INVALID', 'Invalid or expired code');
@@ -93,7 +91,7 @@ export async function register(input: z.infer<typeof registerSchema>, ctx: Clien
 
   const email = issueCode();
   const phone = issueCode();
-  const started = await callDb<{ signupId: string; expiresAt: string; emailTaken: boolean; phoneTaken: boolean }>(
+  const started = await callDb(
     'app_signup_start',
     {
       p_signup: {
@@ -120,7 +118,7 @@ export async function register(input: z.infer<typeof registerSchema>, ctx: Clien
 
   return {
     signupId: started.signupId,
-    expiresAt: new Date(started.expiresAt),
+    expiresAt: started.expiresAt,
     challenges: [
       challengeView(email.publicId, 'EMAIL', maskDestination('EMAIL', input.email)),
       challengeView(phone.publicId, 'PHONE', maskDestination('PHONE', input.phone)),
@@ -144,7 +142,7 @@ export async function startChallenge(purpose: Exclude<OtpPurpose, 'SIGNUP'>, ide
   await consume(LIMITS.otpSendPerDestination, destinationHash);
 
   const challenge = issueCode();
-  const { userExists } = await callDb<{ userExists: boolean }>('app_otp_start', {
+  const { userExists } = await callDb('app_otp_start', {
     p_purpose: purpose,
     p_channel: identifier.channel,
     p_destination_hash: destinationHash,
@@ -165,7 +163,7 @@ export async function forgotPassword(identifier: Identifier, ctx: ClientContext)
 
 // The keyed hash of the address a challenge belongs to, for per-address limits.
 async function challengeDestination(publicId: string): Promise<string | null> {
-  const peek = await callDb<{ destinationHash: string } | null>('app_otp_peek', { p_public_id: publicId });
+  const peek = await callDb('app_otp_peek', { p_public_id: publicId });
   return peek?.destinationHash ?? null;
 }
 
@@ -175,9 +173,7 @@ async function resendChallenge(publicId: string) {
   if (!destinationHash) throw invalid;
 
   const code = issueCode(publicId);
-  const sent = await callDb<
-    { channel: Channel; purpose: OtpPurpose; isDecoy: boolean; destinationEnc: string | null } | DbFailure
-  >('app_otp_resend', {
+  const sent = await callDb('app_otp_resend', {
     p_public_id: publicId,
     p_challenge: code.stored,
     p_cooldown_seconds: OTP_RESEND_COOLDOWN_SECONDS,
@@ -215,11 +211,6 @@ async function resendChallenge(publicId: string) {
 // ---------------------------------------------------------------------------------------------
 // POST /auth/otp/verify
 // ---------------------------------------------------------------------------------------------
-type VerifyResult =
-  | { status: 'PENDING'; signupId: string; verified: Channel[]; pending: Channel[] }
-  | { status: 'COMPLETED'; userId: string; userPublicId: string; sessionExpiresAt: string }
-  | { status: 'RESET_TOKEN_ISSUED' };
-
 export async function verifyOtp(input: z.infer<typeof otpVerifySchema>, ctx: ClientContext) {
   await consume(LIMITS.otpVerifyPerIp, ctx.ip);
   const destinationHash = await challengeDestination(input.challengeId);
@@ -228,7 +219,7 @@ export async function verifyOtp(input: z.infer<typeof otpVerifySchema>, ctx: Cli
   // Prepared up front; the database keeps only hashes and uses whichever the challenge needs.
   const session = newSession(input.device);
   const resetToken = randomToken();
-  const result = await callDb<VerifyResult | DbFailure>('app_otp_verify', {
+  const result = await callDb('app_otp_verify', {
     p_public_id: input.challengeId,
     p_code_hash: codeHash(input.challengeId, input.code),
     p_max_attempts: OTP_MAX_ATTEMPTS,
@@ -268,7 +259,7 @@ export async function login(input: z.infer<typeof loginSchema>, ctx: ClientConte
   // Counted before the password check, so parallel guesses cannot all pass; reset on success.
   await consume(LIMITS.loginFailuresPerAccount, idHash);
 
-  const user = await callDb<{ userId: string; userPublicId: string; passwordHash: string; status: string } | null>(
+  const user = await callDb(
     'app_login_lookup',
     { p_channel: input.identifier.channel, p_id_hash: idHash },
   );
@@ -289,7 +280,7 @@ export async function login(input: z.infer<typeof loginSchema>, ctx: ClientConte
 
   await reset(LIMITS.loginFailuresPerAccount, idHash);
   const session = newSession(input.device);
-  const done = await callDb<{ sessionExpiresAt: string } | DbFailure>('app_login_complete', {
+  const done = await callDb('app_login_complete', {
     p_user_id: user.userId,
     p_session: session.stored,
     p_ctx: ctx,
@@ -313,7 +304,7 @@ export async function refresh(input: z.infer<typeof refreshSchema>, ctx: ClientC
   if (!parsed) throw invalid;
 
   const secret = randomToken();
-  const rotated = await callDb<{ userPublicId: string; sessionExpiresAt: string } | DbFailure>('app_refresh', {
+  const rotated = await callDb('app_refresh', {
     p_session_public_id: parsed.sessionPublicId,
     p_secret_hash: parsed.secretHash,
     p_new_secret_hash: sha256(secret),
@@ -333,27 +324,15 @@ export async function logout(auth: AuthContext, ctx: ClientContext) {
 }
 
 export async function listSessions(auth: AuthContext) {
-  const rows = await callDb<
-    {
-      id: string;
-      deviceName: string | null;
-      platform: string;
-      appVersion: string | null;
-      ip: string | null;
-      createdAt: string;
-      lastUsedAt: string;
-    }[]
-  >('app_list_sessions', { p_user_id: auth.userId });
+  const rows = await callDb('app_list_sessions', { p_user_id: auth.userId });
   return rows.map((r) => ({
     ...r,
-    createdAt: new Date(r.createdAt),
-    lastUsedAt: new Date(r.lastUsedAt),
     current: r.id === auth.sessionPublicId,
   }));
 }
 
 export async function revokeSession(auth: AuthContext, sessionPublicId: string, ctx: ClientContext) {
-  const revoked = await callDb<boolean>('app_revoke_session', {
+  const revoked = await callDb('app_revoke_session', {
     p_user_id: auth.userId,
     p_session_public_id: sessionPublicId,
     p_ctx: ctx,
@@ -373,7 +352,7 @@ export async function resetPassword(input: z.infer<typeof resetPasswordSchema>, 
   const invalid = new AppError(400, 'RESET_TOKEN_INVALID', 'This reset has expired. Please request a new code.');
   const tokenHash = sha256(input.resetToken);
 
-  const ticket = await callDb<{ userId: string; passwordHash: string; emailEnc: string; phoneEnc: string } | null>(
+  const ticket = await callDb(
     'app_reset_lookup',
     { p_token_hash: tokenHash },
   );
@@ -389,7 +368,7 @@ export async function resetPassword(input: z.infer<typeof resetPasswordSchema>, 
   }
 
   // Re-checks the ticket under lock, so a ticket used or replaced meanwhile is refused.
-  const done = await callDb<{ ok: boolean }>('app_reset_complete', {
+  const done = await callDb('app_reset_complete', {
     p_token_hash: tokenHash,
     p_password_hash: await hashPassword(input.newPassword),
     p_ctx: ctx,

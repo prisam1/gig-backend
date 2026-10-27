@@ -45,6 +45,9 @@ export const tierSchema = z
   .object({ tier: z.enum(['OBSERVER', 'PRIVE', 'INSTITUTIONAL'], 'Choose Observer, Prive or Institutional') })
   .strict();
 
+/** The four sign-up preference lists (lookup option types). */
+export const PREFERENCE_TYPES = ['INVESTMENT_FOCUS', 'RISK_LEVEL', 'INVESTMENT_STYLE', 'INVESTMENT_SECTOR'] as const;
+
 export const userIdParamSchema = z.object({ id: z.uuid('Invalid user ID') });
 
 export const LOOKUP_TYPES = {

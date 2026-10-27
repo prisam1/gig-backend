@@ -139,7 +139,7 @@ describe('sign-up', () => {
     const done = await verify(phone, phone.codeHash, [], s);
     expect(done).toMatchObject({ status: 'COMPLETED', userId: expect.any(String), userPublicId: expect.any(String) });
 
-    const user = await one<Record<string, unknown>>(`
+    const user = await one(`
       select u.email_enc, u.password_hash, p.name, c.type as consent, s.refresh_token_hash, s.platform
       from app.users u join app.user_profiles p on p.user_id = u.id
       join app.consents c on c.user_id = u.id join app.user_sessions s on s.user_id = u.id
@@ -212,14 +212,14 @@ describe('OTP guessing', () => {
 describe('sessions', () => {
   it('resolves an active session to its member and stops after logout', async () => {
     const { userId, userPublicId, session: s } = await signUp('member');
-    const member = await call<Record<string, unknown>>('app_member', userPublicId, s.publicId);
+    const member = await call('app_member', userPublicId, s.publicId);
     expect(member).toMatchObject({ userId, userPublicId, tier: 'OBSERVER', kycStatus: 'NOT_STARTED', fullName: 'User member' });
 
     // A session of another user never resolves, even with a valid session id.
     const other = await signUp('member-other');
     expect(await call('app_member', other.userPublicId, s.publicId)).toBeNull();
 
-    await call('app_logout', userId, member.sessionId, CTX);
+    await call('app_logout', userId, member['sessionId'], CTX);
     expect(await call('app_member', userPublicId, s.publicId)).toBeNull();
   });
 

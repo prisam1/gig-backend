@@ -24,13 +24,13 @@ export function parseRefreshToken(token: string): { sessionPublicId: string; sec
   return { sessionPublicId: match[1], secretHash: sha256(match[2]) };
 }
 
-export function tokenPair(userPublicId: string, sessionPublicId: string, secret: string, expiresAt: string): TokenPair {
+export function tokenPair(userPublicId: string, sessionPublicId: string, secret: string, expiresAt: Date): TokenPair {
   return {
     tokenType: 'Bearer',
     accessToken: signAccessToken(userPublicId, sessionPublicId),
     accessTokenExpiresIn: env.ACCESS_TOKEN_TTL_SECONDS,
     refreshToken: `${sessionPublicId}.${secret}`,
-    refreshTokenExpiresAt: new Date(expiresAt),
+    refreshTokenExpiresAt: expiresAt,
   };
 }
 

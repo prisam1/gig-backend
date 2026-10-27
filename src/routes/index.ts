@@ -30,7 +30,7 @@ router.get('/health/live', (_req, res) => {
 
 router.get('/health/ready', async (_req, res) => {
   try {
-    await callDb('app_ping');
+    await callDb('app_ping', {});
     res.json({ status: 'ok', database: 'ok' });
   } catch {
     res.status(503).json({ status: 'unavailable', database: 'unreachable' });

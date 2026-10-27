@@ -4,7 +4,7 @@ import { vi } from 'vitest';
 
 vi.mock('../src/lib/rateLimit', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/lib/rateLimit')>()),
-  consume: async () => undefined,
+  consume: () => Promise.resolve(),
 }));
 
-vi.mock('../src/lib/audit', () => ({ audit: async () => undefined }));
+vi.mock('../src/lib/audit', () => ({ audit: () => Promise.resolve() }));

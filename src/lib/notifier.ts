@@ -17,11 +17,13 @@ export function maskDestination(channel: Channel, destination: string): string {
 
 // Development only (refused in production by config/env.ts). Codes appear in the server log.
 const consoleDelivery: Delivery = {
-  async sendOtp(channel, destination, code, purpose) {
+  sendOtp(channel, destination, code, purpose) {
     console.log(`[otp] ${purpose} ${channel} ${maskDestination(channel, destination)} code=${code}`);
+    return Promise.resolve();
   },
-  async sendNotice(channel, destination, notice) {
+  sendNotice(channel, destination, notice) {
     console.log(`[notice] ${notice} ${channel} ${maskDestination(channel, destination)}`);
+    return Promise.resolve();
   },
 };
 
@@ -31,13 +33,13 @@ const delivery: Delivery = { console: consoleDelivery }[env.OTP_DELIVERY];
 // Fire-and-forget: the response must not wait on (or reveal) delivery, so real and decoy
 // requests take the same time. Failures are logged; the user can ask for a resend.
 export function sendOtp(channel: Channel, destination: string, code: string, purpose: OtpPurpose): void {
-  delivery.sendOtp(channel, destination, code, purpose).catch((err) => {
+  delivery.sendOtp(channel, destination, code, purpose).catch((err: unknown) => {
     console.error(`[otp] delivery failed (${channel})`, err);
   });
 }
 
 export function sendNotice(channel: Channel, destination: string, notice: Notice): void {
-  delivery.sendNotice(channel, destination, notice).catch((err) => {
+  delivery.sendNotice(channel, destination, notice).catch((err: unknown) => {
     console.error(`[notice] delivery failed (${channel})`, err);
   });
 }

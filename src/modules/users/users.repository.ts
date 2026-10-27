@@ -16,7 +16,7 @@ export interface PublicUser {
 
 export const usersRepository = {
   async findActiveByPublicId(publicId: string): Promise<PublicUser | null> {
-    const row = await callDb<(Omit<PublicUser, 'createdAt'> & { createdAt: string }) | null>('app_public_user', {
+    const row = await callDb('app_public_user', {
       p_public_id: publicId,
     });
     return row && { ...row, createdAt: new Date(row.createdAt) };

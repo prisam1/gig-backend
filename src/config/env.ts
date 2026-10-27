@@ -6,6 +6,10 @@ const key32 = z
   .string()
   .refine((v) => Buffer.from(v, 'base64').length === 32, 'Must be 32 bytes, base64-encoded');
 
+// OTP delivery methods that are refused in production. Real SMS and email providers join the
+// enum below as they are added.
+const DEV_ONLY_OTP_DELIVERY: ReadonlySet<string> = new Set(['console']);
+
 const envSchema = z
   .object({
     NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -40,7 +44,7 @@ const envSchema = z
       if (e.CORS_ORIGIN === '*') {
         ctx.addIssue({ code: 'custom', path: ['CORS_ORIGIN'], message: 'Must list exact origins in production' });
       }
-      if (e.OTP_DELIVERY === 'console') {
+      if (DEV_ONLY_OTP_DELIVERY.has(e.OTP_DELIVERY)) {
         ctx.addIssue({ code: 'custom', path: ['OTP_DELIVERY'], message: 'Console OTP delivery is not allowed in production' });
       }
     }

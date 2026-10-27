@@ -35,7 +35,7 @@ async function one<T = Record<string, unknown>>(sql: string, params: unknown[] =
 async function expectDbError(promise: Promise<unknown>, message: RegExp) {
   const error = await promise.then(
     () => null,
-    (e: { message: string }) => e,
+    (e: unknown) => e as { message: string },
   );
   expect(error, 'expected a database error').not.toBeNull();
   expect(error?.message).toMatch(message);
@@ -106,7 +106,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await db?.close();
+  await db.close();
 });
 
 describe('schema and seed', () => {

@@ -56,7 +56,8 @@ function toParam(value: unknown, type: string): string | null {
     const items = (value as unknown[]).map((v) => `"${String(v).replace(/["\\]/g, '\\$&')}"`);
     return `{${items.join(',')}}`;
   }
-  return String(value);
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return String(value);
+  throw new Error(`Cannot send ${typeof value} as ${type}`);
 }
 
 /**
@@ -107,7 +108,7 @@ export async function dbError(
 ): Promise<{ code?: string; message: string; constraint_name?: string }> {
   const error = await promise.then(
     () => null,
-    (e: { code?: string; message: string; constraint_name?: string }) => e,
+    (e: unknown) => e as { code?: string; message: string; constraint_name?: string },
   );
   if (!error) throw new Error('expected a database error');
   return error;

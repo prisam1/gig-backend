@@ -3,7 +3,7 @@
 
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { isUniqueViolationOf } from '../../src/lib/db';
+import { DatabaseError, dbTransport, isUniqueViolationOf } from '../../src/lib/db';
 import { HttpError } from '../../src/middleware/errorHandler';
 import type { ClientContext } from '../../src/middleware/requestContext';
 import {
@@ -20,20 +20,7 @@ import {
 } from '../../src/modules/representations/representations.repository';
 import { listOptions } from '../../src/modules/users/users.service';
 import type { RatingFlag } from '../../src/types/domain';
-import { createTestDatabase, createUser, dbError } from './pglite';
-
-const holder = vi.hoisted(() => ({ db: undefined as PGlite | undefined }));
-
-// callDb runs the app_* database functions directly in PGlite, as supabase-js does in production.
-vi.mock('../../src/lib/db', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../src/lib/db')>();
-  const { callFunction } = await import('./pglite');
-  return {
-    ...original,
-    callDb: (fn: string, args: Record<string, unknown> = {}) =>
-      callFunction(holder.db!, fn, args, (code, message) => new original.DatabaseError(code, message)),
-  };
-});
+import { callFunction, createTestDatabase, createUser, dbError } from './pglite';
 
 // The real audit log (test/setup.ts stubs it), so its write inside each transaction is checked.
 vi.mock('../../src/lib/audit', async (importOriginal) => importOriginal());
@@ -70,14 +57,21 @@ async function count(query: string, params: unknown[] = []): Promise<number> {
 
 beforeAll(async () => {
   db = await createTestDatabase();
-  holder.db = db;
   alice = await createUser(db, ALICE);
   bob = await createUser(db, BOB);
   carol = await createUser(db, CAROL);
 });
 
+// callDb runs as in production (arguments and results checked against src/lib/dbFunctions.ts);
+// only its transport is swapped, so the app_* functions run in PGlite instead of through supabase-js.
+beforeEach(() => {
+  vi.spyOn(dbTransport, 'rpc').mockImplementation((fn, args) =>
+    callFunction(db, fn, args, (code, message) => new DatabaseError(code, message)),
+  );
+});
+
 afterAll(async () => {
-  await db?.close();
+  await db.close();
 });
 
 const TABLES = {
@@ -317,8 +311,8 @@ describe('issuer stats', () => {
     });
     expect(stats?.lastRatingAt).toBeInstanceOf(Date);
     expect(Object.keys(stats?.factorBreakdown ?? {}).sort()).toEqual([...FACTORS].sort());
-    expect(stats?.factorBreakdown.GENERAL).toEqual({ POSITIVE: 50, NEUTRAL: 0, NEGATIVE: 50 });
-    expect(stats?.factorBreakdown.BUSINESS_OF_COMPANY).toEqual({
+    expect(stats?.factorBreakdown['GENERAL']).toEqual({ POSITIVE: 50, NEUTRAL: 0, NEGATIVE: 50 });
+    expect(stats?.factorBreakdown['BUSINESS_OF_COMPANY']).toEqual({
       POSITIVE: 50,
       NEUTRAL: 50,
       NEGATIVE: 0,

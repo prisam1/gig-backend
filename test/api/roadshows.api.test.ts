@@ -34,7 +34,7 @@ const poolBody = {
   expectations: ['PRIORITY_ALLOTMENT', 'BETTER_ROI_IRR', 'SHORTER_LOCK_IN'],
 };
 
-beforeEach(() => fake.reset());
+beforeEach(() => { fake.reset(); });
 
 describe('access rules', () => {
   it('requires a token for financials and Full access for DD documents', async () => {

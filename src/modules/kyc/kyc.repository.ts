@@ -33,9 +33,7 @@ export const kycRepository = {
   },
 
   async findLatest(userId: string): Promise<KycSubmission | null> {
-    const row = await callDb<
-      (Omit<KycSubmission, 'submittedAt' | 'reviewedAt'> & { submittedAt: string; reviewedAt: string | null }) | null
-    >('app_kyc_latest', { p_user_id: userId });
+    const row = await callDb('app_kyc_latest', { p_user_id: userId });
     return (
       row && {
         ...row,

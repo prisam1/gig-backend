@@ -1,4 +1,5 @@
 import { callDb } from '../../lib/db';
+import type { DbResult } from '../../lib/dbFunctions';
 import { displayNameFor } from '../../lib/displayName';
 import { containsPattern } from '../../lib/http';
 import { HttpError, validationError } from '../../middleware/errorHandler';
@@ -118,25 +119,7 @@ export function signatureFileInvalid(): HttpError {
 // Queries
 // ---------------------------------------------------------------------------------------------
 
-interface SignerRow {
-  id: string;
-  displayMode: DisplayMode;
-  signerName: string;
-  investorType: string | null;
-  investorTypeLabel: string | null;
-  signerTier: Tier;
-  signedAt: string;
-}
-
-/** A row as JSON carries it: the named timestamps as ISO strings. */
-type WithDates<T, K extends keyof T> = Omit<T, K> & Record<K, string>;
-
-const toRepresentation = (row: WithDates<Representation, 'opensAt' | 'closesAt' | 'createdAt'>): Representation => ({
-  ...row,
-  opensAt: new Date(row.opensAt),
-  closesAt: new Date(row.closesAt),
-  createdAt: new Date(row.createdAt),
-});
+type SignerRow = DbResult<'app_representation_signers'>[number];
 
 /** Signers as the public sees them: the name follows the signer's display choice. */
 function toSigner(row: SignerRow): Signer {
@@ -149,15 +132,13 @@ function toSigner(row: SignerRow): Signer {
         ? { code: row.investorType, label: row.investorTypeLabel }
         : null,
     isVerified: row.signerTier === 'PRIVE',
-    signedAt: new Date(row.signedAt),
+    signedAt: row.signedAt,
   };
 }
 
-type RepresentationRow = WithDates<Representation, 'opensAt' | 'closesAt' | 'createdAt'>;
-
 export const representationsRepository = {
   async findAll(query: ListRepresentationsQuery): Promise<Page<Representation>> {
-    const page = await callDb<Page<RepresentationRow>>('app_find_representations', {
+    const page = await callDb('app_find_representations', {
       p_q_pattern: query.q ? containsPattern(query.q) : null,
       p_statuses: query.filter?.status ?? null,
       p_countries: query.filter?.country ?? null,
@@ -166,17 +147,16 @@ export const representationsRepository = {
       p_limit: query.pageSize,
       p_offset: (query.page - 1) * query.pageSize,
     });
-    return { items: page.items.map(toRepresentation), total: page.total };
+    return page;
   },
 
-  async findById(id: string): Promise<Representation | null> {
-    const row = await callDb<RepresentationRow | null>('app_find_representation', { p_id: id });
-    return row && toRepresentation(row);
+  findById(id: string): Promise<Representation | null> {
+    return callDb('app_find_representation', { p_id: id });
   },
 
   /** Most recent valid signers first. */
   async findSigners(representation: Representation, limit: number): Promise<Signer[]> {
-    const rows = await callDb<SignerRow[]>('app_representation_signers', {
+    const rows = await callDb('app_representation_signers', {
       p_representation_id: representation.internalId,
       p_limit: limit,
     });
@@ -189,11 +169,8 @@ export const representationsRepository = {
   },
 
   /** Stored status changes, oldest first, with the documents attached to each. */
-  async findStatusHistory(representation: Representation): Promise<StatusChange[]> {
-    const rows = await callDb<WithDates<StatusChange, 'occurredAt'>[]>('app_representation_history', {
-      p_representation_id: representation.internalId,
-    });
-    return rows.map((row) => ({ ...row, occurredAt: new Date(row.occurredAt) }));
+  findStatusHistory(representation: Representation): Promise<StatusChange[]> {
+    return callDb('app_representation_history', { p_representation_id: representation.internalId });
   },
 
   /** The latest submitted petition pack (Phase 2 generates these; staff attach them). */
@@ -204,15 +181,14 @@ export const representationsRepository = {
   },
 
   /** The user's valid, not-deleted signature on this petition. */
-  async findSignature(
+  findSignature(
     userId: string,
     representation: Representation,
   ): Promise<StoredSignature | null> {
-    const row = await callDb<WithDates<StoredSignature, 'createdAt'> | null>(
-      'app_representation_signature',
-      { p_user_id: userId, p_representation_id: representation.internalId },
-    );
-    return row && { ...row, createdAt: new Date(row.createdAt) };
+    return callDb('app_representation_signature', {
+      p_user_id: userId,
+      p_representation_id: representation.internalId,
+    });
   },
 
   /** The signature a user already created with this Idempotency-Key, if any. */
@@ -231,7 +207,7 @@ export const representationsRepository = {
    * locked and re-checked, so a signature never lands after the window closed.
    */
   async sign(signature: NewSignature, ctx: ClientContext): Promise<void> {
-    const result = await callDb<{ ok: true } | { error: 'NOT_FOUND' | 'CLOSED' | 'FILE_INVALID' }>(
+    const result = await callDb(
       'app_representation_sign',
       { p_signature: signature, p_ctx: ctx },
     );

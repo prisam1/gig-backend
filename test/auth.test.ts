@@ -7,7 +7,7 @@ import { signAccessToken } from '../src/lib/tokens';
 import { AppError } from '../src/middleware/errorHandler';
 import { AUTH_HEADER, OTHER_USER_ID, app, signInAs } from './helpers';
 
-const SECRET = process.env.JWT_ACCESS_SECRET!;
+const SECRET = process.env['JWT_ACCESS_SECRET']!;
 const claims = { sid: randomUUID() };
 const signOptions = { issuer: 'gig-backend', audience: 'gig-app', subject: randomUUID() } as const;
 

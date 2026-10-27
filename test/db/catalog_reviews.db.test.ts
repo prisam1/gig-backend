@@ -125,7 +125,7 @@ async function publishAll() {
 }
 
 async function stats(company: string) {
-  return rows<Record<string, unknown>>('select * from public.company_stats where company_id = $1', [
+  return rows('select * from public.company_stats where company_id = $1', [
     company,
   ]);
 }
@@ -133,7 +133,7 @@ async function stats(company: string) {
 async function expectDbError(promise: Promise<unknown>, code: string, message?: RegExp) {
   const error = await promise.then(
     () => null,
-    (e: { code?: string; message: string }) => e,
+    (e: unknown) => e as { code?: string; message: string },
   );
   expect(error, 'expected a database error').not.toBeNull();
   expect(error?.code).toBe(code);
@@ -165,7 +165,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await db?.close();
+  await db.close();
 });
 
 // Every test starts from the seeded catalog with no reviews.
@@ -433,8 +433,7 @@ describe('submit_review', () => {
   it('stores "Older" as a null investment year', async () => {
     const r = await submit({ company: await companyId('astra-mutuals'), year: null });
     expect(
-      (await one('select investment_year from public.reviews where id = $1', [r.id]))
-        .investment_year,
+      (await one('select investment_year from public.reviews where id = $1', [r.id]))['investment_year'],
     ).toBe(null);
   });
 });
@@ -551,22 +550,21 @@ describe('company stats', () => {
       reviews_30d: 4,
     });
     // All reviews are new (weight 1.0), so the score equals the plain average.
-    expect(s?.score).toBe(3.25);
+    expect(s?.['score']).toBe(3.25);
   });
 
   it('weights older reviews less (linear decay to 0.5 at 24 months)', async () => {
     const astra = await companyId('astra-mutuals');
-    const recent = await submit({ company: astra, product: 'New', metrics: [5, 5, 5, 5, 5] });
+    await submit({ company: astra, product: 'New', metrics: [5, 5, 5, 5, 5] });
     const old = await submit({ company: astra, product: 'Old', metrics: [1, 1, 1, 1, 1] });
     await db.query(
       `update public.reviews set created_at = now() - interval '730 days' where id = $1`,
       [old.id],
     );
     await publishAll();
-    void recent;
 
     // weights 1.0 and 0.5: (5*1 + 1*0.5) / 1.5 = 3.67
-    expect((await stats(astra))[0]?.score).toBe(3.67);
+    expect((await stats(astra))[0]?.['score']).toBe(3.67);
   });
 
   it('reports the 12-month change in overall satisfaction', async () => {
@@ -579,7 +577,7 @@ describe('company stats', () => {
     );
     await publishAll();
     // all-time average 3.5 vs 2.0 among reviews older than 12 months
-    expect((await stats(astra))[0]?.score_change_12m).toBe(1.5);
+    expect((await stats(astra))[0]?.['score_change_12m']).toBe(1.5);
   });
 
   it('stores monthly trend points', async () => {
@@ -611,7 +609,7 @@ describe('company stats', () => {
     const astra = await companyId('astra-mutuals');
     const r = await submit({ company: astra });
     await publishAll();
-    expect((await stats(astra))[0]?.review_count).toBe(1);
+    expect((await stats(astra))[0]?.['review_count']).toBe(1);
     await db.query(`update public.reviews set status = 'REMOVED' where id = $1`, [r.id]);
     expect((await stats(astra))[0]).toMatchObject({
       review_count: 0,
@@ -806,10 +804,10 @@ describe('update_review_resolution', () => {
 
   it('keeps the note when told not to update it, and clears it with null', async () => {
     const id = await setup();
-    expect((await update(ALICE, id, 'IN_PROGRESS', null, false)).follow_up_note).toBe(
+    expect((await update(ALICE, id, 'IN_PROGRESS', null, false))['follow_up_note']).toBe(
       'Called them',
     );
-    expect((await update(ALICE, id, 'IN_PROGRESS', null, true)).follow_up_note).toBe(null);
+    expect((await update(ALICE, id, 'IN_PROGRESS', null, true))['follow_up_note']).toBe(null);
   });
 
   it('refuses anyone but the reviewer', async () => {

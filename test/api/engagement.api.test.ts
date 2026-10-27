@@ -36,7 +36,7 @@ const learnRow = (overrides: Record<string, unknown> = {}) => ({
   ...overrides,
 });
 
-beforeEach(() => fake.reset());
+beforeEach(() => { fake.reset(); });
 
 describe('learn', () => {
   it('locks PREMIUM content for signed-out visitors', async () => {
