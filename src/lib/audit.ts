@@ -21,7 +21,10 @@ export type AuditAction =
   | 'file.upload_url.created'
   | 'kyc.submitted'
   | 'rating.submitted'
-  | 'representation.signed';
+  | 'representation.signed'
+  // Staff opening personal data. Admin writes (admin.*) audit themselves in their database function.
+  | 'admin.user.viewed'
+  | 'admin.kyc.viewed';
 
 // Append-only: the table rejects UPDATE and DELETE. Never put raw PII in metadata.
 // Multi-step operations write their audit entry inside their own database function.

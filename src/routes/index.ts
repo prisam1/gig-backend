@@ -10,6 +10,7 @@ import { meRouter, usersRouter } from '../modules/users/users.routes';
 import { apiRateLimit, noStore } from '../middleware/requestContext';
 import { issuersRouter, ratingsRouter } from '../modules/ratings/ratings.routes';
 import { representationsRouter } from '../modules/representations/representations.routes';
+import { adminRouter } from '../modules/admin/admin.routes';
 
 export const router = Router();
 
@@ -79,3 +80,10 @@ router.use('/ratings', ratingsRouter);
 //   GET   /representations/:id/submission  download the submitted petition pack
 // ---------------------------------------------------------------------------------------------
 router.use('/representations', representationsRouter);
+
+// ---------------------------------------------------------------------------------------------
+// Admin (Phase 1): GIG staff only; routes and permissions in src/modules/admin/admin.routes.ts
+//   /admin/users, /admin/kyc, /admin/moderation, /admin/companies, /admin/issuers,
+//   /admin/representations, /admin/credits/grant, /admin/audit-logs
+// ---------------------------------------------------------------------------------------------
+router.use('/admin', adminRouter);

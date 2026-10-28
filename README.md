@@ -2,7 +2,7 @@
 
 REST API for the GIG (Global Investorz Group) mobile app. Node.js + TypeScript + Express, with Supabase (Postgres) as the database.
 
-> **Status:** Phase 1 "Auth and onboarding", "Users, profile and KYC", "Catalog and reviews", "Ratings" and "Representations" are implemented. Roadshows and admin are not built yet.
+> **Status:** Phase 1 "Auth and onboarding", "Users, profile and KYC", "Catalog and reviews", "Ratings", "Representations" and "Admin console APIs" (including roadshow and learn content management) are implemented. The app-facing roadshow, learn and credits endpoints are not built yet.
 
 ## Getting started
 
@@ -42,8 +42,8 @@ The server refuses to start if any required variable is missing or invalid.
 | Folder       | What it tests |
 | ------------ | ------------- |
 | `test/unit/` | Request validation: sign-up, login, OTP and onboarding rules; every review, rating and signing rule from the plan; list filters, compare ids, trend ranges |
-| `test/db/`   | All migrations and the seed in PGlite. The `app_*` functions: sign-up, OTP limits and decoys, sessions, refresh-token theft, password reset, tier, KYC, who may call them, append-only audit log. Ratings and Representations: their repositories call the same `app_*` functions against PGlite (rating and signature transactions, issuer stats, effective petition status, signer names, infected documents, counts). Catalog and reviews: constraints, review submission and receipt numbers, evidence checks, stats, trends, feed, search, resolution updates |
-| `test/api/`  | Every catalog, review, rating and representation endpoint through Express: access rules per tier and KYC, response shapes, filters and sorting, idempotency keys, evidence and signature-file errors, 400/401/403/404/409 errors |
+| `test/db/`   | All migrations and the seed in PGlite. The `app_*` functions: sign-up, OTP limits and decoys, sessions, refresh-token theft, password reset, tier, KYC, who may call them, append-only audit log. Ratings and Representations: their repositories call the same `app_*` functions against PGlite (rating and signature transactions, issuer stats, effective petition status, signer names, infected documents, counts). Catalog and reviews: constraints, review submission and receipt numbers, evidence checks, stats, trends, feed, search, resolution updates. Admin: staff roles, suspension, KYC decisions, moderation, content, petition track, credits and audit search |
+| `test/api/`  | Every catalog, review, rating, representation and admin endpoint through Express: staff roles and permissions, access rules per tier and KYC, response shapes, filters and sorting, idempotency keys, evidence and signature-file errors, 400/401/403/404/409 errors |
 
 ## Project structure
 
@@ -70,6 +70,7 @@ src/
     catalog/  reviews/    # companies, trends, compare; review submission and receipts
     ratings/              # issuers, rating summary, rating submission and receipts
     representations/      # petitions, timeline, signatures and receipt PDFs, submission packs
+    admin/                # staff roles, users, KYC decisions, moderation, content, credits, audit log
 supabase/
   migrations/             # SQL migrations, applied in name order, never edited once applied
   seed.sql                # development data
@@ -168,7 +169,7 @@ Phase 1, plan weeks 5-7. Every route except `/lookups` requires your access toke
 
 **Uploads:** the app asks for a URL with `purpose` (`AVATAR`, `KYC_DOCUMENT` or `REVIEW_EVIDENCE`), `mimeType` and `sizeBytes`, then PUTs the file to `uploadUrl`. Files are stored at `<user public_id>/<random id>.<ext>`, so each user writes only to their own folder. Avatars go to the public `avatars` bucket; KYC documents and review evidence stay private. Use the `fileId` for `PATCH /me` (`avatarFileId`) and KYC documents, and the `path` for review evidence.
 
-**KYC:** one open submission per user. Submitting stores the documents, the consent (with time, IP, user agent and app version) and sets `kycStatus` to `PENDING`, in one transaction. Approval and rejection belong to the admin module, which is not built yet.
+**KYC:** one open submission per user. Submitting stores the documents, the consent (with time, IP, user agent and app version) and sets `kycStatus` to `PENDING`, in one transaction. GIG staff approve or reject it through `/admin/kyc` (see [Admin](#admin)).
 
 ### Sign-up flow
 
@@ -229,7 +230,7 @@ The account only exists once both email and phone are verified. A pending sign-u
 - `sort`: `recent`, `oldest`, `highest` or `lowest`.
 - Filters: `sentiment`, `resolution`, `assetClass`, `investedStatus`, `year`.
 
-New reviews stay `PENDING_MODERATION` and do not count towards public numbers until a moderator sets `status = 'PUBLISHED'`. That moderation step belongs to the admin module, which is not built yet. Company stats recompute automatically whenever a published review changes.
+New reviews stay `PENDING_MODERATION` and do not count towards public numbers until a moderator approves them through `/admin/moderation` (see [Admin](#admin)). Company stats recompute automatically whenever a published review changes.
 
 ### Submitting a review
 
@@ -345,3 +346,75 @@ Tables (private `app` schema): `representations`, `representation_signatures`, `
 | Review-form `isKycVerified` / `isGenuine` as the 2 consents                                                                        | `consents.supportSubmission` / `consents.digitalEndorsement` |
 | `signedSignature`, `Goal`, `closeIn`, `totalSignature`                                                                             | `signatureCount`, `goal`, `daysLeft`, `progressPercent`      |
 | Petition opened without an id                                                                                                      | Petition `id` in the URL                                     |
+
+## Admin
+
+Phase 1, plan weeks 14-15: the API behind GIG's admin console. Every route is under `/admin`, needs an access token, and is open to GIG staff only (`403 STAFF_ONLY` for everyone else, whatever their tier). Staff roles are a second axis next to the membership tier; each route also needs one permission (`403 ROLE_FORBIDDEN` otherwise).
+
+| Permission      | ADMIN | MODERATOR | SUPPORT | ANALYST | Routes                                                             |
+| --------------- | :---: | :-------: | :-----: | :-----: | ------------------------------------------------------------------ |
+| `users.read`    |   ✓   |     ✓     |    ✓    |    ✓    | `GET /admin/users`, `/admin/users/:id`, `/admin/users/:id/credits` |
+| `users.contact` |   ✓   |           |    ✓    |         | Email and phone in `GET /admin/users/:id` (each view audited)      |
+| `users.write`   |   ✓   |           |         |         | `PATCH /admin/users/:id`                                           |
+| `roles.write`   |   ✓   |           |         |         | `PUT /admin/users/:id/roles`                                       |
+| `kyc.read`      |   ✓   |     ✓     |    ✓    |         | `GET /admin/kyc`, `/admin/kyc/:id` (each view audited)             |
+| `kyc.decide`    |   ✓   |     ✓     |         |         | `POST /admin/kyc/:id/approve`, `/reject`                           |
+| `moderation`    |   ✓   |     ✓     |         |         | `/admin/moderation/*`; roadshow questions and answers              |
+| `content.read`  |   ✓   |     ✓     |    ✓    |    ✓    | `GET` companies, issuers, representations, roadshows, learn        |
+| `content.write` |   ✓   |           |         |         | Create, update, delete content; petition track and documents       |
+| `credits.grant` |   ✓   |           |         |         | `POST /admin/credits/grant`                                        |
+| `audit.read`    |   ✓   |           |         |         | `GET /admin/audit-logs`                                            |
+
+`GET /admin/me` returns the signed-in staff member's roles and permissions, for the console's menus. The matrix lives in `src/modules/admin/admin.access.ts`.
+
+**The first ADMIN** is created in the SQL editor. After that, admins manage roles with `PUT /admin/users/:id/roles`:
+
+```sql
+insert into app.user_roles (user_id, role)
+select id, 'ADMIN' from app.users where public_id = '<user id>';
+```
+
+| Method               | Path                                                           | Purpose                                                                                                                                  |
+| -------------------- | -------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| GET                  | `/admin/users`                                                 | `q`: exact email, phone with country code, user ID, or part of the name. `filter[tier/kycStatus/status/role]`. `sort`: `-createdAt`, `createdAt`, `name`, `-lastLoginAt` |
+| GET                  | `/admin/users/:id`                                             | Account, profile, roles, credits, activity counts, KYC submissions, tier history. `contact` for ADMIN and SUPPORT only                  |
+| PATCH                | `/admin/users/:id`                                             | `{ tier?, status?: ACTIVE or SUSPENDED, reason }`. Suspending signs the user out everywhere                                              |
+| PUT                  | `/admin/users/:id/roles`                                       | `{ roles: [...] }` replaces the user's staff roles                                                                                       |
+| GET                  | `/admin/users/:id/credits`                                     | Credit ledger, newest first; the balance is in `meta.balance`                                                                            |
+| GET                  | `/admin/kyc`                                                   | Queue: pending first, oldest first. `filter[status]` (default `PENDING`), `filter[tier]`                                                 |
+| GET                  | `/admin/kyc/:id`                                               | Submission, user, consent, and documents with 5-minute download links                                                                    |
+| POST                 | `/admin/kyc/:id/approve`                                       | Grants the submitted tier (recorded in the tier history as `KYC_APPROVED`)                                                               |
+| POST                 | `/admin/kyc/:id/reject`                                        | `{ reason }`, which the user sees in `GET /kyc/submissions/me`                                                                           |
+| GET                  | `/admin/moderation/queue`                                      | Reviews, ratings and roadshow questions, oldest first. `filter[type]=REVIEW,RATING,QUESTION`, `filter[status]` (default `PENDING_MODERATION`) |
+| GET                  | `/admin/moderation/:id?type=REVIEW`                            | The full review (with evidence links), rating or question                                                                                |
+| POST                 | `/admin/moderation/:id/decision`                               | `{ type, decision, note? }`. `note` is required for every decision except `APPROVE`                                                      |
+| GET / POST           | `/admin/companies`, `/admin/issuers`, `/admin/representations`, `/admin/roadshows`, `/admin/learn` | List (`q`, filters; `filter[deleted]=true` includes deleted items) / create                                  |
+| GET / PATCH / DELETE | `/admin/<resource>/:id`                                        | Read / update only the fields sent / soft delete                                                                                         |
+| POST                 | `/admin/representations/:id/documents/upload-url`              | Signed URL to PUT one document (PDF, JPG or PNG, up to 25 MB) into the petition's folder                                                 |
+| POST                 | `/admin/representations/:id/documents`                         | Attach uploaded documents (evidence and others) outside the track                                                                       |
+| POST                 | `/admin/representations/:id/status`                            | `{ status, note?, documents? }`: moves the track forward, from Under Review onwards                                                      |
+| GET                  | `/admin/roadshows/:id/questions`                               | Ask Me Anything questions, oldest first. `filter[status]`, `filter[category]`, `filter[answered]`                                       |
+| POST                 | `/admin/roadshows/:id/questions/:questionId/answer`            | `{ answer }`: publishes the issuer's answer (sending it again replaces it); a pending question is published with it                    |
+| POST                 | `/admin/credits/grant`                                         | `{ userId, delta, reason }`; a negative `delta` revokes. Needs an `Idempotency-Key` header                                              |
+| GET                  | `/admin/audit-logs`                                            | Newest first. `filter[action]` (exact, or a prefix such as `admin.*`), `filter[user]` (entries by or about the user), `filter[from]`, `filter[to]` |
+
+**Rules.** The database functions enforce these, so they also hold when requests run at the same time.
+
+- **Moderation:** `APPROVE` publishes a pending or changes-requested item. `REQUEST_CHANGES` and `REJECT` decide a pending one. `REMOVE` takes a published one down. Any other combination is `409 INVALID_TRANSITION`. Review decisions appear on the review's status timeline, and company and issuer stats recompute through the existing triggers.
+- **KYC:** a submission is decided once (`409 KYC_ALREADY_DECIDED`). A submission with an infected document cannot be approved (`409 DOCUMENT_INFECTED`).
+- **Users:** Prive and Institutional need approved KYC (`409 KYC_NOT_APPROVED`). Suspended users cannot sign in, and their existing tokens stop working.
+- **Conflicts of interest:** staff cannot decide their own KYC or moderate their own content (`403 CONFLICT_OF_INTEREST`). They cannot change their own status, drop their own ADMIN role, or grant themselves credits (`409 SELF_CHANGE`). GIG always keeps one active ADMIN (`409 LAST_ADMIN`).
+- **Petition track:** staff set the statuses from Under Review to Resolved. Steps can be skipped but never reversed, and moving to Under Review ends signing early. Each step records its note, the staff member and its documents, which show on the public timeline. Documents must be uploaded to the petition's folder first.
+- **Content:** deletes are soft: the item leaves the app, but its reviews, ratings, signatures and questions stay. A slug already in use is `409 SLUG_TAKEN`.
+- **Roadshows:** issue summary (type of issue, instruments, offer price, lock-in, maturity, convertibility, callable, coupon rate), risk factors, the pool window (`opensAt` to `closesAt`, `poolEnabled`) and financials per fiscal year (`FY2025`; revenue, EBITDA, net profit, total assets, total liabilities, net worth, total debt, operating cash flow, EPS, ROE %), all in the roadshow's `currency`. Sending `financials` replaces every year. `published: true` shows it in the app and keeps the first publication time; `false` returns it to draft. The issuer must exist (`400`, field `issuerId`).
+- **Roadshow questions:** categories `EQUITY`, `DEBT`, `INSURANCE`, `CRYPTO`, `MUTUAL_FUNDS`. Rejected, removed and changes-requested questions cannot be answered (`409 INVALID_TRANSITION`).
+- **Learn:** `contentType` is `ARTICLE`, `VIDEO`, `PODCAST`, `REPORT` or `COURSE`. `minTier` is the lowest tier that may open it, and `downloadable` marks downloads for Prive and Institutional members. `published` works as for roadshows.
+- **Credits:** the ledger (`app.credit_ledger`) is append-only, and the balance is cached on `app.users.credit_balance`. The balance never goes below zero (`409 INSUFFICIENT_CREDITS`). A retry with the same `Idempotency-Key` returns the original entry with `Idempotent-Replayed: true`.
+- **Audit:** every admin write records its own audit entry (`admin.*` actions) in the same transaction, with the staff member, IP, user agent and request ID. Opening a user's contact details or a KYC submission is audited too.
+
+Tables (private `app` schema):
+
+- `supabase/migrations/20261028090000_admin.sql`: `user_roles` and `credit_ledger`, plus the `users.credit_balance` column.
+- `supabase/migrations/20261028100000_admin_roadshows_learn.sql`: `roadshows`, `roadshow_financials`, `roadshow_questions` and `learn_items`. The app-facing Roadshows (Phase 2) and Learn modules build on these and add their own tables (pool members, offers, improvement votes, DD documents, learn ratings).
+
+**Not covered yet:** investors cannot ask roadshow questions until the Roadshows module adds that endpoint, so for now questions only exist when inserted directly. Learn files are links (`mediaUrl`); private, tier-gated report files would need a storage bucket and an upload endpoint like the petition documents'.

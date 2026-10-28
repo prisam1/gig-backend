@@ -58,5 +58,28 @@ export const REPRESENTATION_TRACK_STATUSES = [
 ] as const;
 export type RepresentationTrackStatus = (typeof REPRESENTATION_TRACK_STATUSES)[number];
 
-export type RepresentationDocumentType =
-  'EVIDENCE' | 'SUBMISSION_PACK' | 'REGULATOR_RESPONSE' | 'MEETING_MINUTES';
+export const REPRESENTATION_DOCUMENT_TYPES = [
+  'EVIDENCE',
+  'SUBMISSION_PACK',
+  'REGULATOR_RESPONSE',
+  'MEETING_MINUTES',
+] as const;
+export type RepresentationDocumentType = (typeof REPRESENTATION_DOCUMENT_TYPES)[number];
+
+// Admin. They match the CHECK constraints in supabase/migrations/20261028090000_admin.sql.
+
+export const STAFF_ROLES = ['ADMIN', 'MODERATOR', 'ANALYST', 'SUPPORT'] as const;
+export type StaffRole = (typeof STAFF_ROLES)[number];
+
+export const USER_STATUSES = ['ACTIVE', 'SUSPENDED', 'DELETED'] as const;
+export type UserStatus = (typeof USER_STATUSES)[number];
+
+// Roadshows and learn. They match the CHECK constraints in
+// supabase/migrations/20261028100000_admin_roadshows_learn.sql.
+
+/** Ask Me Anything categories; "Top Asked" and "Recently Added" are sort orders, not categories. */
+export const ROADSHOW_QUESTION_CATEGORIES = ['EQUITY', 'DEBT', 'INSURANCE', 'CRYPTO', 'MUTUAL_FUNDS'] as const;
+export type RoadshowQuestionCategory = (typeof ROADSHOW_QUESTION_CATEGORIES)[number];
+
+export const LEARN_CONTENT_TYPES = ['ARTICLE', 'VIDEO', 'PODCAST', 'REPORT', 'COURSE'] as const;
+export type LearnContentType = (typeof LEARN_CONTENT_TYPES)[number];
