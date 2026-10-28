@@ -200,6 +200,7 @@ export const routeDocs: RouteDoc[] = [
   }),
   r('post', '/files/upload-url', 'Files', 'Signed upload URL', 'user', {
     body: files.createUploadUrlSchema,
+    example: { purpose: 'AVATAR', mimeType: 'image/jpeg', sizeBytes: 204800 },
     status: 201,
   }),
   r('post', '/kyc/submissions', 'KYC', 'Submit KYC documents', 'user', {
