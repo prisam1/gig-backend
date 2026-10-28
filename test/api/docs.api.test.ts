@@ -135,4 +135,14 @@ describe('API docs', () => {
     const ui = await request(app).get('/api/docs/').expect(200);
     expect(ui.text).toContain('swagger-ui');
   });
+
+  it('lets "Try it out" call the API over plain http (local development)', async () => {
+    const ui = await request(app).get('/api/docs/').expect(200);
+    const csp = String(ui.headers['content-security-policy']);
+    // upgrade-insecure-requests would turn every call into https://localhost and fail silently.
+    expect(csp).not.toContain('upgrade-insecure-requests');
+    // The rest of the policy still applies to the docs page.
+    expect(csp).toContain("default-src 'self'");
+    expect(csp).toContain("script-src 'self'");
+  });
 });

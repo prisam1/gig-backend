@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import helmet from 'helmet';
 import swaggerUi from 'swagger-ui-express';
 import { z } from 'zod';
 import { IDEMPOTENCY_HEADER } from '../lib/idempotency';
@@ -172,6 +173,10 @@ export function docsRouter() {
   router.get('/openapi.json', (_req, res) => {
     res.json(spec);
   });
+  // Helmet's default policy includes upgrade-insecure-requests, which makes the browser send
+  // "Try it out" calls from http://localhost to https://localhost, where nothing listens, so
+  // every request failed without a response. The docs page keeps the rest of the policy.
+  router.use(helmet.contentSecurityPolicy({ directives: { upgradeInsecureRequests: null } }));
   router.use(
     '/',
     swaggerUi.serve,
