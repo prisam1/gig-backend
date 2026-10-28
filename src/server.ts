@@ -9,7 +9,9 @@ const server = createApp().listen(env.PORT, () => {
 // Clears expired OTPs, sign-ups, reset tokens, sessions and rate-limit rows.
 const purge = setInterval(
   () => {
-    callDb('app_purge_expired').catch((err) => console.error('[purge] failed', err));
+    callDb('app_purge_expired', {}).catch((err: unknown) => {
+      console.error('[purge] failed', err);
+    });
   },
   15 * 60 * 1000,
 );

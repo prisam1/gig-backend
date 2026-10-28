@@ -77,10 +77,12 @@ export const identifierSchema = z
     return z.NEVER;
   });
 
+export const DEVICE_PLATFORMS = ['IOS', 'ANDROID', 'WEB', 'OTHER'] as const;
+
 export const deviceSchema = z
   .object({
     name: z.string().trim().min(1).max(100).optional(),
-    platform: z.enum(['IOS', 'ANDROID', 'WEB', 'OTHER']).default('OTHER'),
+    platform: z.enum(DEVICE_PLATFORMS).default('OTHER'),
   })
   .strict()
   .default({ platform: 'OTHER' });

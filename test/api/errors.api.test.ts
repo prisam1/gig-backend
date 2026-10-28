@@ -15,7 +15,7 @@ vi.mock('../../src/lib/auth', async () => {
 
 const app = createApp();
 
-beforeEach(() => fake.reset());
+beforeEach(() => { fake.reset(); });
 
 describe('API conventions', () => {
   it('serves the health check', async () => {

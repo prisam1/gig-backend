@@ -357,7 +357,7 @@ async function checkEvidence(
   const paths = evidence.map((e) => e.path);
   if (paths.length === 0) return fields;
   if (new Set(paths).size !== paths.length) {
-    fields.evidence = 'Each file can be attached once';
+    fields['evidence'] = 'Each file can be attached once';
     return fields;
   }
 
@@ -404,7 +404,7 @@ export async function submitReview(
       throw err;
     },
   );
-  if (!companyExists) fields.companyId = 'Company not found';
+  if (!companyExists) fields['companyId'] = 'Company not found';
   Object.assign(fields, await checkEvidence(user, input.evidence));
   assertNoFieldErrors(fields);
 

@@ -96,8 +96,8 @@ const verifiedPrive = () =>
   makeUser({ tier: 'PRIVE', kycStatus: 'APPROVED', fullName: 'Shreya Mehta' });
 
 function stubLookups() {
-  vi.mocked(listOptions).mockImplementation(async (type) =>
-    type === 'RATING_FACTOR' ? FACTORS : type === 'RISK_FACTOR' ? RISKS : [],
+  vi.mocked(listOptions).mockImplementation((type) =>
+    Promise.resolve(type === 'RATING_FACTOR' ? FACTORS : type === 'RISK_FACTOR' ? RISKS : []),
   );
 }
 
@@ -406,9 +406,9 @@ describe('POST /issuers/:id/ratings: saving', () => {
     const findByKey = vi
       .spyOn(ratingsRepository, 'findByIdempotencyKey')
       .mockResolvedValueOnce(null);
-    save.mockImplementation(async (rating) => {
+    save.mockImplementation((rating) => {
       findByKey.mockResolvedValue({ publicId: RATING_ID, requestHash: rating.requestHash });
-      throw uniqueViolation('issuer_ratings_idempotency_key_idx');
+      return Promise.reject(uniqueViolation('issuer_ratings_idempotency_key_idx'));
     });
 
     const res = await submit();

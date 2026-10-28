@@ -25,9 +25,9 @@ const auth = (user: Parameters<typeof tokenFor>[0]) => ({
 });
 
 /** The company exists check (head count on companies). */
-const companyExists = (exists: boolean) => fake.on('from:companies', { count: exists ? 1 : 0 });
+const companyExists = (exists: boolean) => { fake.on('from:companies', { count: exists ? 1 : 0 }); };
 
-beforeEach(() => fake.reset());
+beforeEach(() => { fake.reset(); });
 
 // ---------------------------------------------------------------------------------------------
 describe('GET /api/v1/companies', () => {
@@ -206,7 +206,7 @@ describe('GET /api/v1/companies/:id', () => {
     overallSatisfaction: 4.5,
   };
 
-  beforeEach(() => fake.on('from:company_cards', { data: companyCardRow() }));
+  beforeEach(() => { fake.on('from:company_cards', { data: companyCardRow() }); });
 
   it('shows header, sentiment split and scorecard to signed-out visitors, without analytics', async () => {
     const res = await request(app).get(`/api/v1/companies/${COMPANY_A}`).expect(200);

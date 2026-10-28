@@ -8,7 +8,7 @@ export const authProvider = {
   // resets and suspensions take effect immediately instead of when the token expires.
   async loadMember(accessToken: string): Promise<Member> {
     const claims = verifyAccessToken(accessToken);
-    const member = await callDb<Member | null>('app_member', {
+    const member = await callDb('app_member', {
       p_user_public_id: claims.userPublicId,
       p_session_public_id: claims.sessionPublicId,
     });

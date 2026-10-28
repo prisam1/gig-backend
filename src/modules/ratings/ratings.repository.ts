@@ -114,11 +114,8 @@ interface IssuerRow extends IssuerOffer {
   tags: string[];
   ratingCount: number;
   averageScore: number;
-  createdAt: string;
+  createdAt: Date;
 }
-
-/** A row as JSON carries it: the named timestamps as ISO strings. */
-type WithDates<T, K extends keyof T> = Omit<T, K> & Record<K, string>;
 
 function toIssuer(row: IssuerRow): Issuer {
   return {
@@ -145,7 +142,7 @@ function toIssuer(row: IssuerRow): Issuer {
     tags: row.tags,
     ratingCount: row.ratingCount,
     averageScore: row.averageScore,
-    createdAt: new Date(row.createdAt),
+    createdAt: row.createdAt,
   };
 }
 
@@ -166,23 +163,13 @@ const flagSharesSchema = z.object({
 const factorBreakdownSchema = z.record(z.string(), flagSharesSchema);
 const riskCountsSchema = z.record(z.string(), z.number().int());
 
-interface StatsRow {
-  ratingCount: number;
-  averageScore: number;
-  weightedScore: number;
-  scoreDistribution: unknown;
-  factorBreakdown: unknown;
-  riskCounts: unknown;
-  lastRatingAt: string | null;
-}
-
 // ---------------------------------------------------------------------------------------------
 // Queries
 // ---------------------------------------------------------------------------------------------
 
 export const ratingsRepository = {
   async findIssuers(query: ListIssuersQuery): Promise<Page<Issuer>> {
-    const page = await callDb<Page<IssuerRow>>('app_find_issuers', {
+    const page = await callDb('app_find_issuers', {
       p_q_pattern: query.q ? containsPattern(query.q) : null,
       p_asset_types: query.filter?.assetType ?? null,
       p_listed: query.filter?.listed ?? null,
@@ -194,12 +181,12 @@ export const ratingsRepository = {
   },
 
   async findIssuer(id: string): Promise<Issuer | null> {
-    const row = await callDb<IssuerRow | null>('app_find_issuer', { p_id: id });
+    const row = await callDb('app_find_issuer', { p_id: id });
     return row ? toIssuer(row) : null;
   },
 
   async findStats(issuerId: string): Promise<IssuerStats | null> {
-    const row = await callDb<StatsRow | null>('app_issuer_stats', { p_issuer_id: issuerId });
+    const row = await callDb('app_issuer_stats', { p_issuer_id: issuerId });
     if (!row) return null;
 
     return {
@@ -209,7 +196,7 @@ export const ratingsRepository = {
       scoreDistribution: scoreDistributionSchema.parse(row.scoreDistribution),
       factorBreakdown: factorBreakdownSchema.parse(row.factorBreakdown),
       riskCounts: riskCountsSchema.parse(row.riskCounts),
-      lastRatingAt: row.lastRatingAt ? new Date(row.lastRatingAt) : null,
+      lastRatingAt: row.lastRatingAt,
     };
   },
 
@@ -231,23 +218,20 @@ export const ratingsRepository = {
 
   /** One of the user's own, not-deleted ratings, with its factors and risks. */
   async findOwn(userId: string, publicId: string): Promise<StoredRating | null> {
-    const row = await callDb<WithDates<StoredRating, 'createdAt'> | null>('app_rating_own', {
+    const row = await callDb('app_rating_own', {
       p_user_id: userId,
       p_public_id: publicId,
     });
-    return row && { ...row, createdAt: new Date(row.createdAt) };
+    return row;
   },
 
   async findMine(userId: string, query: ListMyRatingsQuery): Promise<Page<MyRating>> {
-    const page = await callDb<Page<WithDates<MyRating, 'createdAt'>>>('app_ratings_mine', {
+    const page = await callDb('app_ratings_mine', {
       p_user_id: userId,
       p_statuses: query.status ?? null,
       p_limit: query.pageSize,
       p_offset: (query.page - 1) * query.pageSize,
     });
-    return {
-      items: page.items.map((item) => ({ ...item, createdAt: new Date(item.createdAt) })),
-      total: page.total,
-    };
+    return page;
   },
 };

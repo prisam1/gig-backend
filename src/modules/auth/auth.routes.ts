@@ -72,6 +72,6 @@ authRouter.delete('/sessions', requireAuth, async (req, res) => {
 });
 
 authRouter.delete('/sessions/:id', requireAuth, async (req, res) => {
-  await auth.revokeSession(getAuth(req), parse(sessionIdSchema, req.params.id), clientContext(req));
+  await auth.revokeSession(getAuth(req), parse(sessionIdSchema, req.params['id']), clientContext(req));
   res.status(204).end();
 });

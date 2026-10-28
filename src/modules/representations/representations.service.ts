@@ -217,7 +217,7 @@ function timelineSteps(
 function newSignatureCode(): string {
   let code = 'GIG-';
   for (let i = 0; i < 9; i++) {
-    code += SIGNATURE_CODE_ALPHABET[randomInt(SIGNATURE_CODE_ALPHABET.length)];
+    code += SIGNATURE_CODE_ALPHABET.charAt(randomInt(SIGNATURE_CODE_ALPHABET.length));
   }
   return code;
 }
