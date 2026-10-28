@@ -183,6 +183,7 @@ The account only exists once both email and phone are verified. A pending sign-u
 
 - **Passwords:** Argon2id. 8-128 characters with upper, lower, digit and special character. Must not contain the email name or phone number.
 - **OTP:** 6 digits, valid 5 minutes, 5 wrong attempts per code, 45 s resend cooldown, 5 sends per challenge. Codes are stored only as keyed hashes.
+- **Testing without SMS or email:** set `OTP_TEST_CODE=123456` in `.env` and every code is `123456` (sign-up, login and reset). Everything else still applies: expiry, attempt and rate limits, and decoys for unknown addresses never verify. The server refuses to start with it in production, and logs a warning when it is on.
 - **No account discovery:** register, OTP login and forgot-password respond the same whether or not the email or phone is registered. Login has a single "incorrect email/phone or password" error and equal timing.
 - **Rate limits** (shared across instances, in Postgres):
   - per IP on every auth route

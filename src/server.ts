@@ -4,6 +4,9 @@ import { callDb } from './lib/db';
 
 const server = createApp().listen(env.PORT, () => {
   console.log(`GIG backend listening on http://localhost:${env.PORT} (${env.NODE_ENV})`);
+  if (env.OTP_TEST_CODE) {
+    console.warn(`[otp] OTP_TEST_CODE is set: every verification code is ${env.OTP_TEST_CODE}. Development only.`);
+  }
 });
 
 // Clears expired OTPs, sign-ups, reset tokens, sessions and rate-limit rows.
