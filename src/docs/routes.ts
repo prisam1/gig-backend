@@ -168,11 +168,23 @@ export const routeDocs: RouteDoc[] = [
     status: 201,
   }),
   r('get', '/me', 'Me', 'My profile', 'user'),
-  r('patch', '/me', 'Me', 'Update my profile', 'user', { body: users.updateMeSchema }),
+  r('patch', '/me', 'Me', 'Update my profile', 'user', {
+    body: users.updateMeSchema,
+    example: { name: 'Asha Mehta', experienceYears: 5, location: 'Mumbai, India' },
+  }),
   r('put', '/me/preferences', 'Me', 'Replace my preferences', 'user', {
     body: users.preferencesSchema,
+    example: {
+      focus: ['FINANCIAL_ASSETS'],
+      risk: ['MEDIUM_LEVEL'],
+      style: ['VALUE_INVESTING', 'DIVIDEND_INVESTING'],
+      sector: ['TECHNOLOGY', 'FINTECH', 'HEALTHCARE'],
+    },
   }),
-  r('put', '/me/tier', 'Me', 'Choose my membership tier', 'user', { body: users.tierSchema }),
+  r('put', '/me/tier', 'Me', 'Choose my membership tier', 'user', {
+    body: users.tierSchema,
+    example: { tier: 'PRIVE' },
+  }),
 
   // Users, files, KYC, lookups
   r('get', '/users/:id', 'Users', 'Public profile of a user', 'user', {
