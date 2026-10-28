@@ -160,7 +160,7 @@ export function accessLevel(user: AuthUser | undefined): AccessLevel {
 // Queries
 // ---------------------------------------------------------------------------------------------
 
-type SortColumn = keyof CompanyCardRow & string;
+type SortColumn = Extract<keyof CompanyCardRow, string>;
 
 const sortOrders: Record<CompanySort, [SortColumn, 'asc' | 'desc'][]> = {
   relevant: [
@@ -188,10 +188,6 @@ const sortOrders: Record<CompanySort, [SortColumn, 'asc' | 'desc'][]> = {
 
 type SearchArgs = Database['public']['Functions']['search_companies']['Args'];
 
-function nonEmpty<T>(list: T[] | undefined): T[] | undefined {
-  return list && list.length > 0 ? list : undefined;
-}
-
 /** Escapes LIKE wildcards so user input matches literally. */
 function escapeLike(value: string): string {
   return value.replace(/[\\%_]/g, (c) => `\\${c}`);
@@ -203,16 +199,17 @@ function searchArgs(query: ListCompaniesQuery): SearchArgs {
   const exactYears = years.filter((y) => !y.startsWith('before_')).map(Number);
   const beforeYears = years.filter((y) => y.startsWith('before_')).map((y) => Number(y.slice(7)));
 
+  // Unused filters are left out (not sent as undefined), so the function's defaults apply.
   return {
-    p_q: query.q ? escapeLike(query.q) : undefined,
-    p_sentiments: nonEmpty(f.sentiment),
-    p_asset_classes: nonEmpty(f.assetClass),
-    p_resolutions: nonEmpty(f.resolution),
-    p_scores: nonEmpty(f.score),
-    p_countries: nonEmpty(f.country),
-    p_investment_statuses: nonEmpty(f.investedStatus),
-    p_years: nonEmpty(exactYears),
-    p_years_before: beforeYears.length > 0 ? Math.max(...beforeYears) : undefined,
+    ...(query.q ? { p_q: escapeLike(query.q) } : {}),
+    ...(f.sentiment?.length ? { p_sentiments: f.sentiment } : {}),
+    ...(f.assetClass?.length ? { p_asset_classes: f.assetClass } : {}),
+    ...(f.resolution?.length ? { p_resolutions: f.resolution } : {}),
+    ...(f.score?.length ? { p_scores: f.score } : {}),
+    ...(f.country?.length ? { p_countries: f.country } : {}),
+    ...(f.investedStatus?.length ? { p_investment_statuses: f.investedStatus } : {}),
+    ...(exactYears.length > 0 ? { p_years: exactYears } : {}),
+    ...(beforeYears.length > 0 ? { p_years_before: Math.max(...beforeYears) } : {}),
   };
 }
 
@@ -298,7 +295,8 @@ export async function compareCompanies(
 
   const full = accessLevel(user) === 'FULL';
   return ids.map((id) => {
-    const row = byId.get(id)!;
+    const row = byId.get(id);
+    if (!row) throw new HttpError(404, `Company not found: ${id}`);
     const card = toCard(row);
     return {
       id: card.id,

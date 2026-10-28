@@ -9,7 +9,8 @@ export type { KycStatus, Tier, VerifiedTier } from '../lib/membership';
 export const FILE_PURPOSES = ['AVATAR', 'KYC_DOCUMENT', 'REVIEW_EVIDENCE', 'SIGNATURE'] as const;
 export type FilePurpose = (typeof FILE_PURPOSES)[number];
 
-export type FileScanStatus = 'PENDING' | 'CLEAN' | 'INFECTED';
+export const FILE_SCAN_STATUSES = ['PENDING', 'CLEAN', 'INFECTED'] as const;
+export type FileScanStatus = (typeof FILE_SCAN_STATUSES)[number];
 
 export const KYC_DOCUMENT_TYPES = [
   'ID_PROOF',
@@ -20,7 +21,8 @@ export const KYC_DOCUMENT_TYPES = [
 ] as const;
 export type KycDocumentType = (typeof KYC_DOCUMENT_TYPES)[number];
 
-export type KycSubmissionStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
+export const KYC_SUBMISSION_STATUSES = ['PENDING', 'APPROVED', 'REJECTED'] as const;
+export type KycSubmissionStatus = (typeof KYC_SUBMISSION_STATUSES)[number];
 
 // Shared with catalog and reviews, so they come from the public schema's enums.
 export const MARKET_COUNTRIES = Constants.public.Enums.market_country;
@@ -73,13 +75,3 @@ export type StaffRole = (typeof STAFF_ROLES)[number];
 
 export const USER_STATUSES = ['ACTIVE', 'SUSPENDED', 'DELETED'] as const;
 export type UserStatus = (typeof USER_STATUSES)[number];
-
-// Roadshows and learn. They match the CHECK constraints in
-// supabase/migrations/20261028100000_admin_roadshows_learn.sql.
-
-/** Ask Me Anything categories; "Top Asked" and "Recently Added" are sort orders, not categories. */
-export const ROADSHOW_QUESTION_CATEGORIES = ['EQUITY', 'DEBT', 'INSURANCE', 'CRYPTO', 'MUTUAL_FUNDS'] as const;
-export type RoadshowQuestionCategory = (typeof ROADSHOW_QUESTION_CATEGORIES)[number];
-
-export const LEARN_CONTENT_TYPES = ['ARTICLE', 'VIDEO', 'PODCAST', 'REPORT', 'COURSE'] as const;
-export type LearnContentType = (typeof LEARN_CONTENT_TYPES)[number];

@@ -1,19 +1,9 @@
 import { callDb } from '../../lib/db';
+import type { DbResult } from '../../lib/dbFunctions';
 import { containsPattern, escapeLike } from '../../lib/http';
-import type { KycStatus, Tier, VerifiedTier } from '../../lib/membership';
+import type { Tier } from '../../lib/membership';
 import type { ClientContext } from '../../middleware/requestContext';
-import type {
-  KycDocumentType,
-  KycSubmissionStatus,
-  LearnContentType,
-  MarketCountry,
-  RatingStatus,
-  RepresentationDocumentType,
-  RepresentationTrackStatus,
-  RoadshowQuestionCategory,
-  StaffRole,
-  UserStatus,
-} from '../../types/domain';
+import type { RepresentationTrackStatus, StaffRole } from '../../types/domain';
 import type {
   AuditLogsQuery,
   CompanyInput,
@@ -35,95 +25,39 @@ import type {
   RoadshowInput,
 } from './admin.schemas';
 
-// Every admin write is one app_admin_* database function that also writes its audit entry.
-// Expected failures come back as { error: CODE }; the service turns them into HTTP errors.
+// Every admin write is one app_admin_* database function that also writes its audit entry. Their
+// arguments and results are declared in src/lib/dbFunctions.ts and checked by callDb on every
+// call. Expected failures come back as { error: CODE }; the service turns them into HTTP errors.
 
-export interface Page<T> {
-  items: T[];
-  total: number;
+/** An expected failure reported by an app_admin_* function. */
+export interface DbFailure {
+  error: string;
+  status?: string | undefined;
+  balance?: number | undefined;
 }
 
-export type DbResult<T> = T | { error: string; status?: string; balance?: number };
-
-export function isDbError<T>(
-  result: DbResult<T>,
-): result is { error: string; status?: string; balance?: number } {
-  return typeof result === 'object' && result !== null && 'error' in result;
+export function isDbError<T extends object>(result: T): result is Extract<T, { error: string }> {
+  return 'error' in result;
 }
 
-const offset = (query: { page: number; pageSize: number }) => ({
-  p_limit: query.pageSize,
-  p_offset: (query.page - 1) * query.pageSize,
-});
+/** A successful result of `fn`, without its { error } case and without null. */
+type Ok<F extends Parameters<typeof callDb>[0]> = Exclude<
+  NonNullable<DbResult<F>>,
+  { error: string }
+>;
 
-// ---------------------------------------------------------------------------------------------
-// Shapes (dates as the JSON carries them: ISO strings)
-// ---------------------------------------------------------------------------------------------
-
-export interface PersonRef {
-  id: string;
-  name: string | null;
-}
-
-export interface UserListItem {
-  id: string;
-  name: string | null;
-  tier: Tier;
-  requestedTier: VerifiedTier | null;
-  kycStatus: KycStatus;
-  status: UserStatus;
-  creditBalance: number;
-  roles: StaffRole[];
-  createdAt: string;
-  lastLoginAt: string | null;
-}
-
-export interface UserDetailRow {
-  /** Internal key, never returned by the API. */
-  id: string;
-  publicId: string;
-  emailEnc: string;
-  phoneEnc: string;
-  name: string | null;
-  experienceYears: number | null;
-  jobProfile: string | null;
-  otherJob: string | null;
-  location: string | null;
-  tier: Tier;
-  requestedTier: VerifiedTier | null;
-  kycStatus: KycStatus;
-  status: UserStatus;
-  creditBalance: number;
-  roles: StaffRole[];
-  emailVerifiedAt: string;
-  phoneVerifiedAt: string;
-  createdAt: string;
-  lastLoginAt: string | null;
-  deletedAt: string | null;
-  activeSessions: number;
-  activity: {
-    reviews: number;
-    ratings: number;
-    signatures: number;
-    followers: number;
-    following: number;
-  };
-  kycSubmissions: {
-    id: string;
-    tier: VerifiedTier;
-    status: KycSubmissionStatus;
-    reason: string | null;
-    submittedAt: string;
-    reviewedAt: string | null;
-  }[];
-  tierHistory: {
-    fromTier: Tier;
-    toTier: Tier;
-    requestedTier: VerifiedTier | null;
-    reason: string;
-    at: string;
-  }[];
-}
+export type Page<T> = { items: T[]; total: number };
+export type UserListItem = DbResult<'app_admin_find_users'>['items'][number];
+export type UserDetailRow = Ok<'app_admin_get_user'>;
+export type KycDetailRow = Ok<'app_admin_get_kyc'>;
+export type ModerationItemRow = Ok<'app_admin_moderation_item'>;
+export type AdminCompany = Ok<'app_admin_get_company'>;
+export type AdminIssuer = Ok<'app_admin_get_issuer'>;
+export type AdminRepresentationDetail = Ok<'app_admin_get_representation'>;
+export type AdminRoadshow = Ok<'app_admin_get_roadshow'>;
+export type AdminQuestion = Ok<'app_admin_answer_question'>;
+export type AdminLearnItem = Ok<'app_admin_get_learn'>;
+export type CreditGrant = Ok<'app_admin_grant_credits'>;
 
 /** What a user search matches on; at most one is set. */
 export interface UserSearch {
@@ -133,313 +67,6 @@ export interface UserSearch {
   namePattern?: string;
 }
 
-export interface KycListItem {
-  id: string;
-  tier: VerifiedTier;
-  status: KycSubmissionStatus;
-  provider: string;
-  reason: string | null;
-  submittedAt: string;
-  reviewedAt: string | null;
-  documentCount: number;
-  user: { id: string; name: string | null; tier: Tier; kycStatus: KycStatus; status: UserStatus };
-}
-
-export interface KycDocumentRow {
-  fileId: string;
-  documentType: KycDocumentType;
-  bucket: string;
-  objectKey: string;
-  mimeType: string;
-  sizeBytes: number;
-  scanStatus: 'PENDING' | 'CLEAN' | 'INFECTED';
-}
-
-export interface KycDetailRow {
-  id: string;
-  tier: VerifiedTier;
-  status: KycSubmissionStatus;
-  provider: string;
-  reference: string | null;
-  reason: string | null;
-  submittedAt: string;
-  reviewedAt: string | null;
-  reviewer: PersonRef | null;
-  user: {
-    id: string;
-    name: string | null;
-    tier: Tier;
-    requestedTier: VerifiedTier | null;
-    kycStatus: KycStatus;
-    status: UserStatus;
-    createdAt: string;
-  };
-  consent: { version: string; acceptedAt: string } | null;
-  documents: KycDocumentRow[];
-}
-
-export interface KycDecision {
-  status: KycSubmissionStatus;
-  tier: Tier;
-  kycStatus: KycStatus;
-}
-
-export interface ModerationAuthor {
-  id: string;
-  name: string;
-  tier: Tier | null;
-  kycStatus: KycStatus | null;
-}
-
-export interface ModerationQueueItem {
-  type: ModerationType;
-  id: string;
-  /** Null for questions, which have no receipt. */
-  receiptNo: string | null;
-  status: RatingStatus;
-  submittedAt: string;
-  moderationNote: string | null;
-  author: ModerationAuthor;
-  subject: { type: 'COMPANY' | 'ISSUER' | 'ROADSHOW'; id: string; name: string };
-  summary: Record<string, unknown>;
-}
-
-export interface ModerationItemRow extends Omit<ModerationQueueItem, 'summary'> {
-  publishedAt: string | null;
-  content: Record<string, unknown>;
-  /** Review evidence: objects in the review-evidence bucket. */
-  evidence: { path: string; docType: string }[];
-  history: {
-    changeType: string;
-    fromValue: string | null;
-    toValue: string | null;
-    note: string | null;
-    at: string;
-  }[];
-}
-
-export interface ModerationResult {
-  type: ModerationType;
-  id: string;
-  previousStatus: RatingStatus;
-  status: RatingStatus;
-}
-
-export interface AdminCompany {
-  id: string;
-  slug: string;
-  name: string;
-  assetClass: string;
-  country: MarketCountry;
-  logoUrl: string | null;
-  description: string | null;
-  verified: boolean;
-  tags: string[];
-  reviewCount: number;
-  score: number;
-  pendingReviews: number;
-  createdAt: string;
-  updatedAt: string;
-  deletedAt: string | null;
-}
-
-export interface AdminIssuer {
-  id: string;
-  slug: string;
-  name: string;
-  instrument: string;
-  assetType: string;
-  exchange: string | null;
-  openDate: string | null;
-  closeDate: string | null;
-  isListed: boolean;
-  minLot: number | null;
-  lotUnit: string;
-  priceMin: number | null;
-  priceMax: number | null;
-  offerSize: number | null;
-  currency: string;
-  useOfFunds: string | null;
-  lockIn: string | null;
-  prePostRatio: string | null;
-  tags: string[];
-  ratingCount: number;
-  averageScore: number;
-  pendingRatings: number;
-  createdAt: string;
-  updatedAt: string;
-  deletedAt: string | null;
-}
-
-export interface AdminRepresentation {
-  id: string;
-  slug: string;
-  title: string;
-  description: string;
-  asks: string[];
-  whyItMatters: string;
-  category: string | null;
-  country: MarketCountry;
-  tags: string[];
-  regulators: string[];
-  goal: number;
-  signatureCount: number;
-  voteCount: number;
-  opensAt: string;
-  closesAt: string;
-  /** As stored; Open / Closing Soon / Closed are then derived from the dates. */
-  storedStatus: RepresentationTrackStatus;
-  /** The status the app shows. */
-  trackStatus: RepresentationTrackStatus;
-  isPublished: boolean;
-  isOpenForSigning: boolean;
-  documentCount: number;
-  createdAt: string;
-  updatedAt: string;
-  deletedAt: string | null;
-}
-
-export interface AdminRepresentationDocument {
-  id: string;
-  title: string;
-  documentType: RepresentationDocumentType;
-  bucket: string;
-  objectKey: string;
-  mimeType: string;
-  sizeBytes: number;
-  scanStatus: 'PENDING' | 'CLEAN' | 'INFECTED';
-  createdAt: string;
-}
-
-export interface AdminRepresentationDetail extends AdminRepresentation {
-  documents: AdminRepresentationDocument[];
-  history: {
-    fromStatus: RepresentationTrackStatus | null;
-    toStatus: RepresentationTrackStatus;
-    note: string | null;
-    actor: PersonRef | null;
-    occurredAt: string;
-    documentIds: string[];
-  }[];
-}
-
-export interface RoadshowFinancialYear {
-  fiscalYear: string;
-  revenue: number | null;
-  ebitda: number | null;
-  netProfit: number | null;
-  totalAssets: number | null;
-  totalLiabilities: number | null;
-  netWorth: number | null;
-  totalDebt: number | null;
-  operatingCashFlow: number | null;
-  eps: number | null;
-  roePct: number | null;
-}
-
-export interface AdminRoadshow {
-  id: string;
-  slug: string;
-  title: string;
-  summary: string;
-  issuer: { id: string; name: string };
-  typeOfIssue: string;
-  instruments: string;
-  noOfInstruments: number | null;
-  offerPrice: number | null;
-  currency: string;
-  lockIn: string | null;
-  maturity: string | null;
-  convertibility: string | null;
-  callable: boolean;
-  couponRate: number | null;
-  riskFactors: string[];
-  opensAt: string;
-  closesAt: string;
-  poolEnabled: boolean;
-  isPublished: boolean;
-  publishedAt: string | null;
-  /** Published, and between opensAt and closesAt. */
-  isOpen: boolean;
-  /** Newest fiscal year first. */
-  financials: RoadshowFinancialYear[];
-  questions: { pending: number; published: number; unanswered: number };
-  createdAt: string;
-  updatedAt: string;
-  deletedAt: string | null;
-}
-
-export interface AdminQuestion {
-  id: string;
-  category: RoadshowQuestionCategory;
-  question: string;
-  status: RatingStatus;
-  moderationNote: string | null;
-  answer: string | null;
-  answeredAt: string | null;
-  answeredBy: PersonRef | null;
-  author: ModerationAuthor;
-  creditSpent: number;
-  upvoteCount: number;
-  submittedAt: string;
-  publishedAt: string | null;
-}
-
-export interface AdminLearnItem {
-  id: string;
-  slug: string;
-  title: string;
-  summary: string;
-  contentType: LearnContentType;
-  category: string | null;
-  tags: string[];
-  minTier: Tier;
-  downloadable: boolean;
-  author: string | null;
-  thumbnailUrl: string | null;
-  mediaUrl: string | null;
-  body: string | null;
-  durationSeconds: number | null;
-  featured: boolean;
-  isPublished: boolean;
-  publishedAt: string | null;
-  createdAt: string;
-  updatedAt: string;
-  deletedAt: string | null;
-}
-
-export interface CreditEntry {
-  id: string;
-  delta: number;
-  balanceAfter: number;
-  reason: string;
-  refType: string;
-  createdAt: string;
-}
-
-export interface CreditGrant {
-  entry: CreditEntry;
-  balance: number;
-  replayed: boolean;
-}
-
-export interface UserCredits extends Page<
-  CreditEntry & { refId: string | null; actor: PersonRef | null }
-> {
-  balance: number;
-}
-
-export interface AuditEntry {
-  id: string;
-  occurredAt: string;
-  action: string;
-  actor: PersonRef | null;
-  ip: string | null;
-  userAgent: string | null;
-  requestId: string | null;
-  metadata: Record<string, unknown>;
-}
-
 /** Audit action filters as LIKE patterns: `admin.*` matches every action under admin. */
 export function actionPatterns(actions: string[] | undefined): string[] | null {
   if (!actions?.length) return null;
@@ -447,6 +74,13 @@ export function actionPatterns(actions: string[] | undefined): string[] | null {
     action.endsWith('.*') ? `${escapeLike(action.slice(0, -1))}%` : escapeLike(action),
   );
 }
+
+const offset = (query: { page: number; pageSize: number }) => ({
+  p_limit: query.pageSize,
+  p_offset: (query.page - 1) * query.pageSize,
+});
+
+const pattern = (q: string | undefined) => (q ? containsPattern(q) : null);
 
 // ---------------------------------------------------------------------------------------------
 // Queries
@@ -461,7 +95,7 @@ export const adminRepository = {
 
   // ----- users -----
 
-  findUsers(search: UserSearch, query: ListUsersQuery): Promise<Page<UserListItem>> {
+  findUsers(search: UserSearch, query: ListUsersQuery) {
     return callDb('app_admin_find_users', {
       p_search: search,
       p_tiers: query.filter?.tier ?? null,
@@ -473,17 +107,17 @@ export const adminRepository = {
     });
   },
 
-  findUser(publicId: string): Promise<UserDetailRow | null> {
+  findUser(publicId: string) {
     return callDb('app_admin_get_user', { p_public_id: publicId });
   },
 
   updateUser(
     actorId: string,
     publicId: string,
-    changes: { tier?: Tier; status?: 'ACTIVE' | 'SUSPENDED' },
+    changes: { tier?: Tier | undefined; status?: 'ACTIVE' | 'SUSPENDED' | undefined },
     reason: string,
     ctx: ClientContext,
-  ): Promise<DbResult<{ ok: true }>> {
+  ) {
     return callDb('app_admin_update_user', {
       p_actor_id: actorId,
       p_public_id: publicId,
@@ -493,12 +127,7 @@ export const adminRepository = {
     });
   },
 
-  setRoles(
-    actorId: string,
-    publicId: string,
-    roles: StaffRole[],
-    ctx: ClientContext,
-  ): Promise<DbResult<{ roles: StaffRole[] }>> {
+  setRoles(actorId: string, publicId: string, roles: StaffRole[], ctx: ClientContext) {
     return callDb('app_admin_set_roles', {
       p_actor_id: actorId,
       p_public_id: publicId,
@@ -507,16 +136,14 @@ export const adminRepository = {
     });
   },
 
-  userCredits(
-    publicId: string,
-    query: { page: number; pageSize: number },
-  ): Promise<UserCredits | null> {
+  /** Null when the user does not exist. */
+  userCredits(publicId: string, query: { page: number; pageSize: number }) {
     return callDb('app_admin_user_credits', { p_public_id: publicId, ...offset(query) });
   },
 
   // ----- KYC -----
 
-  findKyc(query: ListKycQuery): Promise<Page<KycListItem>> {
+  findKyc(query: ListKycQuery) {
     return callDb('app_admin_find_kyc', {
       p_statuses: query.filter?.status ?? ['PENDING'],
       p_tiers: query.filter?.tier ?? null,
@@ -524,7 +151,7 @@ export const adminRepository = {
     });
   },
 
-  findKycSubmission(publicId: string): Promise<KycDetailRow | null> {
+  findKycSubmission(publicId: string) {
     return callDb('app_admin_get_kyc', { p_public_id: publicId });
   },
 
@@ -534,7 +161,7 @@ export const adminRepository = {
     decision: 'APPROVE' | 'REJECT',
     reason: string | null,
     ctx: ClientContext,
-  ): Promise<DbResult<KycDecision>> {
+  ) {
     return callDb('app_admin_decide_kyc', {
       p_actor_id: actorId,
       p_public_id: publicId,
@@ -546,7 +173,7 @@ export const adminRepository = {
 
   // ----- moderation -----
 
-  moderationQueue(query: ModerationQueueQuery): Promise<Page<ModerationQueueItem>> {
+  moderationQueue(query: ModerationQueueQuery) {
     return callDb('app_admin_moderation_queue', {
       p_types: query.filter?.type ?? null,
       p_statuses: query.filter?.status ?? ['PENDING_MODERATION'],
@@ -554,16 +181,11 @@ export const adminRepository = {
     });
   },
 
-  moderationItem(type: ModerationType, id: string): Promise<ModerationItemRow | null> {
+  moderationItem(type: ModerationType, id: string) {
     return callDb('app_admin_moderation_item', { p_type: type, p_id: id });
   },
 
-  moderate(
-    actorId: string,
-    id: string,
-    input: ModerationDecisionInput,
-    ctx: ClientContext,
-  ): Promise<DbResult<ModerationResult>> {
+  moderate(actorId: string, id: string, input: ModerationDecisionInput, ctx: ClientContext) {
     return callDb('app_admin_moderate', {
       p_actor_id: actorId,
       p_type: input.type,
@@ -576,9 +198,9 @@ export const adminRepository = {
 
   // ----- companies -----
 
-  findCompanies(query: ListCompaniesQuery): Promise<Page<AdminCompany>> {
+  findCompanies(query: ListCompaniesQuery) {
     return callDb('app_admin_find_companies', {
-      p_q_pattern: query.q ? containsPattern(query.q) : null,
+      p_q_pattern: pattern(query.q),
       p_asset_classes: query.filter?.assetClass ?? null,
       p_countries: query.filter?.country ?? null,
       p_verified: query.filter?.verified ?? null,
@@ -587,17 +209,12 @@ export const adminRepository = {
     });
   },
 
-  findCompany(id: string): Promise<AdminCompany | null> {
+  findCompany(id: string) {
     return callDb('app_admin_get_company', { p_id: id });
   },
 
   /** Creates the company when `id` is null. */
-  saveCompany(
-    actorId: string,
-    id: string | null,
-    input: CompanyInput,
-    ctx: ClientContext,
-  ): Promise<DbResult<{ id: string }>> {
+  saveCompany(actorId: string, id: string | null, input: CompanyInput, ctx: ClientContext) {
     return callDb('app_admin_save_company', {
       p_actor_id: actorId,
       p_id: id,
@@ -606,15 +223,15 @@ export const adminRepository = {
     });
   },
 
-  deleteCompany(actorId: string, id: string, ctx: ClientContext): Promise<boolean> {
+  deleteCompany(actorId: string, id: string, ctx: ClientContext) {
     return callDb('app_admin_delete_company', { p_actor_id: actorId, p_id: id, p_ctx: ctx });
   },
 
   // ----- issuers -----
 
-  findIssuers(query: ListIssuersAdminQuery): Promise<Page<AdminIssuer>> {
+  findIssuers(query: ListIssuersAdminQuery) {
     return callDb('app_admin_find_issuers', {
-      p_q_pattern: query.q ? containsPattern(query.q) : null,
+      p_q_pattern: pattern(query.q),
       p_asset_types: query.filter?.assetType ?? null,
       p_listed: query.filter?.listed ?? null,
       p_include_deleted: query.filter?.deleted ?? false,
@@ -622,17 +239,12 @@ export const adminRepository = {
     });
   },
 
-  findIssuer(id: string): Promise<AdminIssuer | null> {
+  findIssuer(id: string) {
     return callDb('app_admin_get_issuer', { p_id: id });
   },
 
   /** Creates the issuer when `id` is null. */
-  saveIssuer(
-    actorId: string,
-    id: string | null,
-    input: IssuerInput,
-    ctx: ClientContext,
-  ): Promise<DbResult<{ id: string }>> {
+  saveIssuer(actorId: string, id: string | null, input: IssuerInput, ctx: ClientContext) {
     return callDb('app_admin_save_issuer', {
       p_actor_id: actorId,
       p_id: id,
@@ -641,15 +253,15 @@ export const adminRepository = {
     });
   },
 
-  deleteIssuer(actorId: string, id: string, ctx: ClientContext): Promise<boolean> {
+  deleteIssuer(actorId: string, id: string, ctx: ClientContext) {
     return callDb('app_admin_delete_issuer', { p_actor_id: actorId, p_id: id, p_ctx: ctx });
   },
 
   // ----- representations -----
 
-  findRepresentations(query: ListRepresentationsAdminQuery): Promise<Page<AdminRepresentation>> {
+  findRepresentations(query: ListRepresentationsAdminQuery) {
     return callDb('app_admin_find_representations', {
-      p_q_pattern: query.q ? containsPattern(query.q) : null,
+      p_q_pattern: pattern(query.q),
       p_statuses: query.filter?.status ?? null,
       p_countries: query.filter?.country ?? null,
       p_include_deleted: query.filter?.deleted ?? false,
@@ -657,7 +269,7 @@ export const adminRepository = {
     });
   },
 
-  findRepresentation(id: string): Promise<AdminRepresentationDetail | null> {
+  findRepresentation(id: string) {
     return callDb('app_admin_get_representation', { p_public_id: id });
   },
 
@@ -667,7 +279,7 @@ export const adminRepository = {
     id: string | null,
     input: RepresentationInput,
     ctx: ClientContext,
-  ): Promise<DbResult<{ id: string }>> {
+  ) {
     return callDb('app_admin_save_representation', {
       p_actor_id: actorId,
       p_public_id: id,
@@ -676,7 +288,7 @@ export const adminRepository = {
     });
   },
 
-  deleteRepresentation(actorId: string, id: string, ctx: ClientContext): Promise<boolean> {
+  deleteRepresentation(actorId: string, id: string, ctx: ClientContext) {
     return callDb('app_admin_delete_representation', {
       p_actor_id: actorId,
       p_public_id: id,
@@ -689,9 +301,7 @@ export const adminRepository = {
     id: string,
     input: { status: RepresentationTrackStatus; note: string | null; documents: DocumentInput[] },
     ctx: ClientContext,
-  ): Promise<
-    DbResult<{ previousStatus: RepresentationTrackStatus; status: RepresentationTrackStatus }>
-  > {
+  ) {
     return callDb('app_admin_representation_status', {
       p_actor_id: actorId,
       p_public_id: id,
@@ -707,7 +317,7 @@ export const adminRepository = {
     id: string,
     documents: DocumentInput[],
     ctx: ClientContext,
-  ): Promise<DbResult<{ ok: true }>> {
+  ) {
     return callDb('app_admin_add_representation_documents', {
       p_actor_id: actorId,
       p_public_id: id,
@@ -716,53 +326,41 @@ export const adminRepository = {
     });
   },
 
-  // ----- roadshows -----
+  // ----- roadshows and questions -----
 
-  findRoadshows(query: ListRoadshowsAdminQuery): Promise<Page<AdminRoadshow>> {
+  findRoadshows(query: ListRoadshowsAdminQuery) {
     return callDb('app_admin_find_roadshows', {
-      p_q_pattern: query.q ? containsPattern(query.q) : null,
+      p_q_pattern: pattern(query.q),
       p_issuer_id: query.filter?.issuer ?? null,
-      p_published: query.filter?.published ?? null,
+      // Archived roadshows only when asked for.
+      p_statuses: query.filter?.status ?? ['DRAFT', 'PUBLISHED'],
       p_open: query.filter?.open ?? null,
-      p_include_deleted: query.filter?.deleted ?? false,
       ...offset(query),
     });
   },
 
-  findRoadshow(id: string): Promise<AdminRoadshow | null> {
-    return callDb('app_admin_get_roadshow', { p_public_id: id });
+  findRoadshow(id: string) {
+    return callDb('app_admin_get_roadshow', { p_id: id });
   },
 
   /** Creates the roadshow when `id` is null. */
-  saveRoadshow(
-    actorId: string,
-    id: string | null,
-    input: RoadshowInput,
-    ctx: ClientContext,
-  ): Promise<DbResult<{ id: string }>> {
+  saveRoadshow(actorId: string, id: string | null, input: RoadshowInput, ctx: ClientContext) {
     return callDb('app_admin_save_roadshow', {
       p_actor_id: actorId,
-      p_public_id: id,
+      p_id: id,
       p_roadshow: input,
       p_ctx: ctx,
     });
   },
 
-  deleteRoadshow(actorId: string, id: string, ctx: ClientContext): Promise<boolean> {
-    return callDb('app_admin_delete_roadshow', {
-      p_actor_id: actorId,
-      p_public_id: id,
-      p_ctx: ctx,
-    });
+  archiveRoadshow(actorId: string, id: string, ctx: ClientContext) {
+    return callDb('app_admin_archive_roadshow', { p_actor_id: actorId, p_id: id, p_ctx: ctx });
   },
 
   /** Null when the roadshow does not exist. */
-  findQuestions(
-    roadshowId: string,
-    query: ListQuestionsQuery,
-  ): Promise<Page<AdminQuestion> | null> {
+  findQuestions(roadshowId: string, query: ListQuestionsQuery) {
     return callDb('app_admin_roadshow_questions', {
-      p_public_id: roadshowId,
+      p_id: roadshowId,
       p_statuses: query.filter?.status ?? null,
       p_categories: query.filter?.category ?? null,
       p_answered: query.filter?.answered ?? null,
@@ -774,55 +372,51 @@ export const adminRepository = {
     actorId: string,
     roadshowId: string,
     questionId: string,
-    answer: string,
+    answer: { answer: string; featured?: boolean | undefined },
     ctx: ClientContext,
-  ): Promise<DbResult<AdminQuestion>> {
+  ) {
     return callDb('app_admin_answer_question', {
       p_actor_id: actorId,
       p_roadshow_id: roadshowId,
       p_question_id: questionId,
-      p_answer: answer,
+      p_answer: answer.answer,
+      p_featured: answer.featured ?? null,
       p_ctx: ctx,
     });
   },
 
   // ----- learn -----
 
-  findLearn(query: ListLearnAdminQuery): Promise<Page<AdminLearnItem>> {
+  findLearn(query: ListLearnAdminQuery) {
     return callDb('app_admin_find_learn', {
-      p_q_pattern: query.q ? containsPattern(query.q) : null,
-      p_content_types: query.filter?.contentType ?? null,
-      p_min_tiers: query.filter?.minTier ?? null,
-      p_published: query.filter?.published ?? null,
-      p_include_deleted: query.filter?.deleted ?? false,
+      p_q_pattern: pattern(query.q),
+      p_formats: query.filter?.format ?? null,
+      p_access: query.filter?.access ?? null,
+      // Archived items only when asked for.
+      p_statuses: query.filter?.status ?? ['DRAFT', 'PUBLISHED'],
       ...offset(query),
     });
   },
 
-  findLearnItem(id: string): Promise<AdminLearnItem | null> {
-    return callDb('app_admin_get_learn', { p_public_id: id });
+  findLearnItem(id: string) {
+    return callDb('app_admin_get_learn', { p_id: id });
   },
 
   /** Creates the learn item when `id` is null. */
-  saveLearn(
-    actorId: string,
-    id: string | null,
-    input: LearnInput,
-    ctx: ClientContext,
-  ): Promise<DbResult<{ id: string }>> {
+  saveLearn(actorId: string, id: string | null, input: LearnInput, ctx: ClientContext) {
     return callDb('app_admin_save_learn', {
       p_actor_id: actorId,
-      p_public_id: id,
+      p_id: id,
       p_item: input,
       p_ctx: ctx,
     });
   },
 
-  deleteLearn(actorId: string, id: string, ctx: ClientContext): Promise<boolean> {
-    return callDb('app_admin_delete_learn', { p_actor_id: actorId, p_public_id: id, p_ctx: ctx });
+  archiveLearn(actorId: string, id: string, ctx: ClientContext) {
+    return callDb('app_admin_archive_learn', { p_actor_id: actorId, p_id: id, p_ctx: ctx });
   },
 
-  // ----- credits -----
+  // ----- credits and audit trail -----
 
   grantCredits(
     actorId: string,
@@ -834,7 +428,7 @@ export const adminRepository = {
       requestHash: string;
     },
     ctx: ClientContext,
-  ): Promise<DbResult<CreditGrant>> {
+  ) {
     return callDb('app_admin_grant_credits', {
       p_actor_id: actorId,
       p_public_id: grant.userId,
@@ -846,9 +440,7 @@ export const adminRepository = {
     });
   },
 
-  // ----- audit trail -----
-
-  auditLogs(query: AuditLogsQuery): Promise<Page<AuditEntry>> {
+  auditLogs(query: AuditLogsQuery) {
     return callDb('app_admin_audit_logs', {
       p_action_patterns: actionPatterns(query.filter?.action),
       p_user: query.filter?.user ?? null,

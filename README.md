@@ -2,7 +2,7 @@
 
 REST API for the GIG (Global Investorz Group) mobile app. Node.js + TypeScript + Express, with Supabase (Postgres) as the database.
 
-> **Status:** Phase 1 "Auth and onboarding", "Users, profile and KYC", "Catalog and reviews", "Ratings", "Representations" and "Admin console APIs" (including roadshow and learn content management) are implemented. The app-facing roadshow, learn and credits endpoints are not built yet.
+> **Status:** Phase 1 "Auth and onboarding", "Users, profile and KYC", "Catalog and reviews", "Ratings", "Representations", "Learn, saved items, credits and notifications" and "Admin console APIs", and Phase 2 "Roadshows", are implemented. Top-rated lists are not built yet.
 
 ## Getting started
 
@@ -42,8 +42,8 @@ The server refuses to start if any required variable is missing or invalid.
 | Folder       | What it tests |
 | ------------ | ------------- |
 | `test/unit/` | Request validation: sign-up, login, OTP and onboarding rules; every review, rating and signing rule from the plan; list filters, compare ids, trend ranges |
-| `test/db/`   | All migrations and the seed in PGlite. The `app_*` functions: sign-up, OTP limits and decoys, sessions, refresh-token theft, password reset, tier, KYC, who may call them, append-only audit log. Ratings and Representations: their repositories call the same `app_*` functions against PGlite (rating and signature transactions, issuer stats, effective petition status, signer names, infected documents, counts). Catalog and reviews: constraints, review submission and receipt numbers, evidence checks, stats, trends, feed, search, resolution updates. Admin: staff roles, suspension, KYC decisions, moderation, content, petition track, credits and audit search |
-| `test/api/`  | Every catalog, review, rating, representation and admin endpoint through Express: staff roles and permissions, access rules per tier and KYC, response shapes, filters and sorting, idempotency keys, evidence and signature-file errors, 400/401/403/404/409 errors |
+| `test/db/`   | All migrations and the seed in PGlite. The `app_*` functions: sign-up, OTP limits and decoys, sessions, refresh-token theft, password reset, tier, KYC, who may call them, append-only audit log. Ratings and Representations: their repositories call the same `app_*` functions against PGlite (rating and signature transactions, issuer stats, effective petition status, signer names, infected documents, counts). Roadshows and engagement: pool joins and credit spending, question rules, ledger append-only. Catalog and reviews: constraints, review submission and receipt numbers, evidence checks, stats, trends, feed, search, resolution updates. Admin: staff roles, suspension, KYC decisions, moderation, content, petition track, credits and audit search |
+| `test/api/`  | Every catalog, review, rating, representation, learn, webinar, saved, credits, notifications, roadshow and admin endpoint through Express: staff roles and permissions, access rules per tier and KYC, response shapes, filters and sorting, idempotency keys, evidence and signature-file errors, 400/401/403/404/409 errors |
 
 ## Project structure
 
@@ -347,6 +347,51 @@ Tables (private `app` schema): `representations`, `representation_signatures`, `
 | `signedSignature`, `Goal`, `closeIn`, `totalSignature`                                                                             | `signatureCount`, `goal`, `daysLeft`, `progressPercent`      |
 | Petition opened without an id                                                                                                      | Petition `id` in the URL                                     |
 
+## Learn, saved items, credits and notifications
+
+| Method | Path                      | Access | Purpose                                                                                       |
+| ------ | ------------------------- | ------ | --------------------------------------------------------------------------------------------- |
+| GET    | `/learn`                  | Public | Content list. `q`, `sort` (`recent`, `top_rated`), `filter[format]`, `[category]`, `[access]` |
+| GET    | `/learn/:id`              | Public | `contentUrl` (null when `locked`), report `download` (Full only), `myRating`                  |
+| POST   | `/learn/:id/rating`       | User   | `{ rating: 1-5 }`; rating again replaces it. Returns the new average and count                |
+| GET    | `/webinars?when=upcoming` | User   | `upcoming` (incl. live) or `past`; `joinUrl` for registered members, delayed recordings       |
+| POST   | `/webinars/:id/register`  | User   | Register; PREMIUM webinars need Full access                                                   |
+| GET    | `/me/saved?type=COMPANY`  | User   | Saved items, newest first, each with a `{ name, subtitle, imageUrl }` summary                 |
+| POST   | `/me/saved`               | User   | `{ type, id }`; `type` is `COMPANY`, `ISSUER`, `ROADSHOW` or `LEARN_ITEM`                     |
+| DELETE | `/me/saved/:type/:id`     | User   | Remove a saved item                                                                           |
+| GET    | `/me/credits`             | User   | `{ balance, entries }` with the ledger paged in `meta`                                        |
+| GET    | `/me/notifications`       | User   | Inbox; `?unread=true`; `meta.unread` is the badge count                                       |
+| POST   | `/me/notifications/read`  | User   | `{ ids?: [...] }`; omit `ids` to mark all read                                                |
+| POST   | `/me/devices`             | User   | `{ token, platform: IOS / ANDROID / WEB, appVersion? }` push token                            |
+
+PREMIUM learn content and webinars are for Full members; others see them with `locked: true`. Report downloads are 5-minute signed URLs from the private `learn-reports` bucket.
+
+**Credits.** `credit_ledger` is append-only (updates and deletes are refused by a trigger); `app.users.credit_balance` caches the sum and can never go below 0. Every change goes through `public.apply_credit_change`. Until `/admin/credits/grant` exists, grant credits in the SQL editor:
+
+```sql
+select public.apply_credit_change('<user public_id>', 5, 'ADMIN_GRANT', null, null, 'Launch credits');
+```
+
+## Roadshows
+
+| Method | Path                              | Access | Purpose                                                                                                                      |
+| ------ | --------------------------------- | ------ | ---------------------------------------------------------------------------------------------------------------------------- |
+| GET    | `/roadshows`                      | Public | `state` (`OPEN` default, `CLOSED`, `ALL`), `q`, `sort` (`closing_soon`, `recent`), `filter[poolEnabled]`, `filter[currency]` |
+| GET    | `/roadshows/:id`                  | Public | Issue summary and terms, risk factors, document list, `inPool` for signed-in users                                           |
+| GET    | `/roadshows/:id/financials`       | User   | Latest 3 fiscal years; `?currency=INR/USD/EUR/GBP/AED` converts with `fx_rates`                                              |
+| GET    | `/roadshows/:id/documents/:docId` | Full   | 5-minute signed download URL for a DD PDF                                                                                    |
+| GET    | `/roadshows/:id/questions`        | User   | Published questions with answers. `sort=top` (Top Asked) or `recent`; `category`; `q`                                        |
+| POST   | `/roadshows/:id/questions`        | Prive  | `{ question, category? }` while the roadshow is open; published after moderation                                             |
+| POST   | `/roadshows/:id/pool`             | Prive  | Join the Power Pool: `{ capitalInterest, expectations }` (3+ of 8). Costs 1 credit. Needs `Idempotency-Key`                  |
+| GET    | `/roadshows/:id/pool-power`       | User   | Participants, total and average capital interest, % per improvement, heat map                                                |
+| POST   | `/roadshows/:id/offers`           | Inst.  | Post an offer (price, ROI/IRR, loads, lock-in, allotment and payment terms); `PENDING_REVIEW`                                |
+
+- **Power Pool join** runs in one transaction (`public.join_roadshow_pool`): checks the roadshow is published, open and pool-enabled, spends 1 credit, stores the membership and expectations, and adds an inbox notification. Errors: `402 INSUFFICIENT_CREDITS`, `409 ALREADY_IN_POOL`, `409 POOL_NOT_ENABLED`, `409 ROADSHOW_CLOSED`. A retry with the same key and body returns the same membership with `Idempotent-Replayed: true`.
+- **Expectations:** `BETTER_ROI_IRR`, `SHORTER_LOCK_IN`, `LOWER_ENTRY_LOAD`, `LOWER_EXIT_LOAD`, `PRIORITY_ALLOTMENT`, `FLEXIBLE_PAYMENT_TERMS`, `DISCOUNTED_OFFER_PRICE`, `REGULAR_DISCLOSURES`.
+- **Heat map:** members are split into capital-interest quartile bands; each cell is the share of a band asking for an improvement.
+- **Top Asked** lists staff-featured questions first, then answered ones. GIG staff answer and feature questions through `/admin/roadshows/:id/questions/:questionId/answer` (see [Admin](#admin)); publishing offers is not built yet.
+- `fx_rates` holds units per 1 USD; the FX feed job (not built yet) should overwrite it. A missing rate returns `503 FX_RATE_UNAVAILABLE`.
+
 ## Admin
 
 Phase 1, plan weeks 14-15: the API behind GIG's admin console. Every route is under `/admin`, needs an access token, and is open to GIG staff only (`403 STAFF_ONLY` for everyone else, whatever their tier). Staff roles are a second axis next to the membership tier; each route also needs one permission (`403 ROLE_FORBIDDEN` otherwise).
@@ -388,33 +433,35 @@ select id, 'ADMIN' from app.users where public_id = '<user id>';
 | GET                  | `/admin/moderation/queue`                                      | Reviews, ratings and roadshow questions, oldest first. `filter[type]=REVIEW,RATING,QUESTION`, `filter[status]` (default `PENDING_MODERATION`) |
 | GET                  | `/admin/moderation/:id?type=REVIEW`                            | The full review (with evidence links), rating or question                                                                                |
 | POST                 | `/admin/moderation/:id/decision`                               | `{ type, decision, note? }`. `note` is required for every decision except `APPROVE`                                                      |
-| GET / POST           | `/admin/companies`, `/admin/issuers`, `/admin/representations`, `/admin/roadshows`, `/admin/learn` | List (`q`, filters; `filter[deleted]=true` includes deleted items) / create                                  |
-| GET / PATCH / DELETE | `/admin/<resource>/:id`                                        | Read / update only the fields sent / soft delete                                                                                         |
+| GET / POST           | `/admin/companies`, `/admin/issuers`, `/admin/representations`, `/admin/roadshows`, `/admin/learn` | List / create. Companies, issuers, representations: `filter[deleted]=true` includes deleted items. Roadshows, learn: `filter[status]` (default `DRAFT,PUBLISHED`; add `ARCHIVED`) |
+| GET / PATCH / DELETE | `/admin/<resource>/:id`                                        | Read / update only the fields sent / delete: a soft delete, or for roadshows and learn, archive (`status: ARCHIVED`) |
 | POST                 | `/admin/representations/:id/documents/upload-url`              | Signed URL to PUT one document (PDF, JPG or PNG, up to 25 MB) into the petition's folder                                                 |
 | POST                 | `/admin/representations/:id/documents`                         | Attach uploaded documents (evidence and others) outside the track                                                                       |
 | POST                 | `/admin/representations/:id/status`                            | `{ status, note?, documents? }`: moves the track forward, from Under Review onwards                                                      |
 | GET                  | `/admin/roadshows/:id/questions`                               | Ask Me Anything questions, oldest first. `filter[status]`, `filter[category]`, `filter[answered]`                                       |
-| POST                 | `/admin/roadshows/:id/questions/:questionId/answer`            | `{ answer }`: publishes the issuer's answer (sending it again replaces it); a pending question is published with it                    |
+| POST                 | `/admin/roadshows/:id/questions/:questionId/answer`            | `{ answer, featured? }`: publishes the issuer's answer (sending it again replaces it) and notifies the asker; a pending question is published with it. `featured` puts it in "Top Asked" |
 | POST                 | `/admin/credits/grant`                                         | `{ userId, delta, reason }`; a negative `delta` revokes. Needs an `Idempotency-Key` header                                              |
 | GET                  | `/admin/audit-logs`                                            | Newest first. `filter[action]` (exact, or a prefix such as `admin.*`), `filter[user]` (entries by or about the user), `filter[from]`, `filter[to]` |
 
 **Rules.** The database functions enforce these, so they also hold when requests run at the same time.
 
-- **Moderation:** `APPROVE` publishes a pending or changes-requested item. `REQUEST_CHANGES` and `REJECT` decide a pending one. `REMOVE` takes a published one down. Any other combination is `409 INVALID_TRANSITION`. Review decisions appear on the review's status timeline, and company and issuer stats recompute through the existing triggers.
+- **Moderation:** `APPROVE` publishes a pending or changes-requested item. `REQUEST_CHANGES` and `REJECT` decide a pending one. `REMOVE` takes a published one down. Any other combination is `409 INVALID_TRANSITION`. Review decisions appear on the review's status timeline, and company and issuer stats recompute through the existing triggers. Roadshow questions have only `PENDING_MODERATION`, `PUBLISHED` and `REJECTED`: `REMOVE` rejects a published question, and `REQUEST_CHANGES` does not apply.
 - **KYC:** a submission is decided once (`409 KYC_ALREADY_DECIDED`). A submission with an infected document cannot be approved (`409 DOCUMENT_INFECTED`).
 - **Users:** Prive and Institutional need approved KYC (`409 KYC_NOT_APPROVED`). Suspended users cannot sign in, and their existing tokens stop working.
 - **Conflicts of interest:** staff cannot decide their own KYC or moderate their own content (`403 CONFLICT_OF_INTEREST`). They cannot change their own status, drop their own ADMIN role, or grant themselves credits (`409 SELF_CHANGE`). GIG always keeps one active ADMIN (`409 LAST_ADMIN`).
 - **Petition track:** staff set the statuses from Under Review to Resolved. Steps can be skipped but never reversed, and moving to Under Review ends signing early. Each step records its note, the staff member and its documents, which show on the public timeline. Documents must be uploaded to the petition's folder first.
-- **Content:** deletes are soft: the item leaves the app, but its reviews, ratings, signatures and questions stay. A slug already in use is `409 SLUG_TAKEN`.
-- **Roadshows:** issue summary (type of issue, instruments, offer price, lock-in, maturity, convertibility, callable, coupon rate), risk factors, the pool window (`opensAt` to `closesAt`, `poolEnabled`) and financials per fiscal year (`FY2025`; revenue, EBITDA, net profit, total assets, total liabilities, net worth, total debt, operating cash flow, EPS, ROE %), all in the roadshow's `currency`. Sending `financials` replaces every year. `published: true` shows it in the app and keeps the first publication time; `false` returns it to draft. The issuer must exist (`400`, field `issuerId`).
-- **Roadshow questions:** categories `EQUITY`, `DEBT`, `INSURANCE`, `CRYPTO`, `MUTUAL_FUNDS`. Rejected, removed and changes-requested questions cannot be answered (`409 INVALID_TRANSITION`).
-- **Learn:** `contentType` is `ARTICLE`, `VIDEO`, `PODCAST`, `REPORT` or `COURSE`. `minTier` is the lowest tier that may open it, and `downloadable` marks downloads for Prive and Institutional members. `published` works as for roadshows.
-- **Credits:** the ledger (`app.credit_ledger`) is append-only, and the balance is cached on `app.users.credit_balance`. The balance never goes below zero (`409 INSUFFICIENT_CREDITS`). A retry with the same `Idempotency-Key` returns the original entry with `Idempotent-Replayed: true`.
+- **Content:** companies, issuers and representations are soft-deleted; roadshows and learn items are archived (`status: ARCHIVED`), as the Roadshows and Learn modules intend. Either way the item leaves the app and its reviews, ratings, signatures, pool, questions and learn ratings stay. A slug already in use is `409 SLUG_TAKEN`.
+- **Roadshows** (`public.roadshows`): issue summary (type of issue, instruments, offer price, lock-in, maturity, convertibility, callable, coupon rate), risk factors, the pool window (`opensAt`, which may be null, to `closesAt`; `poolEnabled`) and financials per fiscal year (`fiscalYear: 2025`; revenue, EBITDA, net profit, total assets, total liabilities, net worth, total debt, cash and equivalents, operating cash flow, EPS), all in the roadshow's `currency`. Sending `financials` replaces every year. `status` is `DRAFT`, `PUBLISHED` (the first publication time is kept) or `ARCHIVED`. The issuer must exist (`400`, field `issuerId`).
+- **Roadshow questions** (`public.roadshow_questions`): categories `GENERAL`, `EQUITY`, `DEBT`, `INSURANCE`, `CRYPTO`, `MUTUAL_FUNDS`. Rejected questions cannot be answered (`409 INVALID_TRANSITION`). The asker is notified the first time their question is answered.
+- **Learn** (`public.learn_items`): `format` is `VIDEO`, `ARTICLE`, `REPORT` or `PODCAST`; `access` is `FREE` or `PREMIUM` (Full members only); `contentUrl` is the stream or article link. `downloadPath` names a PDF already uploaded to the private `learn-reports` bucket (`400` if it is not there). `status` works as for roadshows.
+- **Credits:** grants and revocations go through the Credits module's `public.apply_credit_change`, so they land in the same append-only `public.credit_ledger` (reason `ADMIN_GRANT` or `ADMIN_REVOKE`, `refType: ADMIN` with the staff member's id, and the reason as the entry's `note`, at most 400 characters). The balance never goes below zero (`409 INSUFFICIENT_CREDITS`), and the user gets a `CREDITS` notification. A retry with the same `Idempotency-Key` returns the original entry with `Idempotent-Replayed: true`.
 - **Audit:** every admin write records its own audit entry (`admin.*` actions) in the same transaction, with the staff member, IP, user agent and request ID. Opening a user's contact details or a KYC submission is audited too.
 
-Tables (private `app` schema):
+Migrations:
 
-- `supabase/migrations/20261028090000_admin.sql`: `user_roles` and `credit_ledger`, plus the `users.credit_balance` column.
-- `supabase/migrations/20261028100000_admin_roadshows_learn.sql`: `roadshows`, `roadshow_financials`, `roadshow_questions` and `learn_items`. The app-facing Roadshows (Phase 2) and Learn modules build on these and add their own tables (pool members, offers, improvement votes, DD documents, learn ratings).
+- `supabase/migrations/20261028090000_admin.sql`: `app.user_roles` (staff roles) and `app.admin_credit_grants` (the Idempotency-Key of each credit grant), plus the admin functions for users, KYC, moderation, companies, issuers, representations, credits and the audit trail.
+- `supabase/migrations/20261028100000_admin_roadshows_learn.sql`: no new tables. It adds `moderation_note` and `answered_by` to `public.roadshow_questions`, the admin functions for roadshows, questions and learn items, and adds questions to the moderation queue.
 
-**Not covered yet:** investors cannot ask roadshow questions until the Roadshows module adds that endpoint, so for now questions only exist when inserted directly. Learn files are links (`mediaUrl`); private, tier-gated report files would need a storage bucket and an upload endpoint like the petition documents'.
+Every `app_admin_*` function is declared with its arguments and result shape in `src/lib/dbFunctions.ts`, like the rest of the API.
+
+**Not covered yet:** uploading roadshow DD documents and learn report files (staff upload them to the `roadshow-documents` and `learn-reports` buckets directly for now), publishing institutional roadshow offers, and webinar management.

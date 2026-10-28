@@ -82,11 +82,12 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
 
   if (!known) {
     console.error(`[${req.requestId}]`, err);
+    const detail = err instanceof Error ? err.message : String(err);
     res.status(500).json({
       error: {
         code: 'INTERNAL',
         // Details (SQL errors, stack messages) only on a developer machine, never on a server.
-        message: env.NODE_ENV === 'development' ? String(err?.message ?? err) : 'Internal server error',
+        message: env.NODE_ENV === 'development' ? detail : 'Internal server error',
       },
     });
     return;

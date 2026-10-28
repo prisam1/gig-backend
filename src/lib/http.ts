@@ -12,11 +12,12 @@ export function parse<S extends z.ZodType>(schema: S, input: unknown): z.output<
   return schema.parse(input);
 }
 
-export function sendData<T>(res: Response, data: T, status = 200): void {
+export function sendData(res: Response, data: unknown, status = 200): void {
   res.status(status).json({ data });
 }
 
-export function sendPage<T>(res: Response, data: T[], meta: PageMeta): void {
+/** A list response. `meta` may carry extra counts, e.g. `unread`. */
+export function sendPage(res: Response, data: readonly unknown[], meta: PageMeta): void {
   res.status(200).json({ data, meta });
 }
 

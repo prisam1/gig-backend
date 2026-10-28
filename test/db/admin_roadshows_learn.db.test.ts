@@ -1,30 +1,14 @@
 // Admin roadshows, roadshow questions and learn content against the real migrations: the admin
-// repository runs against PGlite, calling the same app_admin_* functions as through supabase-js.
+// repository runs against PGlite through callDb, which checks every argument and result against
+// src/lib/dbFunctions.ts. The tables are the Roadshows and Learn modules' own.
 
 import type { PGlite } from '@electric-sql/pglite';
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { isUniqueViolationOf } from '../../src/lib/db';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { DatabaseError, dbTransport, isUniqueViolationOf } from '../../src/lib/db';
 import type { ClientContext } from '../../src/middleware/requestContext';
 import { adminRepository, isDbError } from '../../src/modules/admin/admin.repository';
-import { createTestDatabase, createUser, dbError } from './pglite';
-
-const holder = vi.hoisted(() => ({ db: undefined as PGlite | undefined }));
-
-vi.mock('../../src/lib/db', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../src/lib/db')>();
-  const { callFunction } = await import('./pglite');
-  return {
-    ...original,
-    callDb: (fn: string, args: Record<string, unknown> = {}) =>
-      callFunction(
-        holder.db!,
-        fn,
-        args,
-        (code, message) => new original.DatabaseError(code, message),
-      ),
-  };
-});
+import { callFunction, createTestDatabase, createUser, dbError } from './pglite';
 
 vi.mock('../../src/lib/audit', async (importOriginal) => importOriginal());
 
@@ -38,10 +22,10 @@ const CTX: ClientContext = {
 };
 const PAGE = { page: 1, pageSize: 20 };
 const DAY = 86_400_000;
+const TITLE = 'Sovereign Alpha IPO roadshow';
 
 let db: PGlite;
 let staff: string;
-let investor: string;
 let issuerId: string;
 
 async function one<T = Record<string, unknown>>(query: string, params: unknown[] = []) {
@@ -64,9 +48,8 @@ async function lastAudit(action: string) {
 
 beforeAll(async () => {
   db = await createTestDatabase();
-  holder.db = db;
   staff = await createUser(db, STAFF);
-  investor = await createUser(db, INVESTOR);
+  const investor = await createUser(db, INVESTOR);
   await db.query(
     `insert into app.user_profiles (user_id, name) values ($1, 'Gita Admin'), ($2, 'Ira Investor')`,
     [staff, investor],
@@ -77,7 +60,13 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await db?.close();
+  await db.close();
+});
+
+beforeEach(() => {
+  vi.spyOn(dbTransport, 'rpc').mockImplementation((fn, args) =>
+    callFunction(db, fn, args, (code, message) => new DatabaseError(code, message)),
+  );
 });
 
 describe('roadshows', () => {
@@ -100,8 +89,14 @@ describe('roadshows', () => {
           closesAt: new Date(Date.now() + 30 * DAY).toISOString(),
           poolEnabled: true,
           financials: [
-            { fiscalYear: 'FY2024', revenue: 1200.5, netProfit: -40, roePct: -3.2 },
-            { fiscalYear: 'FY2025', revenue: 1500, netProfit: 85.25, eps: 4.1234 },
+            { fiscalYear: 2024, revenue: 1200.5, netProfit: -40 },
+            {
+              fiscalYear: 2025,
+              revenue: 1500,
+              netProfit: 85.25,
+              eps: 4.1234,
+              cashAndEquivalents: 90,
+            },
           ],
         },
         CTX,
@@ -115,65 +110,58 @@ describe('roadshows', () => {
       offerPrice: 325,
       callable: false,
       poolEnabled: true,
-      isPublished: false,
+      status: 'DRAFT',
       publishedAt: null,
+      opensAt: null,
       isOpen: false,
       riskFactors: ['Customer concentration', 'Regulatory approvals pending'],
       financials: [
         expect.objectContaining({
-          fiscalYear: 'FY2025',
+          fiscalYear: 2025,
           revenue: 1500,
           netProfit: 85.25,
           eps: 4.1234,
+          cashAndEquivalents: 90,
         }),
-        expect.objectContaining({
-          fiscalYear: 'FY2024',
-          netProfit: -40,
-          roePct: -3.2,
-          ebitda: null,
-        }),
+        expect.objectContaining({ fiscalYear: 2024, netProfit: -40, ebitda: null }),
       ],
+      documentCount: 0,
+      poolMembers: 0,
       questions: { pending: 0, published: 0, unanswered: 0 },
     });
     expect((await lastAudit('admin.roadshow.created')).actor_user_id).toBe(staff);
   });
 
-  it('publishes it, keeps the first publication time, and replaces the financials', async () => {
-    await adminRepository.saveRoadshow(staff, id, { published: true }, CTX);
+  it('publishes it (keeping the first publication time) and replaces the financials', async () => {
+    await adminRepository.saveRoadshow(staff, id, { status: 'PUBLISHED' }, CTX);
     const first = (await adminRepository.findRoadshow(id))!.publishedAt;
+    expect(first).toBeInstanceOf(Date);
     await adminRepository.saveRoadshow(
       staff,
       id,
-      { published: true, financials: [{ fiscalYear: 'FY2026', revenue: 1700 }] },
+      { status: 'PUBLISHED', financials: [{ fiscalYear: 2026, revenue: 1700 }] },
       CTX,
     );
 
     const roadshow = await adminRepository.findRoadshow(id);
-    expect(roadshow).toMatchObject({
-      isPublished: true,
-      publishedAt: first,
-      isOpen: true,
-      title: 'Sovereign Alpha IPO roadshow',
-    });
-    expect(roadshow!.financials.map((f) => f.fiscalYear)).toEqual(['FY2026']);
-
-    await adminRepository.saveRoadshow(staff, id, { published: false }, CTX);
-    expect(await adminRepository.findRoadshow(id)).toMatchObject({
-      isPublished: false,
-      publishedAt: null,
-    });
-    await adminRepository.saveRoadshow(staff, id, { published: true }, CTX);
+    expect(roadshow).toMatchObject({ status: 'PUBLISHED', publishedAt: first, isOpen: true });
+    expect(roadshow!.financials.map((f) => f.fiscalYear)).toEqual([2026]);
   });
 
   it('lists with filters, and refuses an unknown issuer, a taken slug and a closing time before opening', async () => {
+    // The seed has roadshows too, so these lists are narrowed to this one by its title.
     const published = await adminRepository.findRoadshows({
       ...PAGE,
-      filter: { published: true, issuer: issuerId },
+      q: TITLE,
+      filter: { status: ['PUBLISHED'], issuer: issuerId },
     });
     expect(published.items.map((r) => r.id)).toEqual([id]);
-    expect((await adminRepository.findRoadshows({ ...PAGE, filter: { open: false } })).total).toBe(
-      0,
-    );
+    expect(
+      (await adminRepository.findRoadshows({ ...PAGE, q: TITLE, filter: { open: true } })).total,
+    ).toBe(1);
+    expect(
+      (await adminRepository.findRoadshows({ ...PAGE, q: TITLE, filter: { open: false } })).total,
+    ).toBe(0);
 
     expect(await adminRepository.saveRoadshow(staff, id, { issuerId: randomUUID() }, CTX)).toEqual({
       error: 'ISSUER_NOT_FOUND',
@@ -199,8 +187,8 @@ describe('roadshows', () => {
         staff,
         id,
         {
-          closesAt: new Date(Date.now() - 2 * DAY).toISOString(),
           opensAt: new Date().toISOString(),
+          closesAt: new Date(Date.now() - 2 * DAY).toISOString(),
         },
         CTX,
       ),
@@ -216,13 +204,12 @@ describe('roadshows', () => {
     beforeAll(async () => {
       const ask = async (question: string, status = 'PENDING_MODERATION', category = 'EQUITY') =>
         (
-          await one<{ public_id: string }>(
-            `insert into app.roadshow_questions (roadshow_id, user_id, category, question, status)
-             select r.id, $2, $4, $3, $5 from app.roadshows r where r.public_id = $1
-             returning public_id`,
-            [id, investor, question, category, status],
+          await one<{ id: string }>(
+            `insert into public.roadshow_questions (roadshow_id, user_id, category, question, status)
+             values ($1, $2, $4, $3, $5) returning id`,
+            [id, INVESTOR, question, category, status],
           )
-        ).public_id;
+        ).id;
       pending = await ask('What is the lock-in for anchor investors?');
       published = await ask('How will the proceeds be used?', 'PUBLISHED', 'DEBT');
       rejected = await ask('Is this a guaranteed return??', 'REJECTED');
@@ -234,6 +221,7 @@ describe('roadshows', () => {
       expect(all?.items[0]).toMatchObject({
         category: 'EQUITY',
         status: 'PENDING_MODERATION',
+        featured: false,
         answer: null,
         answeredBy: null,
         author: { id: INVESTOR, name: 'Ira Investor' },
@@ -252,41 +240,49 @@ describe('roadshows', () => {
       });
     });
 
-    it('publishes the answer, and the question with it', async () => {
+    it('publishes the answer with the question, features it and notifies the asker once', async () => {
       const answered = ok(
         await adminRepository.answerQuestion(
           staff,
           id,
           pending,
-          'Six months for anchor investors.',
+          { answer: 'Six months for anchor investors.', featured: true },
           CTX,
         ),
       );
       expect(answered).toMatchObject({
         id: pending,
         status: 'PUBLISHED',
+        featured: true,
         answer: 'Six months for anchor investors.',
         answeredBy: { id: STAFF, name: 'Gita Admin' },
       });
-      expect(answered.publishedAt).not.toBeNull();
       expect((await lastAudit('admin.roadshow.question_answered')).metadata).toEqual({
         roadshow: id,
         question: pending,
         replacedAnswer: false,
       });
 
-      ok(
+      // Replacing the answer keeps the feature flag and does not notify again.
+      const replaced = ok(
         await adminRepository.answerQuestion(
           staff,
           id,
           pending,
-          'Six months, per the offer document.',
+          { answer: 'Six months, per the offer document.' },
           CTX,
         ),
       );
-      expect((await lastAudit('admin.roadshow.question_answered')).metadata.replacedAnswer).toBe(
+      expect(replaced.featured).toBe(true);
+      expect((await lastAudit('admin.roadshow.question_answered')).metadata['replacedAnswer']).toBe(
         true,
       );
+      expect(
+        await one(
+          `select count(*)::int as n from public.notifications where user_id = $1 and type = 'ROADSHOW'`,
+          [INVESTOR],
+        ),
+      ).toEqual({ n: 1 });
 
       const unanswered = await adminRepository.findQuestions(id, {
         ...PAGE,
@@ -296,31 +292,47 @@ describe('roadshows', () => {
     });
 
     it('refuses rejected questions, your own question, and a question of another roadshow', async () => {
-      expect(await adminRepository.answerQuestion(staff, id, rejected, 'No.', CTX)).toEqual({
+      expect(
+        await adminRepository.answerQuestion(staff, id, rejected, { answer: 'No.' }, CTX),
+      ).toEqual({
         error: 'INVALID_TRANSITION',
         status: 'REJECTED',
       });
+      const investorId = (
+        await one<{ id: string }>(`select id::text from app.users where public_id = $1`, [INVESTOR])
+      ).id;
       expect(
-        await adminRepository.answerQuestion(investor, id, published, 'Self answer', CTX),
+        await adminRepository.answerQuestion(
+          investorId,
+          id,
+          published,
+          { answer: 'Self answer' },
+          CTX,
+        ),
       ).toEqual({
         error: 'OWN_CONTENT',
       });
       expect(
-        await adminRepository.answerQuestion(staff, randomUUID(), published, 'Wrong roadshow', CTX),
+        await adminRepository.answerQuestion(
+          staff,
+          randomUUID(),
+          published,
+          { answer: 'Wrong roadshow' },
+          CTX,
+        ),
       ).toEqual({
         error: 'NOT_FOUND',
       });
     });
 
-    it('queues pending questions for moderation next to reviews and ratings', async () => {
+    it('queues pending questions for moderation; REMOVE rejects, REQUEST_CHANGES does not apply', async () => {
       const fresh = (
-        await one<{ public_id: string }>(
-          `insert into app.roadshow_questions (roadshow_id, user_id, category, question)
-           select r.id, $2, 'CRYPTO', 'Will the issuer hold crypto reserves?' from app.roadshows r
-           where r.public_id = $1 returning public_id`,
-          [id, investor],
+        await one<{ id: string }>(
+          `insert into public.roadshow_questions (roadshow_id, user_id, category, question)
+           values ($1, $2, 'CRYPTO', 'Will the issuer hold crypto reserves?') returning id`,
+          [id, INVESTOR],
         )
-      ).public_id;
+      ).id;
 
       const queue = await adminRepository.moderationQueue({
         ...PAGE,
@@ -331,6 +343,7 @@ describe('roadshows', () => {
           type: 'QUESTION',
           id: fresh,
           receiptNo: null,
+          author: expect.objectContaining({ id: INVESTOR, name: 'Ira Investor' }),
           subject: { type: 'ROADSHOW', id, name: 'Sovereign Alpha IPO roadshow' },
           summary: {
             category: 'CRYPTO',
@@ -351,35 +364,49 @@ describe('roadshows', () => {
         await adminRepository.moderate(
           staff,
           fresh,
-          { type: 'QUESTION', decision: 'REJECT', note: 'Speculative' },
+          { type: 'QUESTION', decision: 'REQUEST_CHANGES', note: 'Rephrase' },
           CTX,
         ),
-      ).toEqual({
-        type: 'QUESTION',
-        id: fresh,
-        previousStatus: 'PENDING_MODERATION',
-        status: 'REJECTED',
+      ).toEqual({ error: 'INVALID_TRANSITION', status: 'PENDING_MODERATION' });
+      expect(
+        await adminRepository.moderate(
+          staff,
+          fresh,
+          { type: 'QUESTION', decision: 'APPROVE' },
+          CTX,
+        ),
+      ).toMatchObject({
+        status: 'PUBLISHED',
       });
       expect(
-        await one(`select moderation_note from app.roadshow_questions where public_id = $1`, [
+        await adminRepository.moderate(
+          staff,
+          fresh,
+          { type: 'QUESTION', decision: 'REMOVE', note: 'Speculative' },
+          CTX,
+        ),
+      ).toEqual({ type: 'QUESTION', id: fresh, previousStatus: 'PUBLISHED', status: 'REJECTED' });
+      expect(
+        await one(`select status, moderation_note from public.roadshow_questions where id = $1`, [
           fresh,
         ]),
       ).toEqual({
+        status: 'REJECTED',
         moderation_note: 'Speculative',
       });
     });
   });
 
-  it('soft-deletes a roadshow', async () => {
-    expect(await adminRepository.deleteRoadshow(staff, id, CTX)).toBe(true);
-    expect(await adminRepository.deleteRoadshow(staff, id, CTX)).toBe(false);
-    expect(await adminRepository.saveRoadshow(staff, id, { title: 'Gone roadshow' }, CTX)).toEqual({
-      error: 'NOT_FOUND',
-    });
-    expect((await adminRepository.findRoadshows(PAGE)).total).toBe(0);
+  it('archives a roadshow instead of deleting it', async () => {
+    expect(await adminRepository.archiveRoadshow(staff, id, CTX)).toBe(true);
+    expect(await adminRepository.archiveRoadshow(staff, id, CTX)).toBe(false);
+    expect((await adminRepository.findRoadshows({ ...PAGE, q: TITLE })).total).toBe(0);
     expect(
-      (await adminRepository.findRoadshows({ ...PAGE, filter: { deleted: true } })).total,
+      (await adminRepository.findRoadshows({ ...PAGE, q: TITLE, filter: { status: ['ARCHIVED'] } }))
+        .total,
     ).toBe(1);
+    // Its questions stay.
+    expect((await adminRepository.findQuestions(id, PAGE))?.total).toBe(4);
   });
 });
 
@@ -391,24 +418,20 @@ describe('learn', () => {
       await adminRepository.saveLearn(
         staff,
         null,
-        {
-          slug: 'reading-an-ipo-prospectus',
-          title: 'Reading an IPO prospectus',
-          contentType: 'VIDEO',
-          tags: ['IPO', 'Basics'],
-        },
+        { title: 'Reading an IPO prospectus', format: 'VIDEO', category: 'IPO basics' },
         CTX,
       ),
     ));
     expect(await adminRepository.findLearnItem(id)).toMatchObject({
-      contentType: 'VIDEO',
-      minTier: 'OBSERVER',
-      downloadable: false,
-      featured: false,
-      tags: ['IPO', 'Basics'],
-      summary: '',
-      mediaUrl: null,
-      isPublished: false,
+      format: 'VIDEO',
+      access: 'FREE',
+      status: 'DRAFT',
+      category: 'IPO basics',
+      contentUrl: null,
+      downloadPath: null,
+      ratingAvg: 0,
+      ratingCount: 0,
+      publishedAt: null,
     });
     expect((await lastAudit('admin.learn.created')).metadata).toMatchObject({ learn: id });
   });
@@ -418,47 +441,57 @@ describe('learn', () => {
       staff,
       id,
       {
-        minTier: 'PRIVE',
-        downloadable: true,
-        mediaUrl: 'https://cdn.example.com/v/ipo.mp4',
+        access: 'PREMIUM',
+        contentUrl: 'https://cdn.example.com/v/ipo.mp4',
+        downloadPath: 'reports/ipo-guide.pdf',
         durationSeconds: 540,
-        published: true,
+        status: 'PUBLISHED',
       },
       CTX,
     );
     expect(await adminRepository.findLearnItem(id)).toMatchObject({
       title: 'Reading an IPO prospectus',
-      minTier: 'PRIVE',
-      downloadable: true,
+      access: 'PREMIUM',
+      downloadPath: 'reports/ipo-guide.pdf',
       durationSeconds: 540,
-      isPublished: true,
+      status: 'PUBLISHED',
+      publishedAt: expect.any(Date),
     });
 
-    const prive = await adminRepository.findLearn({
+    // The seed has learn items too, so these lists are narrowed to this one by its title.
+    const premium = await adminRepository.findLearn({
       ...PAGE,
-      filter: { minTier: ['PRIVE'], published: true },
+      q: 'prospectus',
+      filter: { access: ['PREMIUM'], status: ['PUBLISHED'] },
     });
-    expect(prive.items.map((l) => l.id)).toEqual([id]);
+    expect(premium.items.map((l) => l.id)).toEqual([id]);
     expect(
       (
         await adminRepository.findLearn({
           ...PAGE,
           q: 'prospectus',
-          filter: { contentType: ['REPORT'] },
+          filter: { format: ['REPORT'] },
         })
       ).total,
     ).toBe(0);
   });
 
-  it('refuses unknown content types at the database too, and soft-deletes', async () => {
-    const error = await dbError(
-      adminRepository.saveLearn(staff, id, { contentType: 'MEME' as never }, CTX),
+  it('archives instead of deleting, and keeps ratings', async () => {
+    await db.query(
+      `insert into public.learn_ratings (learn_item_id, user_id, rating) values ($1, $2, 4)`,
+      [id, INVESTOR],
     );
-    expect(error).toMatchObject({ code: '23514' });
 
-    expect(await adminRepository.deleteLearn(staff, id, CTX)).toBe(true);
-    expect(await adminRepository.findLearn(PAGE)).toEqual({ items: [], total: 0 });
-    expect(await adminRepository.saveLearn(staff, id, { title: 'Gone' }, CTX)).toEqual({
+    expect(await adminRepository.archiveLearn(staff, id, CTX)).toBe(true);
+    expect(await adminRepository.findLearn({ ...PAGE, q: 'prospectus' })).toEqual({
+      items: [],
+      total: 0,
+    });
+    expect(await adminRepository.findLearnItem(id)).toMatchObject({
+      status: 'ARCHIVED',
+      ratingCount: 1,
+    });
+    expect(await adminRepository.saveLearn(staff, randomUUID(), { title: 'Gone' }, CTX)).toEqual({
       error: 'NOT_FOUND',
     });
   });

@@ -114,11 +114,12 @@ function stubSigning() {
   const storage = stubStorage();
   const sign = vi
     .spyOn(representationsRepository, 'sign')
-    .mockImplementation(async (signature: NewSignature) => {
+    .mockImplementation((signature: NewSignature) => {
       vi.spyOn(representationsRepository, 'findSignature').mockResolvedValue({
         ...mySignature,
         signatureCode: signature.signatureCode,
       });
+      return Promise.resolve();
     });
   return { sign, storage };
 }
@@ -672,13 +673,14 @@ describe('POST /representations/:id/signatures: signing', () => {
 
   it('signs anonymously without exposing the name', async () => {
     stubSigning();
-    vi.spyOn(representationsRepository, 'sign').mockImplementation(async (signature) => {
+    vi.spyOn(representationsRepository, 'sign').mockImplementation((signature) => {
       vi.spyOn(representationsRepository, 'findSignature').mockResolvedValue({
         ...mySignature,
         signatureCode: signature.signatureCode,
         displayMode: 'ANONYMOUS',
         investorType: null,
       });
+      return Promise.resolve();
     });
 
     const res = await signPetition({ ...validBody, displayMode: 'ANONYMOUS', investorType: null });

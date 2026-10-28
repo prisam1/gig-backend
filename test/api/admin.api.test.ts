@@ -11,11 +11,11 @@ import {
 import { filesStorage } from '../../src/modules/files/files.storage';
 import type { StaffRole } from '../../src/types/domain';
 import { AUTH_HEADER, USER_ID, app, makeUser, signInAs } from '../helpers';
-import { uniqueViolation } from '../helpers/dbErrors';
+import { asJson, uniqueViolation } from '../helpers/dbErrors';
 
 const TARGET = '8b8b8b8b-0000-4000-8000-000000000001';
 const ITEM = '9c9c9c9c-0000-4000-8000-000000000002';
-const NOW = '2026-10-28T09:00:00.000Z';
+const NOW = new Date('2026-10-28T09:00:00.000Z');
 
 function asStaff(...roles: StaffRole[]) {
   signInAs(makeUser({ userId: '42', fullName: 'Gita Admin' }));
@@ -99,7 +99,7 @@ function representation(
     signatureCount: 12,
     voteCount: 10,
     opensAt: NOW,
-    closesAt: '2026-12-01T00:00:00.000Z',
+    closesAt: new Date('2026-12-01T00:00:00.000Z'),
     storedStatus: 'OPEN',
     trackStatus: 'OPEN',
     isPublished: true,
@@ -501,7 +501,7 @@ describe('content', () => {
     });
 
     expect(res.status).toBe(201);
-    expect(res.body.data).toEqual(company);
+    expect(res.body.data).toEqual(asJson(company));
     expect(save).toHaveBeenCalledWith(
       '42',
       null,
@@ -677,11 +677,13 @@ describe('credits', () => {
   const body = { userId: TARGET, delta: 5, reason: 'Welcome bonus' };
   const grant = {
     entry: {
-      id: ITEM,
+      id: '41',
       delta: 5,
       balanceAfter: 5,
-      reason: 'Welcome bonus',
-      refType: 'ADMIN_GRANT',
+      reason: 'ADMIN_GRANT' as const,
+      refType: 'ADMIN',
+      refId: USER_ID,
+      note: 'Welcome bonus',
       createdAt: NOW,
     },
     balance: 5,
@@ -708,7 +710,7 @@ describe('credits', () => {
     const retry = await send();
 
     expect(first.status).toBe(201);
-    expect(first.body.data).toEqual({ userId: TARGET, ...grant });
+    expect(first.body.data).toEqual(asJson({ userId: TARGET, ...grant }));
     expect(retry.status).toBe(200);
     expect(retry.headers['idempotent-replayed']).toBe('true');
     expect(call.mock.calls[0]![1]).toEqual({

@@ -4,7 +4,7 @@
 --   * KYC decisions: approval grants the submitted tier, rejection records the reason
 --   * one moderation queue for reviews and ratings: approve, request changes, reject, remove
 --   * content: companies, issuers and representations, and the petition track with documents
---   * credits: an append-only ledger, with the balance cached on app.users
+--   * credits: grants and revocations through main's ledger (public.apply_credit_change)
 --   * the audit trail
 -- Same rules as 20261027160000_app_functions.sql: tables in the private "app" schema, reached only
 -- through the public.app_admin_* functions (security definer, fixed search_path, service role
@@ -26,42 +26,21 @@ create table app.user_roles (
 );
 create index user_roles_role_idx on app.user_roles (role);
 
--- Balance = sum of the ledger, cached here so spending can check it under a row lock.
-alter table app.users add column credit_balance integer not null default 0
-  constraint users_credit_balance_check check (credit_balance >= 0);
-
-create table app.credit_ledger (
-  id bigint generated always as identity primary key,
-  public_id uuid not null unique default gen_random_uuid(),
-  user_id bigint not null references app.users (id) on delete cascade,
-  delta integer not null check (delta <> 0),
-  balance_after integer not null check (balance_after >= 0),
-  reason text not null check (char_length(reason) between 3 and 500),
-  -- What the entry is for: ADMIN_GRANT / ADMIN_REVOKE here; pool joins, questions, ... later.
-  ref_type text not null check (ref_type ~ '^[A-Z_]{1,40}$'),
-  ref_id text check (char_length(ref_id) <= 100),
-  -- The staff member for manual entries.
-  actor_id bigint references app.users (id) on delete set null,
-  idempotency_key text check (char_length(idempotency_key) between 8 and 128),
-  request_hash text,
-  created_at timestamptz not null default now()
+-- Credits live in public.credit_ledger, changed only through public.apply_credit_change
+-- (20261027200000_learn_saved_credits_notifications.sql). Admin grants record the staff member
+-- (ref_type 'ADMIN', ref_id = their public_id) and the reason (note) on the ledger entry; this
+-- table only remembers each grant's Idempotency-Key, so a retried request is never applied twice.
+create table app.admin_credit_grants (
+  actor_id bigint not null references app.users (id) on delete cascade,
+  idempotency_key text not null check (char_length(idempotency_key) between 8 and 128),
+  request_hash text not null,
+  ledger_entry_id bigint not null references public.credit_ledger (id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (actor_id, idempotency_key)
 );
-create index credit_ledger_user_idx on app.credit_ledger (user_id, created_at desc);
-create unique index credit_ledger_idempotency_key_idx
-  on app.credit_ledger (actor_id, idempotency_key)
-  where idempotency_key is not null;
-
--- Entries are never edited; they leave only with the account (on delete cascade).
-create or replace function app.credit_ledger_no_update() returns trigger
-language plpgsql as $$
-begin
-  raise exception 'credit_ledger is append-only';
-end $$;
-create trigger credit_ledger_no_update before update on app.credit_ledger
-  for each statement execute function app.credit_ledger_no_update();
 
 alter table app.user_roles enable row level security;
-alter table app.credit_ledger enable row level security;
+alter table app.admin_credit_grants enable row level security;
 
 -- ---------------------------------------------------------------------------------------------
 -- JSON shapes and helpers (app schema, not callable through the API)
@@ -144,6 +123,13 @@ create or replace function app.admin_add_representation_documents(
          coalesce((select max(x.sort_order) from app.representation_documents x
                    where x.representation_id = p_representation_id), 0) + d.ordinality::integer
   from jsonb_array_elements(coalesce(p_documents, '[]'::jsonb)) with ordinality as d (value, ordinality);
+$$;
+
+create or replace function app.admin_credit_entry_json(e public.credit_ledger)
+returns jsonb language sql stable set search_path = '' as $$
+  select jsonb_build_object(
+    'id', e.id::text, 'delta', e.delta, 'balanceAfter', e.balance_after, 'reason', e.reason,
+    'refType', e.ref_type, 'refId', e.ref_id, 'note', e.note, 'createdAt', e.created_at);
 $$;
 
 -- ---------------------------------------------------------------------------------------------
@@ -987,17 +973,21 @@ end $$;
 -- Credits
 -- ---------------------------------------------------------------------------------------------
 
--- Grants (delta > 0) or revokes (delta < 0) credits, never below zero. The same Idempotency-Key
--- from the same staff member returns the original entry; with a different request it is refused.
--- Returns { entry, balance, replayed } or { error: NOT_FOUND | SELF_CHANGE | INSUFFICIENT_CREDITS |
--- IDEMPOTENCY_CONFLICT }.
+-- Grants (delta > 0) or revokes (delta < 0) credits through public.apply_credit_change, so the
+-- balance never goes below zero and the ledger stays the only record. The entry names the staff
+-- member (ref_type 'ADMIN', ref_id) and carries the reason as its note; the user is notified.
+-- The same Idempotency-Key from the same staff member returns the original entry; with a different
+-- request it is refused. Returns { entry, balance, replayed } or { error: NOT_FOUND | SELF_CHANGE |
+-- INSUFFICIENT_CREDITS | IDEMPOTENCY_CONFLICT }.
 create or replace function public.app_admin_grant_credits(
   p_actor_id bigint, p_public_id uuid, p_delta integer, p_reason text, p_idempotency_key text,
   p_request_hash text, p_ctx jsonb
 ) returns jsonb language plpgsql security definer set search_path = '' as $$
 declare
   v_u app.users%rowtype;
-  v_e app.credit_ledger%rowtype;
+  v_actor uuid;
+  v_grant app.admin_credit_grants%rowtype;
+  v_e public.credit_ledger%rowtype;
 begin
   select * into v_u from app.users where public_id = p_public_id and status <> 'DELETED' for update;
   if not found then
@@ -1005,14 +995,15 @@ begin
   end if;
 
   -- Checked under the user's row lock, so two retries cannot both write.
-  select * into v_e from app.credit_ledger where actor_id = p_actor_id and idempotency_key = p_idempotency_key;
+  select * into v_grant from app.admin_credit_grants
+  where actor_id = p_actor_id and idempotency_key = p_idempotency_key;
   if found then
-    if v_e.request_hash is distinct from p_request_hash or v_e.user_id <> v_u.id then
+    select * into v_e from public.credit_ledger where id = v_grant.ledger_entry_id;
+    if v_grant.request_hash <> p_request_hash or v_e.user_id <> v_u.public_id then
       return jsonb_build_object('error', 'IDEMPOTENCY_CONFLICT');
     end if;
-    return jsonb_build_object('replayed', true, 'balance', v_u.credit_balance, 'entry', jsonb_build_object(
-      'id', v_e.public_id, 'delta', v_e.delta, 'balanceAfter', v_e.balance_after, 'reason', v_e.reason,
-      'refType', v_e.ref_type, 'createdAt', v_e.created_at));
+    return jsonb_build_object('replayed', true, 'balance', v_u.credit_balance,
+      'entry', app.admin_credit_entry_json(v_e));
   end if;
 
   if v_u.id = p_actor_id then
@@ -1022,19 +1013,26 @@ begin
     return jsonb_build_object('error', 'INSUFFICIENT_CREDITS', 'balance', v_u.credit_balance);
   end if;
 
-  update app.users set credit_balance = credit_balance + p_delta where id = v_u.id;
-  insert into app.credit_ledger (user_id, delta, balance_after, reason, ref_type, actor_id,
-    idempotency_key, request_hash)
-  values (v_u.id, p_delta, v_u.credit_balance + p_delta, p_reason,
-    case when p_delta > 0 then 'ADMIN_GRANT' else 'ADMIN_REVOKE' end, p_actor_id,
-    p_idempotency_key, p_request_hash)
-  returning * into v_e;
+  select public_id into v_actor from app.users where id = p_actor_id;
+  select * into v_e from public.apply_credit_change(
+    v_u.public_id, p_delta,
+    (case when p_delta > 0 then 'ADMIN_GRANT' else 'ADMIN_REVOKE' end)::public.credit_reason,
+    'ADMIN', v_actor, p_reason);
+  insert into app.admin_credit_grants (actor_id, idempotency_key, request_hash, ledger_entry_id)
+  values (p_actor_id, p_idempotency_key, p_request_hash, v_e.id);
+
+  insert into public.notifications (user_id, type, title, body, data)
+  values (v_u.public_id, 'CREDITS',
+    case when p_delta > 0 then 'Credits added' else 'Credits removed' end,
+    case when p_delta > 0 then 'GIG added ' || p_delta || ' credit' || case when p_delta = 1 then '' else 's' end
+         else 'GIG removed ' || -p_delta || ' credit' || case when p_delta = -1 then '' else 's' end end
+      || '. Your balance is ' || v_e.balance_after || '.',
+    jsonb_build_object('ledgerEntryId', v_e.id::text));
 
   perform app.write_audit(p_ctx, 'admin.credits.granted', p_actor_id, jsonb_build_object(
-    'user', v_u.public_id, 'entry', v_e.public_id, 'delta', p_delta, 'balance', v_e.balance_after));
-  return jsonb_build_object('replayed', false, 'balance', v_e.balance_after, 'entry', jsonb_build_object(
-    'id', v_e.public_id, 'delta', v_e.delta, 'balanceAfter', v_e.balance_after, 'reason', v_e.reason,
-    'refType', v_e.ref_type, 'createdAt', v_e.created_at));
+    'user', v_u.public_id, 'entry', v_e.id::text, 'delta', p_delta, 'balance', v_e.balance_after));
+  return jsonb_build_object('replayed', false, 'balance', v_e.balance_after,
+    'entry', app.admin_credit_entry_json(v_e));
 end $$;
 
 -- A user's balance and ledger, newest first. Null when the user does not exist.
@@ -1043,20 +1041,15 @@ returns jsonb language sql stable security definer set search_path = '' as $$
   select jsonb_build_object(
     'balance', u.credit_balance,
     'items', coalesce((
-      select jsonb_agg(x.item order by x.created_at desc, x.id desc)
-      from (select e.id, e.created_at, jsonb_build_object(
-                     'id', e.public_id, 'delta', e.delta, 'balanceAfter', e.balance_after,
-                     'reason', e.reason, 'refType', e.ref_type, 'refId', e.ref_id,
-                     'actor', case when a.id is null then null
-                                   else jsonb_build_object('id', a.public_id, 'name', ap.name) end,
-                     'createdAt', e.created_at) as item
-            from app.credit_ledger e
-            left join app.users a on a.id = e.actor_id
-            left join app.user_profiles ap on ap.user_id = a.id
-            where e.user_id = u.id
-            order by e.created_at desc, e.id desc
-            limit p_limit offset p_offset) x), '[]'::jsonb),
-    'total', (select count(*) from app.credit_ledger e where e.user_id = u.id))
+      select jsonb_agg(app.admin_credit_entry_json(e) || jsonb_build_object(
+               'actor', case when a.id is null then null
+                             else jsonb_build_object('id', a.public_id, 'name', ap.name) end)
+             order by e.id desc)
+      from (select * from public.credit_ledger l where l.user_id = u.public_id
+            order by l.id desc limit p_limit offset p_offset) e
+      left join app.users a on e.ref_type = 'ADMIN' and a.public_id = e.ref_id
+      left join app.user_profiles ap on ap.user_id = a.id), '[]'::jsonb),
+    'total', (select count(*) from public.credit_ledger l where l.user_id = u.public_id))
   from app.users u
   where u.public_id = p_public_id;
 $$;

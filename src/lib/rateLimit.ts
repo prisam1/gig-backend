@@ -52,7 +52,7 @@ export function tooMany(retryAfterSeconds: number): AppError {
 
 // Counts one hit and throws 429 once the limit is passed.
 export async function consume(limit: Limit, subject: string | null): Promise<void> {
-  const hit = await callDb<{ limited: boolean; retryAfter: number }>('app_rate_limit_hit', {
+  const hit = await callDb('app_rate_limit_hit', {
     p_key: key(limit, subject),
     p_max: limit.max,
     p_window_seconds: limit.windowSeconds,

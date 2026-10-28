@@ -138,8 +138,8 @@ describe('POST /api/v1/reviews: Idempotency-Key', () => {
     const key = newKey();
     await submit(positiveBody, 'prive', key).expect(201);
     const args = fake.callsTo('rpc:submit_review')[0]?.args[0] as Record<string, unknown>;
-    expect(args.p_idempotency_key).toBe(key);
-    expect(args.p_request_hash).toMatch(/^[0-9a-f]{64}$/);
+    expect(args['p_idempotency_key']).toBe(key);
+    expect(args['p_request_hash']).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('returns the same review for a retry with the same key and body', async () => {

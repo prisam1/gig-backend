@@ -6,15 +6,16 @@ import {
   type AdminQuestion,
   type AdminRoadshow,
 } from '../../src/modules/admin/admin.repository';
+import { filesStorage } from '../../src/modules/files/files.storage';
 import type { StaffRole } from '../../src/types/domain';
 import { AUTH_HEADER, app, makeUser, signInAs } from '../helpers';
-import { uniqueViolation } from '../helpers/dbErrors';
+import { asJson, uniqueViolation } from '../helpers/dbErrors';
 
 const ROADSHOW = '7d7d7d7d-0000-4000-8000-000000000001';
 const QUESTION = '7d7d7d7d-0000-4000-8000-000000000002';
 const ISSUER = '7d7d7d7d-0000-4000-8000-000000000003';
 const LEARN = '7d7d7d7d-0000-4000-8000-000000000004';
-const NOW = '2026-10-28T09:00:00.000Z';
+const NOW = new Date('2026-10-28T09:00:00.000Z');
 const LATER = '2026-12-01T00:00:00.000Z';
 
 function asStaff(...roles: StaffRole[]) {
@@ -35,7 +36,7 @@ const roadshow: AdminRoadshow = {
   id: ROADSHOW,
   slug: 'sovereign-alpha-ipo',
   title: 'Sovereign Alpha IPO roadshow',
-  summary: '',
+  summary: null,
   issuer: { id: ISSUER, name: 'Sovereign Alpha Yield' },
   typeOfIssue: 'IPO',
   instruments: 'Equity shares',
@@ -48,17 +49,18 @@ const roadshow: AdminRoadshow = {
   callable: false,
   couponRate: null,
   riskFactors: [],
-  opensAt: NOW,
-  closesAt: LATER,
+  opensAt: null,
+  closesAt: new Date(LATER),
   poolEnabled: true,
-  isPublished: false,
+  status: 'DRAFT',
   publishedAt: null,
   isOpen: false,
   financials: [],
+  documentCount: 0,
+  poolMembers: 0,
   questions: { pending: 0, published: 0, unanswered: 0 },
   createdAt: NOW,
   updatedAt: NOW,
-  deletedAt: null,
 };
 
 const question: AdminQuestion = {
@@ -66,38 +68,33 @@ const question: AdminQuestion = {
   category: 'EQUITY',
   question: 'What is the lock-in for anchor investors?',
   status: 'PUBLISHED',
+  featured: true,
   moderationNote: null,
   answer: 'Six months.',
   answeredAt: NOW,
   answeredBy: { id: ROADSHOW, name: 'Gita Admin' },
   author: { id: ISSUER, name: 'Ira Investor', tier: 'PRIVE', kycStatus: 'APPROVED' },
-  creditSpent: 0,
-  upvoteCount: 0,
   submittedAt: NOW,
-  publishedAt: NOW,
+  updatedAt: NOW,
 };
 
 const learnItem: AdminLearnItem = {
   id: LEARN,
-  slug: 'reading-an-ipo-prospectus',
   title: 'Reading an IPO prospectus',
-  summary: '',
-  contentType: 'VIDEO',
+  summary: null,
+  format: 'VIDEO',
   category: null,
-  tags: [],
-  minTier: 'OBSERVER',
-  downloadable: false,
-  author: null,
+  access: 'FREE',
   thumbnailUrl: null,
-  mediaUrl: null,
-  body: null,
+  contentUrl: null,
   durationSeconds: null,
-  featured: false,
-  isPublished: false,
+  downloadPath: null,
+  ratingAvg: 0,
+  ratingCount: 0,
+  status: 'DRAFT',
   publishedAt: null,
   createdAt: NOW,
   updatedAt: NOW,
-  deletedAt: null,
 };
 
 const newRoadshow = {
@@ -116,39 +113,40 @@ describe('roadshows', () => {
     vi.spyOn(adminRepository, 'findRoadshow').mockResolvedValue(roadshow);
     const body = {
       ...newRoadshow,
-      financials: [{ fiscalYear: 'FY2025', revenue: 1500, netProfit: -4 }],
+      status: 'PUBLISHED',
+      financials: [{ fiscalYear: 2025, revenue: 1500, netProfit: -4, cashAndEquivalents: 90 }],
     };
 
     const res = await api.post('/roadshows', body);
 
     expect(res.status).toBe(201);
-    expect(res.body.data).toEqual(roadshow);
+    expect(res.body.data).toEqual(asJson(roadshow));
     expect(save).toHaveBeenCalledWith('42', null, body, expect.anything());
   });
 
-  it('validates required fields, financial years and the window', async () => {
+  it('validates required fields, financial years, status and the window', async () => {
     asStaff('ADMIN');
     const save = vi.spyOn(adminRepository, 'saveRoadshow');
 
     const missing = await api.post('/roadshows', { slug: 'x-roadshow' });
     const badYear = await api.post('/roadshows', {
       ...newRoadshow,
-      financials: [{ fiscalYear: '2025' }],
+      financials: [{ fiscalYear: 'FY2025' }],
     });
     const twice = await api.post('/roadshows', {
       ...newRoadshow,
-      financials: [{ fiscalYear: 'FY2025' }, { fiscalYear: 'FY2025' }],
+      financials: [{ fiscalYear: 2025 }, { fiscalYear: 2025 }],
     });
+    const status = await api.patch(`/roadshows/${ROADSHOW}`, { status: 'LIVE' });
     const window = await api.patch(`/roadshows/${ROADSHOW}`, { opensAt: LATER, closesAt: NOW });
     const coupon = await api.patch(`/roadshows/${ROADSHOW}`, { couponRate: 120 });
 
     expect(Object.keys(missing.body.error.fields).sort()).toEqual(
       ['closesAt', 'instruments', 'issuerId', 'title', 'typeOfIssue'].sort(),
     );
-    expect(badYear.body.error.fields['financials.0.fiscalYear']).toBe(
-      'Use FY followed by the year, e.g. FY2025',
-    );
+    expect(badYear.body.error.fields).toHaveProperty(['financials.0.fiscalYear']);
     expect(twice.body.error.fields).toEqual({ financials: 'List each fiscal year once' });
+    expect(status.body.error.fields).toHaveProperty('status');
     expect(window.body.error.fields).toEqual({ closesAt: 'Must be after the opening time' });
     expect(coupon.status).toBe(400);
     expect(save).not.toHaveBeenCalled();
@@ -169,7 +167,7 @@ describe('roadshows', () => {
     expect(slug.body.error.code).toBe('SLUG_TAKEN');
   });
 
-  it('lists, reads and soft-deletes', async () => {
+  it('lists, reads and archives', async () => {
     asStaff('ANALYST');
     const find = vi
       .spyOn(adminRepository, 'findRoadshows')
@@ -179,20 +177,26 @@ describe('roadshows', () => {
       .mockResolvedValueOnce(null);
 
     const list = await api.get(
-      `/roadshows?q=alpha&filter[published]=true&filter[issuer]=${ISSUER}`,
+      `/roadshows?q=alpha&filter[status]=PUBLISHED,ARCHIVED&filter[issuer]=${ISSUER}`,
     );
     const found = await api.get(`/roadshows/${ROADSHOW}`);
     const missing = await api.get(`/roadshows/${ROADSHOW}`);
 
-    expect(list.body).toEqual({ data: [roadshow], meta: { page: 1, pageSize: 20, total: 1 } });
+    expect(list.body).toEqual({
+      data: [asJson(roadshow)],
+      meta: { page: 1, pageSize: 20, total: 1 },
+    });
     expect(find).toHaveBeenCalledWith(
-      expect.objectContaining({ q: 'alpha', filter: { published: true, issuer: ISSUER } }),
+      expect.objectContaining({
+        q: 'alpha',
+        filter: { status: ['PUBLISHED', 'ARCHIVED'], issuer: ISSUER },
+      }),
     );
     expect(found.body.data.id).toBe(ROADSHOW);
     expect(missing.status).toBe(404);
 
     asStaff('ADMIN');
-    vi.spyOn(adminRepository, 'deleteRoadshow')
+    vi.spyOn(adminRepository, 'archiveRoadshow')
       .mockResolvedValueOnce(true)
       .mockResolvedValueOnce(false);
     expect((await api.delete(`/roadshows/${ROADSHOW}`)).status).toBe(204);
@@ -218,28 +222,35 @@ describe('roadshow questions', () => {
       .mockResolvedValueOnce(null);
 
     const list = await api.get(
-      `/roadshows/${ROADSHOW}/questions?filter[answered]=false&filter[category]=EQUITY,DEBT`,
+      `/roadshows/${ROADSHOW}/questions?filter[answered]=false&filter[category]=GENERAL,DEBT`,
     );
     const missing = await api.get(`/roadshows/${ROADSHOW}/questions`);
 
-    expect(list.body.data).toEqual([question]);
+    expect(list.body.data).toEqual([asJson(question)]);
     expect(find.mock.calls[0]![1]).toMatchObject({
-      filter: { answered: false, category: ['EQUITY', 'DEBT'] },
+      filter: { answered: false, category: ['GENERAL', 'DEBT'] },
     });
     expect(missing.status).toBe(404);
   });
 
-  it('publishes the issuer answer', async () => {
+  it('publishes the issuer answer and can feature the question', async () => {
     asStaff('MODERATOR');
     const answer = vi.spyOn(adminRepository, 'answerQuestion').mockResolvedValue(question);
 
     const res = await api.post(`/roadshows/${ROADSHOW}/questions/${QUESTION}/answer`, {
       answer: '  Six months.  ',
+      featured: true,
     });
 
     expect(res.status).toBe(200);
-    expect(res.body.data).toEqual(question);
-    expect(answer).toHaveBeenCalledWith('42', ROADSHOW, QUESTION, 'Six months.', expect.anything());
+    expect(res.body.data).toEqual(asJson(question));
+    expect(answer).toHaveBeenCalledWith(
+      '42',
+      ROADSHOW,
+      QUESTION,
+      { answer: 'Six months.', featured: true },
+      expect.anything(),
+    );
   });
 
   it('validates the answer and maps refusals', async () => {
@@ -299,65 +310,82 @@ describe('learn', () => {
     asStaff('ADMIN');
     const save = vi.spyOn(adminRepository, 'saveLearn').mockResolvedValue({ id: LEARN });
     vi.spyOn(adminRepository, 'findLearnItem').mockResolvedValue(learnItem);
-    const body = {
-      slug: 'reading-an-ipo-prospectus',
-      title: 'Reading an IPO prospectus',
-      contentType: 'VIDEO',
-      minTier: 'PRIVE',
-    };
+    const body = { title: 'Reading an IPO prospectus', format: 'VIDEO', access: 'PREMIUM' };
 
     const res = await api.post('/learn', body);
 
     expect(res.status).toBe(201);
-    expect(res.body.data).toEqual(learnItem);
+    expect(res.body.data).toEqual(asJson(learnItem));
     expect(save).toHaveBeenCalledWith('42', null, body, expect.anything());
   });
 
-  it('validates content type, tier and links', async () => {
+  it('validates format, access, links and paths', async () => {
     asStaff('ADMIN');
     const save = vi.spyOn(adminRepository, 'saveLearn');
 
-    const missing = await api.post('/learn', { slug: 'x-item' });
-    const type = await api.patch(`/learn/${LEARN}`, { contentType: 'MEME' });
-    const tier = await api.patch(`/learn/${LEARN}`, { minTier: 'GOLD' });
-    const link = await api.patch(`/learn/${LEARN}`, { mediaUrl: 'not a url' });
+    const missing = await api.post('/learn', { summary: 'No title' });
+    const format = await api.patch(`/learn/${LEARN}`, { format: 'MEME' });
+    const access = await api.patch(`/learn/${LEARN}`, { access: 'GOLD' });
+    const link = await api.patch(`/learn/${LEARN}`, { contentUrl: 'not a url' });
+    const path = await api.patch(`/learn/${LEARN}`, { downloadPath: '../secret.pdf' });
     const empty = await api.patch(`/learn/${LEARN}`, {});
 
-    expect(Object.keys(missing.body.error.fields).sort()).toEqual(['contentType', 'title']);
-    expect(type.body.error.fields).toHaveProperty('contentType');
-    expect(tier.body.error.fields).toHaveProperty('minTier');
-    expect(link.body.error.fields).toHaveProperty('mediaUrl');
+    expect(Object.keys(missing.body.error.fields).sort()).toEqual(['format', 'title']);
+    expect(format.body.error.fields).toHaveProperty('format');
+    expect(access.body.error.fields).toHaveProperty('access');
+    expect(link.body.error.fields).toHaveProperty('contentUrl');
+    expect(path.body.error.fields).toEqual({
+      downloadPath: 'Use a path like reports/scorecard.pdf',
+    });
     expect(empty.body.error.fields).toEqual({ _: 'Change at least one field' });
     expect(save).not.toHaveBeenCalled();
   });
 
-  it('publishes with a partial update, lists with filters and soft-deletes', async () => {
+  it('accepts a report download only once it is in the learn-reports bucket', async () => {
+    asStaff('ADMIN');
+    const exists = vi
+      .spyOn(filesStorage, 'exists')
+      .mockResolvedValueOnce(false)
+      .mockResolvedValueOnce(true);
+    const save = vi.spyOn(adminRepository, 'saveLearn').mockResolvedValue({ id: LEARN });
+    vi.spyOn(adminRepository, 'findLearnItem').mockResolvedValue(learnItem);
+
+    const missing = await api.patch(`/learn/${LEARN}`, { downloadPath: 'reports/ipo-guide.pdf' });
+    const uploaded = await api.patch(`/learn/${LEARN}`, { downloadPath: 'reports/ipo-guide.pdf' });
+
+    expect(missing.body.error.fields).toEqual({
+      downloadPath: 'No report has been uploaded at this path',
+    });
+    expect(uploaded.status).toBe(200);
+    expect(exists).toHaveBeenCalledWith('learn-reports', 'reports/ipo-guide.pdf');
+    expect(save).toHaveBeenCalledOnce();
+  });
+
+  it('publishes with a partial update, lists with filters and archives', async () => {
     asStaff('ADMIN');
     const save = vi.spyOn(adminRepository, 'saveLearn').mockResolvedValue({ id: LEARN });
     vi.spyOn(adminRepository, 'findLearnItem').mockResolvedValue({
       ...learnItem,
-      isPublished: true,
+      status: 'PUBLISHED',
       publishedAt: NOW,
     });
     const find = vi
       .spyOn(adminRepository, 'findLearn')
       .mockResolvedValue({ items: [learnItem], total: 1 });
-    vi.spyOn(adminRepository, 'deleteLearn').mockResolvedValue(true);
+    vi.spyOn(adminRepository, 'archiveLearn').mockResolvedValue(true);
 
-    const patched = await api.patch(`/learn/${LEARN}`, { published: true });
-    await api.get(
-      '/learn?filter[contentType]=VIDEO,REPORT&filter[minTier]=PRIVE&filter[published]=false',
-    );
-    const deleted = await api.delete(`/learn/${LEARN}`);
+    const patched = await api.patch(`/learn/${LEARN}`, { status: 'PUBLISHED' });
+    await api.get('/learn?filter[format]=VIDEO,REPORT&filter[access]=PREMIUM&filter[status]=DRAFT');
+    const archived = await api.delete(`/learn/${LEARN}`);
 
-    expect(patched.body.data.isPublished).toBe(true);
-    expect(save).toHaveBeenCalledWith('42', LEARN, { published: true }, expect.anything());
+    expect(patched.body.data.status).toBe('PUBLISHED');
+    expect(save).toHaveBeenCalledWith('42', LEARN, { status: 'PUBLISHED' }, expect.anything());
     expect(find).toHaveBeenCalledWith(
       expect.objectContaining({
-        filter: { contentType: ['VIDEO', 'REPORT'], minTier: ['PRIVE'], published: false },
+        filter: { format: ['VIDEO', 'REPORT'], access: ['PREMIUM'], status: ['DRAFT'] },
       }),
     );
-    expect(deleted.status).toBe(204);
+    expect(archived.status).toBe(204);
   });
 
   it('is readable by every staff role and written by ADMIN only', async () => {

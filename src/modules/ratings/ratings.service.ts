@@ -125,7 +125,7 @@ function checkCodes(
   const flagged = new Set(input.factors.map((f) => f.code));
   const missing = factorOptions.filter((o) => !flagged.has(o.code)).map((o) => o.code);
   if (missing.length > 0) {
-    fields.factors = `Flag every rating factor (missing: ${missing.join(', ')})`;
+    fields['factors'] = `Flag every rating factor (missing: ${missing.join(', ')})`;
   }
 
   input.riskFactors.forEach((code, i) => {

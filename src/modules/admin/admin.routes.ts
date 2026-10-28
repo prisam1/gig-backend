@@ -313,7 +313,7 @@ adminRouter.patch('/roadshows/:id', allow('content.write'), async (req, res) => 
 
 adminRouter.delete('/roadshows/:id', allow('content.write'), async (req, res) => {
   const { id } = parse(idParams, req.params);
-  await adminRoadshows.remove(getAuth(req), id, clientContext(req));
+  await adminRoadshows.archive(getAuth(req), id, clientContext(req));
   res.status(204).end();
 });
 
@@ -328,10 +328,10 @@ adminRouter.post(
   allow('moderation'),
   async (req, res) => {
     const { id, questionId } = parse(questionParams, req.params);
-    const { answer } = parse(answerQuestionBody, req.body);
+    const input = parse(answerQuestionBody, req.body);
     sendData(
       res,
-      await adminRoadshows.answer(getAuth(req), id, questionId, answer, clientContext(req)),
+      await adminRoadshows.answer(getAuth(req), id, questionId, input, clientContext(req)),
     );
   },
 );
@@ -359,7 +359,7 @@ adminRouter.patch('/learn/:id', allow('content.write'), async (req, res) => {
 
 adminRouter.delete('/learn/:id', allow('content.write'), async (req, res) => {
   const { id } = parse(idParams, req.params);
-  await adminLearn.remove(getAuth(req), id, clientContext(req));
+  await adminLearn.archive(getAuth(req), id, clientContext(req));
   res.status(204).end();
 });
 

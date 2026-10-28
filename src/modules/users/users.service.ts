@@ -2,7 +2,8 @@ import type { z } from 'zod';
 import { audit } from '../../lib/audit';
 import { decrypt } from '../../lib/crypto';
 import { callDb } from '../../lib/db';
-import type { KycStatus, Member, Tier } from '../../lib/membership';
+import type { DbResult } from '../../lib/dbFunctions';
+import type { Member } from '../../lib/membership';
 import { consume, LIMITS } from '../../lib/rateLimit';
 import { AppError } from '../../middleware/errorHandler';
 import type { ClientContext } from '../../middleware/requestContext';
@@ -22,9 +23,9 @@ const fieldErrors = (fields: Record<string, string>) =>
 const userNotFound = () => new AppError(404, 'NOT_FOUND', 'User not found');
 
 // Results of the app_* write functions: { ok } on success, otherwise an error code or field errors.
-type WriteResult = { ok: true; requestedTier?: Tier | null } | { error: string } | { fields: Record<string, string> };
+type WriteResult = DbResult<'app_update_profile'>;
 
-function assertWritten(result: WriteResult): asserts result is { ok: true; requestedTier?: Tier | null } {
+function assertWritten(result: WriteResult): asserts result is Extract<WriteResult, { ok: true }> {
   if ('fields' in result) throw fieldErrors(result.fields);
   if ('error' in result) {
     if (result.error === 'NOT_FOUND') throw userNotFound();
@@ -49,33 +50,11 @@ const PREFERENCE_KEYS = {
 } as const;
 
 export function listOptions(type: LookupType): Promise<Option[]> {
-  return callDb<Option[]>('app_list_options', { p_type: type });
-}
-
-interface UserRow {
-  publicId: string;
-  emailEnc: string;
-  phoneEnc: string;
-  tier: Tier;
-  requestedTier: Tier | null;
-  kycStatus: KycStatus;
-  tierSelectedAt: string | null;
-  createdAt: string;
-  name: string;
-  experienceYears: number | null;
-  jobProfileCode: string | null;
-  jobProfileLabel: string | null;
-  otherJob: string | null;
-  location: string | null;
-  avatarBucket: string | null;
-  avatarObjectKey: string | null;
-  followers: number;
-  following: number;
-  preferences: { type: keyof typeof PREFERENCE_KEYS; code: string; label: string }[];
+  return callDb('app_list_options', { p_type: type });
 }
 
 export async function loadUser(userId: string) {
-  const row = await callDb<UserRow | null>('app_get_user', { p_user_id: userId });
+  const row = await callDb('app_get_user', { p_user_id: userId });
   if (!row) throw userNotFound();
 
   const preferences: Record<(typeof PREFERENCE_KEYS)[keyof typeof PREFERENCE_KEYS], Option[]> = {
@@ -114,7 +93,7 @@ export async function loadUser(userId: string) {
       tierSelected,
       completed: profileCompleted && preferencesCompleted && tierSelected,
     },
-    createdAt: new Date(row.createdAt),
+    createdAt: row.createdAt,
   };
 }
 export type UserDto = Awaited<ReturnType<typeof loadUser>>;
@@ -135,7 +114,7 @@ export async function updateMe(userId: string, input: z.infer<typeof updateMeSch
     avatar = file.id;
   }
 
-  const result = await callDb<WriteResult>('app_update_profile', {
+  const result = await callDb('app_update_profile', {
     p_user_id: userId,
     p_changes: { ...changes, ...(avatar && { avatarFileId: avatar }) },
     p_ctx: ctx,
@@ -145,7 +124,7 @@ export async function updateMe(userId: string, input: z.infer<typeof updateMeSch
 }
 
 export async function setPreferences(userId: string, input: z.infer<typeof preferencesSchema>, ctx: ClientContext) {
-  const result = await callDb<WriteResult>('app_set_preferences', {
+  const result = await callDb('app_set_preferences', {
     p_user_id: userId,
     p_groups: [
       { type: 'INVESTMENT_FOCUS', field: 'focus', codes: input.focus },
@@ -162,7 +141,7 @@ export async function setPreferences(userId: string, input: z.infer<typeof prefe
 // Observer is granted at once. Prive and Institutional are recorded as requested and granted
 // only when KYC is approved (KYC workstream), never by this endpoint.
 export async function selectTier(userId: string, input: z.infer<typeof tierSchema>, ctx: ClientContext) {
-  const result = await callDb<WriteResult>('app_select_tier', { p_user_id: userId, p_tier: input.tier, p_ctx: ctx });
+  const result = await callDb('app_select_tier', { p_user_id: userId, p_tier: input.tier, p_ctx: ctx });
   assertWritten(result);
   return { user: await loadUser(userId), nextStep: result.requestedTier ? 'KYC_REQUIRED' : 'NONE' };
 }

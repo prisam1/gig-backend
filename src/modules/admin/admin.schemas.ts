@@ -1,14 +1,20 @@
 import { z } from 'zod';
-import { assetClassSchema, countrySchema } from '../../lib/enums';
+import {
+  assetClassSchema,
+  contentAccessSchema,
+  countrySchema,
+  currencySchema,
+  learnFormatSchema,
+  questionCategorySchema,
+} from '../../lib/enums';
 import { csv, pagination } from '../../lib/http';
 import { KYC_STATUSES, TIERS } from '../../lib/membership';
+import { Constants } from '../../types/database';
 import {
-  LEARN_CONTENT_TYPES,
   MARKET_COUNTRIES,
   RATING_STATUSES,
   REPRESENTATION_DOCUMENT_TYPES,
   REPRESENTATION_TRACK_STATUSES,
-  ROADSHOW_QUESTION_CATEGORIES,
   STAFF_ROLES,
   USER_STATUSES,
 } from '../../types/domain';
@@ -194,7 +200,8 @@ export const updateCompanyBody = z
   .strictObject(companyFields)
   .partial()
   .refine(nonEmpty, 'Change at least one field');
-export type CompanyInput = Partial<z.infer<typeof createCompanyBody>>;
+/** A create or a partial update: only the fields being set. */
+export type CompanyInput = z.infer<typeof updateCompanyBody>;
 
 export const listCompaniesQuery = z.object({
   ...contentListQuery,
@@ -284,7 +291,8 @@ export const updateIssuerBody = z
   .partial()
   .refine(nonEmpty, 'Change at least one field')
   .superRefine(checkIssuerRanges);
-export type IssuerInput = Partial<z.infer<typeof createIssuerBody>>;
+/** A create or a partial update: only the fields being set. */
+export type IssuerInput = z.infer<typeof updateIssuerBody>;
 
 export const listIssuersAdminQuery = z.object({
   ...contentListQuery,
@@ -321,7 +329,10 @@ const representationFields = {
   closesAt: timestamp,
 };
 
-function checkWindow(body: { opensAt?: string; closesAt?: string }, ctx: z.RefinementCtx) {
+function checkWindow(
+  body: { opensAt?: string | null | undefined; closesAt?: string | undefined },
+  ctx: z.RefinementCtx,
+) {
   const opens = body.opensAt ? Date.parse(body.opensAt) : undefined;
   const closes = body.closesAt ? Date.parse(body.closesAt) : undefined;
   if (closes !== undefined && closes <= (opens ?? Date.now())) {
@@ -349,7 +360,8 @@ export const updateRepresentationBody = z
     // With only one end of the window in the request, the database checks it against the other.
     if (body.opensAt && body.closesAt) checkWindow(body, ctx);
   });
-export type RepresentationInput = Partial<z.infer<typeof createRepresentationBody>>;
+/** A create or a partial update: only the fields being set. */
+export type RepresentationInput = z.infer<typeof updateRepresentationBody>;
 
 export const listRepresentationsAdminQuery = z.object({
   ...contentListQuery,
@@ -422,14 +434,16 @@ export const representationStatusBody = z.strictObject({
 export type RepresentationStatusInput = z.infer<typeof representationStatusBody>;
 
 // ---------------------------------------------------------------------------------------------
-// Roadshows
+// Roadshows (public.roadshows, 20261027201000_roadshows.sql)
 // ---------------------------------------------------------------------------------------------
+
+const contentStatus = z.enum(Constants.public.Enums.content_status);
 
 /** A financial figure in the roadshow's currency; losses are negative. */
 const figure = z.number().min(-1e15).max(1e15).nullable().optional();
 
 const financialYear = z.strictObject({
-  fiscalYear: z.string().regex(/^FY\d{4}$/, 'Use FY followed by the year, e.g. FY2025'),
+  fiscalYear: z.number().int().min(1990).max(2100),
   revenue: figure,
   ebitda: figure,
   netProfit: figure,
@@ -437,40 +451,41 @@ const financialYear = z.strictObject({
   totalLiabilities: figure,
   netWorth: figure,
   totalDebt: figure,
+  cashAndEquivalents: figure,
   operatingCashFlow: figure,
   eps: figure,
-  roePct: z.number().min(-99_999).max(99_999).nullable().optional(),
 });
 
 const roadshowFields = {
   slug,
   issuerId: z.uuid('Invalid issuer ID'),
-  title: z.string().trim().min(5).max(200),
-  summary: z.string().trim().max(2000),
+  title: z.string().trim().min(2).max(160),
+  summary: nullableText(4000),
   /** e.g. IPO, NCD, Rights issue. */
   typeOfIssue: z.string().trim().min(1).max(60),
   instruments: z.string().trim().min(1).max(60),
   noOfInstruments: z.number().int().positive().max(1e15).nullable(),
   offerPrice: amount,
-  currency: z.enum(['INR', 'USD', 'EUR', 'GBP', 'AED']),
+  /** Of the offer price, capital interest and financials. */
+  currency: currencySchema,
   lockIn: nullableText(60),
   maturity: nullableText(60),
   convertibility: nullableText(60),
   callable: z.boolean(),
   couponRate: z.number().min(0).max(100).nullable(),
   riskFactors: tags(20, 300),
-  /** When the pool opens; defaults to now. */
-  opensAt: timestamp,
+  /** When the Power Pool opens; null opens it as soon as the roadshow is published. */
+  opensAt: timestamp.nullable(),
   closesAt: timestamp,
   poolEnabled: z.boolean(),
-  /** true publishes it in the app; false returns it to draft. */
-  published: z.boolean(),
+  /** DRAFT, PUBLISHED (shown in the app; the first publication time is kept) or ARCHIVED. */
+  status: contentStatus,
   /** Replaces every fiscal year; the app shows the latest 3. */
   financials: z
     .array(financialYear)
     .max(10, 'At most 10 fiscal years')
     .refine(
-      (years) => hasNoDuplicates(years.map((y) => y.fiscalYear)),
+      (years) => new Set(years.map((y) => y.fiscalYear)).size === years.length,
       'List each fiscal year once',
     ),
 };
@@ -501,10 +516,10 @@ export const listRoadshowsAdminQuery = z.object({
   filter: z
     .strictObject({
       issuer: z.uuid('Invalid issuer ID').optional(),
-      published: booleanQuery.optional(),
-      /** Published, and between opensAt and closesAt. */
+      /** Defaults to DRAFT and PUBLISHED; ask for ARCHIVED to see archived roadshows. */
+      status: csv(contentStatus).optional(),
+      /** Published, opened and not yet closed. */
       open: booleanQuery.optional(),
-      deleted: booleanQuery.optional(),
     })
     .optional(),
 });
@@ -519,8 +534,8 @@ export const listQuestionsQuery = z.object({
   ...pagination,
   filter: z
     .strictObject({
-      status: csv(z.enum(RATING_STATUSES)).optional(),
-      category: csv(z.enum(ROADSHOW_QUESTION_CATEGORIES)).optional(),
+      status: csv(z.enum(Constants.public.Enums.question_status)).optional(),
+      category: csv(questionCategorySchema).optional(),
       answered: booleanQuery.optional(),
     })
     .optional(),
@@ -530,39 +545,48 @@ export type ListQuestionsQuery = z.infer<typeof listQuestionsQuery>;
 export const answerQuestionBody = z.strictObject({
   /** The issuer's answer, published by GIG. Sending it again replaces the answer. */
   answer: z.string({ message: 'Write the answer' }).trim().min(1, 'Write the answer').max(4000),
+  /** Picks the question for the "Top Asked" tab (true) or takes it off (false). */
+  featured: z.boolean().optional(),
 });
+export type AnswerQuestionInput = z.infer<typeof answerQuestionBody>;
 
 // ---------------------------------------------------------------------------------------------
-// Learn
+// Learn (public.learn_items, 20261027200000_learn_saved_credits_notifications.sql)
 // ---------------------------------------------------------------------------------------------
+
+/** Private "learn-reports" bucket for downloadable reports. */
+export const LEARN_REPORTS_BUCKET = 'learn-reports';
 
 const learnFields = {
-  slug,
-  title: z.string().trim().min(3).max(200),
-  summary: z.string().trim().max(2000),
-  contentType: z.enum(LEARN_CONTENT_TYPES),
+  title: z.string().trim().min(2).max(200),
+  summary: nullableText(2000),
+  format: learnFormatSchema,
   category: nullableText(60),
-  tags: tags(10),
-  /** The lowest tier that may open it (premium content and reports are gated). */
-  minTier: z.enum(TIERS),
-  /** Downloads are for Prive and Institutional members. */
-  downloadable: z.boolean(),
-  author: nullableText(120),
+  /** PREMIUM content is for Full members (verified Prive and Institutional). */
+  access: contentAccessSchema,
   thumbnailUrl: z.url().max(500).nullable(),
-  /** The video, audio or document link. */
-  mediaUrl: z.url().max(1000).nullable(),
-  /** Article text. Request bodies are capped at 100 KB. */
-  body: z.string().max(50_000).nullable(),
+  /** Stream or article URL; for PREMIUM items the app returns it to Full members only. */
+  contentUrl: z.url().max(1000).nullable(),
   durationSeconds: z.number().int().positive().max(1_000_000).nullable(),
-  featured: z.boolean(),
-  /** true publishes it in the app; false returns it to draft. */
-  published: z.boolean(),
+  /** A PDF already uploaded to the learn-reports bucket, e.g. reports/scorecard.pdf. */
+  downloadPath: z
+    .string()
+    .max(300)
+    .regex(/^[A-Za-z0-9._-]+(\/[A-Za-z0-9._-]+)*$/, 'Use a path like reports/scorecard.pdf')
+    // No . or .. segments: the path names one object, never a step up.
+    .refine(
+      (path) => !path.split('/').some((segment) => /^\.+$/.test(segment)),
+      'Use a path like reports/scorecard.pdf',
+    )
+    .nullable(),
+  /** DRAFT, PUBLISHED (the first publication time is kept) or ARCHIVED. */
+  status: contentStatus,
 };
 
 export const createLearnBody = z
   .strictObject(learnFields)
   .partial()
-  .required({ slug: true, title: true, contentType: true });
+  .required({ title: true, format: true });
 export const updateLearnBody = z
   .strictObject(learnFields)
   .partial()
@@ -573,10 +597,10 @@ export const listLearnAdminQuery = z.object({
   ...contentListQuery,
   filter: z
     .strictObject({
-      contentType: csv(z.enum(LEARN_CONTENT_TYPES)).optional(),
-      minTier: csv(z.enum(TIERS)).optional(),
-      published: booleanQuery.optional(),
-      deleted: booleanQuery.optional(),
+      format: csv(learnFormatSchema).optional(),
+      access: csv(contentAccessSchema).optional(),
+      /** Defaults to DRAFT and PUBLISHED; ask for ARCHIVED to see archived items. */
+      status: csv(contentStatus).optional(),
     })
     .optional(),
 });
@@ -595,7 +619,8 @@ export const grantCreditsBody = z.strictObject({
     .min(-1000, 'At most 1000 credits at a time')
     .max(1000, 'At most 1000 credits at a time')
     .refine((value) => value !== 0, 'Grant or revoke at least 1 credit'),
-  reason,
+  /** Saved as the ledger entry's note (at most 400 characters). */
+  reason: reason.max(400, 'Keep the reason under 400 characters'),
 });
 export type GrantCreditsInput = z.infer<typeof grantCreditsBody>;
 

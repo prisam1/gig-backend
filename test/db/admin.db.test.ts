@@ -3,30 +3,12 @@
 
 import type { PGlite } from '@electric-sql/pglite';
 import { randomUUID } from 'node:crypto';
-import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { callDb, isUniqueViolationOf } from '../../src/lib/db';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { callDb, DatabaseError, dbTransport, isUniqueViolationOf } from '../../src/lib/db';
 import type { ClientContext } from '../../src/middleware/requestContext';
 import { adminRepository, isDbError } from '../../src/modules/admin/admin.repository';
 import type { RepresentationDocumentType } from '../../src/types/domain';
-import { createTestDatabase, createUser, dbError } from './pglite';
-
-const holder = vi.hoisted(() => ({ db: undefined as PGlite | undefined }));
-
-// callDb runs the app_* database functions directly in PGlite, as supabase-js does in production.
-vi.mock('../../src/lib/db', async (importOriginal) => {
-  const original = await importOriginal<typeof import('../../src/lib/db')>();
-  const { callFunction } = await import('./pglite');
-  return {
-    ...original,
-    callDb: (fn: string, args: Record<string, unknown> = {}) =>
-      callFunction(
-        holder.db!,
-        fn,
-        args,
-        (code, message) => new original.DatabaseError(code, message),
-      ),
-  };
-});
+import { callFunction, createTestDatabase, createUser, dbError } from './pglite';
 
 vi.mock('../../src/lib/audit', async (importOriginal) => importOriginal());
 
@@ -81,7 +63,6 @@ function ok<T extends object>(result: T): Exclude<T, { error: string }> {
 
 beforeAll(async () => {
   db = await createTestDatabase();
-  holder.db = db;
   admin = await makeUser(ADMIN, 'Gita Admin');
   mod = await makeUser(MOD, 'Manoj Moderator');
   alice = await makeUser(ALICE, 'Alice Investor');
@@ -91,7 +72,15 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await db?.close();
+  await db.close();
+});
+
+// callDb runs the app_* database functions in PGlite, as supabase-js does in production, and
+// still checks every argument and result against src/lib/dbFunctions.ts.
+beforeEach(() => {
+  vi.spyOn(dbTransport, 'rpc').mockImplementation((fn, args) =>
+    callFunction(db, fn, args, (code, message) => new DatabaseError(code, message)),
+  );
 });
 
 describe('staff roles', () => {
@@ -241,7 +230,7 @@ describe('KYC', () => {
       `update app.users set requested_tier = $2, kyc_status = 'NOT_STARTED' where id = $1`,
       [userId, tier],
     );
-    const file = await callDb<{ id: string }>('app_create_file', {
+    const file = await callDb('app_create_file', {
       p_owner_id: userId,
       p_purpose: 'KYC_DOCUMENT',
       p_bucket: 'kyc-documents',
@@ -800,27 +789,44 @@ describe('credits', () => {
       CTX,
     );
 
-  it('grants credits once per Idempotency-Key and keeps the ledger append-only', async () => {
+  it('grants through the credit ledger once per Idempotency-Key, and notifies the user', async () => {
     expect(ok(await grant(5, 'grant-key-1'))).toMatchObject({
       replayed: false,
       balance: 5,
-      entry: { delta: 5, balanceAfter: 5, refType: 'ADMIN_GRANT', reason: 'Welcome bonus' },
+      // The ledger entry names the staff member and keeps the reason as its note.
+      entry: {
+        delta: 5,
+        balanceAfter: 5,
+        reason: 'ADMIN_GRANT',
+        refType: 'ADMIN',
+        refId: ADMIN,
+        note: 'Welcome bonus',
+      },
     });
     expect(ok(await grant(5, 'grant-key-1'))).toMatchObject({ replayed: true, balance: 5 });
     expect(await grant(7, 'grant-key-1', 'other-hash')).toEqual({ error: 'IDEMPOTENCY_CONFLICT' });
     expect(
-      await one(`select count(*)::int as n from app.credit_ledger where user_id = $1`, [bob]),
+      await one(`select count(*)::int as n from public.credit_ledger where user_id = $1`, [BOB]),
     ).toEqual({ n: 1 });
+    expect(await one(`select credit_balance from app.users where id = $1`, [bob])).toEqual({
+      credit_balance: 5,
+    });
+    expect(
+      await one(
+        `select title, body from public.notifications where user_id = $1 and type = 'CREDITS'`,
+        [BOB],
+      ),
+    ).toEqual({ title: 'Credits added', body: 'GIG added 5 credits. Your balance is 5.' });
 
-    const error = await dbError(db.query(`update app.credit_ledger set delta = 50`));
-    expect(error.message).toContain('append-only');
+    const error = await dbError(db.query(`update public.credit_ledger set delta = 50`));
+    expect(error.message).toContain('CREDIT_LEDGER_APPEND_ONLY');
   });
 
   it('revokes credits but never below zero, and never for yourself', async () => {
     expect(await grant(-10, 'revoke-key-1')).toEqual({ error: 'INSUFFICIENT_CREDITS', balance: 5 });
     expect(ok(await grant(-2, 'revoke-key-2'))).toMatchObject({
       balance: 3,
-      entry: { refType: 'ADMIN_REVOKE' },
+      entry: { reason: 'ADMIN_REVOKE', delta: -2 },
     });
     expect(await grant(1, 'self-key-1', 'h', ADMIN)).toEqual({ error: 'SELF_CHANGE' });
     expect(await grant(1, 'missing-key-1', 'h', randomUUID())).toEqual({ error: 'NOT_FOUND' });
@@ -848,7 +854,7 @@ describe('audit trail', () => {
       ...PAGE,
       filter: { user: BOB, action: ['admin.user.updated'] },
     });
-    expect(aboutBob.items.map((e) => e.metadata.reason)).toEqual([
+    expect(aboutBob.items.map((e) => e.metadata['reason'])).toEqual([
       'Appeal accepted',
       'Spam reviews',
     ]);

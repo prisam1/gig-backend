@@ -17,34 +17,36 @@ import {
   adminRepository,
   isDbError,
   type CreditGrant,
-  type DbResult,
+  type DbFailure,
   type Page,
   type UserDetailRow,
   type UserSearch,
 } from './admin.repository';
-import type {
-  AuditLogsQuery,
-  CompanyInput,
-  DocumentInput,
-  DocumentUploadUrlInput,
-  GrantCreditsInput,
-  IssuerInput,
-  LearnInput,
-  ListCompaniesQuery,
-  ListIssuersAdminQuery,
-  ListKycQuery,
-  ListLearnAdminQuery,
-  ListQuestionsQuery,
-  ListRepresentationsAdminQuery,
-  ListRoadshowsAdminQuery,
-  ListUsersQuery,
-  ModerationDecisionInput,
-  ModerationQueueQuery,
-  ModerationType,
-  RepresentationInput,
-  RepresentationStatusInput,
-  RoadshowInput,
-  UpdateUserInput,
+import {
+  LEARN_REPORTS_BUCKET,
+  type AnswerQuestionInput,
+  type AuditLogsQuery,
+  type CompanyInput,
+  type DocumentInput,
+  type DocumentUploadUrlInput,
+  type GrantCreditsInput,
+  type IssuerInput,
+  type LearnInput,
+  type ListCompaniesQuery,
+  type ListIssuersAdminQuery,
+  type ListKycQuery,
+  type ListLearnAdminQuery,
+  type ListQuestionsQuery,
+  type ListRepresentationsAdminQuery,
+  type ListRoadshowsAdminQuery,
+  type ListUsersQuery,
+  type ModerationDecisionInput,
+  type ModerationQueueQuery,
+  type ModerationType,
+  type RepresentationInput,
+  type RepresentationStatusInput,
+  type RoadshowInput,
+  type UpdateUserInput,
 } from './admin.schemas';
 
 /** Private bucket for petition evidence, submission packs and regulator responses. */
@@ -60,7 +62,7 @@ const DOWNLOAD_URL_TTL_SECONDS = 300;
 const notFound = (what: string) => new HttpError(404, `${what} not found`);
 
 // { error: CODE } results of the app_admin_* functions, as API errors.
-const ERRORS: Record<string, (result: { status?: string; balance?: number }) => HttpError> = {
+const ERRORS: Record<string, (result: DbFailure) => HttpError> = {
   SELF_CHANGE: () =>
     new HttpError(409, 'Staff cannot make this change to their own account', {
       code: 'SELF_CHANGE',
@@ -110,8 +112,8 @@ const ERRORS: Record<string, (result: { status?: string; balance?: number }) => 
 };
 
 /** The value of a successful app_admin_* call; otherwise the matching API error. */
-function unwrap<T>(result: DbResult<T>, what: string): T {
-  if (!isDbError(result)) return result;
+function unwrap<T extends object>(result: T, what: string): Exclude<T, { error: string }> {
+  if (!isDbError(result)) return result as Exclude<T, { error: string }>;
   if (result.error === 'NOT_FOUND') throw notFound(what);
   const error = ERRORS[result.error];
   if (!error) throw new Error(`Unexpected database result: ${result.error}`);
@@ -521,8 +523,9 @@ export const adminRoadshows = {
     return this.get(unwrap(result, 'Roadshow').id);
   },
 
-  async remove(staff: Member, id: string, ctx: ClientContext) {
-    if (!(await adminRepository.deleteRoadshow(staff.userId, id, ctx))) throw notFound('Roadshow');
+  /** "Delete" archives: the roadshow leaves the app; its pool, offers and questions stay. */
+  async archive(staff: Member, id: string, ctx: ClientContext) {
+    if (!(await adminRepository.archiveRoadshow(staff.userId, id, ctx))) throw notFound('Roadshow');
   },
 
   /** Ask Me Anything questions, oldest first; filter by status, category or answered. */
@@ -532,10 +535,19 @@ export const adminRoadshows = {
     return pageOf(page, query);
   },
 
-  /** Publishes the issuer's answer; answering a pending question publishes the question too. */
-  async answer(staff: Member, id: string, questionId: string, answer: string, ctx: ClientContext) {
+  /**
+   * Publishes the issuer's answer and notifies the asker; answering a pending question publishes
+   * the question too. `featured` picks it for the "Top Asked" tab.
+   */
+  async answer(
+    staff: Member,
+    id: string,
+    questionId: string,
+    input: AnswerQuestionInput,
+    ctx: ClientContext,
+  ) {
     return unwrap(
-      await adminRepository.answerQuestion(staff.userId, id, questionId, answer, ctx),
+      await adminRepository.answerQuestion(staff.userId, id, questionId, input, ctx),
       'Question',
     );
   },
@@ -553,6 +565,13 @@ export const adminLearn = {
   },
 
   async save(staff: Member, id: string | null, input: LearnInput, ctx: ClientContext) {
+    // A downloadable report must already be in the private learn-reports bucket.
+    if (
+      input.downloadPath &&
+      !(await filesStorage.exists(LEARN_REPORTS_BUCKET, input.downloadPath))
+    ) {
+      throw validationError({ downloadPath: 'No report has been uploaded at this path' });
+    }
     const saved = unwrap(
       await guarded(() => adminRepository.saveLearn(staff.userId, id, input, ctx)),
       'Learn item',
@@ -560,8 +579,9 @@ export const adminLearn = {
     return this.get(saved.id);
   },
 
-  async remove(staff: Member, id: string, ctx: ClientContext) {
-    if (!(await adminRepository.deleteLearn(staff.userId, id, ctx))) throw notFound('Learn item');
+  /** "Delete" archives: the item leaves the app; its ratings and saves stay. */
+  async archive(staff: Member, id: string, ctx: ClientContext) {
+    if (!(await adminRepository.archiveLearn(staff.userId, id, ctx))) throw notFound('Learn item');
   },
 };
 
