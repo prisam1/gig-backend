@@ -116,10 +116,8 @@ describe('schema and seed', () => {
     );
     const expected = [
       'credit_ledger',
-      'device_tokens',
       'fx_rates',
       'learn_items',
-      'learn_ratings',
       'notifications',
       'pool_members',
       'roadshow_documents',
@@ -326,30 +324,5 @@ describe('roadshow_pool_power', () => {
       [issuer],
     );
     expect(await rows('select * from public.roadshow_pool_power($1)', [empty.id])).toEqual([]);
-  });
-});
-
-describe('learn ratings', () => {
-  it('keeps the item average and count in step with ratings', async () => {
-    const item = (
-      await one<{ id: string }>(`select id from public.learn_items where format = 'VIDEO'`)
-    ).id;
-    const [a, b] = [await newUser(), await newUser()];
-    await db.query(
-      'insert into public.learn_ratings (learn_item_id, user_id, rating) values ($1, $2, 5), ($1, $3, 2)',
-      [item, a, b],
-    );
-    const stats = () =>
-      one<{ rating_avg: number; rating_count: number }>(
-        'select rating_avg, rating_count from public.learn_items where id = $1',
-        [item],
-      );
-    expect(await stats()).toEqual({ rating_avg: 3.5, rating_count: 2 });
-
-    await db.query('update public.learn_ratings set rating = 4 where user_id = $1', [b]);
-    expect(await stats()).toEqual({ rating_avg: 4.5, rating_count: 2 });
-
-    await db.query('delete from public.learn_ratings where learn_item_id = $1', [item]);
-    expect(await stats()).toEqual({ rating_avg: 0, rating_count: 0 });
   });
 });

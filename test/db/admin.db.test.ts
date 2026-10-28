@@ -390,10 +390,12 @@ describe('KYC decisions', () => {
       kyc_status: 'REJECTED',
       requested_tier: 'INSTITUTIONAL',
     });
-    expect(await callDb('app_kyc_latest', { p_user_id: member.id })).toMatchObject({
-      status: 'REJECTED',
-      reason: 'The ID proof is unreadable',
-    });
+    expect(
+      await one(
+        `select status, reason from app.kyc_submissions where user_id = $1 order by created_at desc limit 1`,
+        [member.id],
+      ),
+    ).toEqual({ status: 'REJECTED', reason: 'The ID proof is unreadable' });
     expect((await notifications(member, 'KYC'))[0]?.body).toContain('The ID proof is unreadable');
   });
 

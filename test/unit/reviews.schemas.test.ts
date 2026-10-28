@@ -6,7 +6,6 @@ import {
   EVIDENCE_TYPE_CODES,
   idempotencyHeaders,
   listCompanyReviewsQuery,
-  listMyReviewsQuery,
   submitReviewBody,
   updateResolutionBody,
 } from '../../src/modules/reviews/reviews.schemas';
@@ -387,15 +386,5 @@ describe('company reviews list query', () => {
       false,
     );
     expect(listCompanyReviewsQuery.safeParse({ filter: { colour: 'red' } }).success).toBe(false);
-  });
-});
-
-describe('my reviews list query', () => {
-  it('parses a status filter', () => {
-    expect(listMyReviewsQuery.parse({ status: 'PUBLISHED,PENDING_MODERATION' }).status).toEqual([
-      'PUBLISHED',
-      'PENDING_MODERATION',
-    ]);
-    expect(listMyReviewsQuery.safeParse({ status: 'DRAFT' }).success).toBe(false);
   });
 });

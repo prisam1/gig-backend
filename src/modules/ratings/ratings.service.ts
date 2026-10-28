@@ -16,7 +16,7 @@ import {
   type ScoreDistribution,
   type StoredRating,
 } from './ratings.repository';
-import type { ListIssuersQuery, ListMyRatingsQuery, SubmitRatingInput } from './ratings.schemas';
+import type { ListIssuersQuery, SubmitRatingInput } from './ratings.schemas';
 
 // ---------------------------------------------------------------------------------------------
 // Response shapes
@@ -75,15 +75,6 @@ export interface RatingReceipt {
   factors: { code: string; label: string; flag: RatingFlag }[];
   riskFactors: { code: string; label: string }[];
   rater: { name: string | null; tier: Tier };
-  createdAt: Date;
-}
-
-export interface MyRatingItem {
-  id: string;
-  receiptNo: string;
-  status: RatingStatus;
-  issuer: { id: string; name: string };
-  overallScore: number;
   createdAt: Date;
 }
 
@@ -309,21 +300,4 @@ export const ratingsService = {
     }
   },
 
-  async listMyRatings(
-    user: Member,
-    query: ListMyRatingsQuery,
-  ): Promise<{ items: MyRatingItem[]; meta: PageMeta }> {
-    const { items, total } = await ratingsRepository.findMine(user.userId, query);
-    return {
-      items: items.map((rating) => ({
-        id: rating.publicId,
-        receiptNo: rating.receiptNo,
-        status: rating.status,
-        issuer: rating.issuer,
-        overallScore: rating.overallScore,
-        createdAt: rating.createdAt,
-      })),
-      meta: { page: query.page, pageSize: query.pageSize, total },
-    };
-  },
 };

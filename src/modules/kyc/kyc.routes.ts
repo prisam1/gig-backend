@@ -14,7 +14,3 @@ kycRouter.post('/submissions', async (req, res) => {
   const submission = await kycService.submit(getAuth(req), input, clientContext(req));
   res.status(201).json({ data: submission });
 });
-
-kycRouter.get('/submissions/me', async (req, res) => {
-  res.json({ data: await kycService.getMine(getAuth(req)) });
-});

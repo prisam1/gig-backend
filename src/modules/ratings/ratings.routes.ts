@@ -7,7 +7,6 @@ import { parse } from '../../middleware/validate';
 import {
   issuerIdParams,
   listIssuersQuery,
-  listMyRatingsQuery,
   submitRatingBody,
 } from './ratings.schemas';
 import { ratingsService } from './ratings.service';
@@ -49,15 +48,4 @@ issuersRouter.post('/:id/ratings', requireAuth, requireVerifiedPrive, async (req
   );
   if (replayed) res.set(REPLAYED_HEADER, 'true');
   sendData(res, result, 201);
-});
-
-export const ratingsRouter = Router();
-
-// GET /ratings/me — User: my ratings with moderation status.
-ratingsRouter.get('/me', requireAuth, async (req, res) => {
-  const { items, meta } = await ratingsService.listMyRatings(
-    getAuth(req),
-    parse(listMyRatingsQuery, req.query),
-  );
-  sendPage(res, items, meta);
 });

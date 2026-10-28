@@ -75,23 +75,4 @@ export const kycService = {
       throw error;
     }
   },
-
-  async getMine(user: Member) {
-    const submission = await kycRepository.findLatest(user.userId);
-
-    return {
-      kycStatus: user.kycStatus,
-      tier: user.tier,
-      requestedTier: user.requestedTier,
-      submission: submission && {
-        id: submission.publicId,
-        tier: submission.tier,
-        status: submission.status,
-        rejectionReason: submission.status === 'REJECTED' ? submission.reason : null,
-        submittedAt: submission.submittedAt,
-        reviewedAt: submission.reviewedAt,
-        documents: submission.documents,
-      },
-    };
-  },
 };

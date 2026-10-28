@@ -1,16 +1,8 @@
 import { z } from 'zod';
 import { nameSchema } from '../auth/auth.schemas';
-import {
-  experienceYearsSchema,
-  locationSchema,
-  optionCode,
-  otherJobSchema,
-  PREFERENCE_TYPES,
-  preferencesSchema,
-  tierChoiceSchema,
-} from './onboarding.schemas';
+import { experienceYearsSchema, locationSchema, optionCode, otherJobSchema } from './onboarding.schemas';
 
-// Sign-up step 2 (and later profile edits). Every field is optional, but at least one is required.
+// Profile edits. Every field is optional, but at least one is required.
 export const updateMeSchema = z
   .object({
     name: nameSchema.optional(),
@@ -23,12 +15,6 @@ export const updateMeSchema = z
   })
   .strict()
   .refine((body) => Object.keys(body).length > 0, 'Nothing to update');
-
-export { PREFERENCE_TYPES, preferencesSchema };
-
-export const tierSchema = z.object({ tier: tierChoiceSchema }).strict();
-
-export const userIdParamSchema = z.object({ id: z.uuid('Invalid user ID') });
 
 export const LOOKUP_TYPES = {
   'job-profiles': 'JOB_PROFILE',

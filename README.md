@@ -37,13 +37,13 @@ The server refuses to start if any required variable is missing or invalid.
 
 `npm test` runs the whole suite. It needs no database, no Supabase project and no `.env`: the database tests use PGlite (Postgres in WASM), and the HTTP tests stub sign-in (`authProvider.loadMember`), the repositories, rate limits and the audit log (`test/setup.ts`).
 
-`test/auth.test.ts` checks that every protected route rejects a missing, forged, unsigned (`alg: none`), expired or wrongly signed token, a token for another issuer or audience, and a valid token whose session has ended. `test/users.test.ts`, `test/files.test.ts` and `test/kyc.test.ts` cover public profiles and follows, uploads, and KYC submissions.
+`test/auth.test.ts` checks that every protected route rejects a missing, forged, unsigned (`alg: none`), expired or wrongly signed token, a token for another issuer or audience, and a valid token whose session has ended. `test/files.test.ts` and `test/kyc.test.ts` cover uploads and KYC submissions.
 
 | Folder       | What it tests |
 | ------------ | ------------- |
 | `test/unit/` | Request validation: sign-up, login, OTP and onboarding rules; every review, rating and signing rule from the plan; list filters, compare ids, trend ranges |
-| `test/db/`   | All migrations and the seed in PGlite. The `app_*` functions: sign-up, OTP limits and decoys, sessions, refresh-token theft, password reset, tier, KYC, who may call them, append-only audit log. Ratings and Representations: their repositories call the same `app_*` functions against PGlite (rating and signature transactions, issuer stats, effective petition status, signer names, infected documents, counts). Roadshows and engagement: pool joins and credit spending, question rules, ledger append-only. Catalog and reviews: constraints, review submission and receipt numbers, evidence checks, stats, trends, feed, search, resolution updates |
-| `test/api/`  | Every catalog, review, rating, representation, learn, webinar, saved, credits, notifications and roadshow endpoint through Express: access rules per tier and KYC, response shapes, filters and sorting, idempotency keys, evidence and signature-file errors, 400/401/403/404/409 errors |
+| `test/db/`   | All migrations and the seed in PGlite. The `app_*` functions: sign-up, OTP limits and decoys, sessions, refresh-token theft, password reset, sign-up with onboarding, KYC, who may call them, append-only audit log. Ratings and Representations: their repositories call the same `app_*` functions against PGlite (rating and signature transactions, issuer stats, effective petition status, signer names, infected documents, counts). Roadshows and engagement: pool joins and credit spending, question rules, ledger append-only. Catalog and reviews: constraints, review submission and receipt numbers, evidence checks, stats, trends, feed, search, resolution updates |
+| `test/api/`  | Every catalog, review, rating, representation, learn, webinar, saved, credits and roadshow endpoint through Express: access rules per tier and KYC, response shapes, filters and sorting, idempotency keys, evidence and signature-file errors, 400/401/403/404/409 errors |
 
 ## Project structure
 
@@ -63,8 +63,8 @@ src/
   middleware/             # errors, auth + tier guards, validation, request context
   routes/index.ts         # /api/v1 router; feature routers are mounted here
   modules/                # one folder per feature: *.routes.ts, *.schemas.ts, *.service.ts
-    auth/                 # register, OTP, login, refresh, sessions, password reset
-    users/                # /me profile, avatar, preferences, tier; /users/:id, follows; /lookups
+    auth/                 # register, OTP, login, refresh, logout, password reset
+    users/                # /me profile and avatar; /lookups
     files/                # signed upload URLs for avatars, KYC documents and review evidence
     kyc/                  # KYC submissions and status
     catalog/  reviews/    # companies, trends, compare; review submission and receipts
@@ -138,17 +138,16 @@ Phase 1, plan weeks 3-5.
 
 | Method | Path                    | Access | Purpose                                                                                      |
 | ------ | ----------------------- | ------ | -------------------------------------------------------------------------------------------- |
-| POST   | `/auth/register`        | Public | Sign-up step 1: name, email, phone, password, 18+ confirmation. Sends 2 OTPs                 |
-| POST   | `/auth/otp/send`        | Public | Resend a code `{ challengeId }`, or start `{ purpose: LOGIN \| PASSWORD_RESET, identifier }` |
+| POST   | `/auth/register`        | Public | Name, email, phone, password, 18+ confirmation, `profile`, `preferences`, `tier`. Sends 2 OTPs |
+| POST   | `/auth/otp/send`        | Public | Resend the code of a sign-up or reset challenge `{ challengeId }`                             |
 | POST   | `/auth/otp/verify`      | Public | Verify a 6-digit code. Returns tokens, sign-up progress, or a reset token                    |
 | POST   | `/auth/login`           | Public | Email or phone (`+91…`, `+971…`) + password                                                  |
 | POST   | `/auth/refresh`         | Public | Rotate the refresh token                                                                     |
 | POST   | `/auth/logout`          | User   | End this session                                                                             |
 | POST   | `/auth/password/forgot` | Public | Start a reset by OTP                                                                         |
 | POST   | `/auth/password/reset`  | Public | Set a new password with the reset token; signs out every device                              |
-| GET    | `/auth/sessions`        | User   | Signed-in devices                                                                            |
-| DELETE | `/auth/sessions`        | User   | Sign out every other device                                                                  |
-| DELETE | `/auth/sessions/:id`    | User   | Sign out one device                                                                          |
+
+There is no OTP login: the app signs in with email or phone + password.
 
 ## Users, profile and KYC
 
@@ -156,15 +155,10 @@ Phase 1, plan weeks 5-7. Every route except `/lookups` requires your access toke
 
 | Method        | Path                  | Access | Purpose                                                                                            |
 | ------------- | --------------------- | ------ | -------------------------------------------------------------------------------------------------- |
-| GET           | `/me`                 | User   | Profile, avatar, follower counts, preferences, tier and onboarding progress                        |
-| PATCH         | `/me`                 | User   | Sign-up step 2: experience, job profile (or Others + text), location; name and avatar edits        |
-| PUT           | `/me/preferences`     | User   | Sign-up step 3: 1 focus, 1 risk, 1-3 styles, 1-3 sectors                                           |
-| PUT           | `/me/tier`            | User   | Observer is granted at once; Prive / Institutional wait for KYC. Blocked while KYC is under review |
-| GET           | `/users/:id`          | User   | Public profile (no email, phone or KYC detail) with follower counts                                |
-| POST / DELETE | `/users/:id/follow`   | User   | Follow / unfollow                                                                                  |
+| GET           | `/me`                 | User   | Profile, avatar, follower counts, preferences, tier, KYC status and onboarding progress            |
+| PATCH         | `/me`                 | User   | Edit name, experience, job profile (or Others + text), location and avatar                         |
 | POST          | `/files/upload-url`   | User   | Signed upload URL; PDF/JPG/PNG up to 10 MB. Returns `fileId` and the Storage `path`                |
 | POST          | `/kyc/submissions`    | User   | Submit uploaded documents for the requested tier (+ consent, required for Prive)                   |
-| GET           | `/kyc/submissions/me` | User   | KYC status, latest submission and rejection reason                                                 |
 | GET           | `/lookups/:type`      | Public | `job-profiles`, `investment-focus`, `risk-levels`, `investment-styles`, `investment-sectors`; also `rating-factors`, `risk-factors`, `investor-types` |
 
 **Uploads:** the app asks for a URL with `purpose` (`AVATAR`, `KYC_DOCUMENT` or `REVIEW_EVIDENCE`), `mimeType` and `sizeBytes`, then PUTs the file to `uploadUrl`. Files are stored at `<user public_id>/<random id>.<ext>`, so each user writes only to their own folder. Avatars go to the public `avatars` bucket; KYC documents and review evidence stay private. Use the `fileId` for `PATCH /me` (`avatarFileId`) and KYC documents, and the `path` for review evidence.
@@ -185,7 +179,7 @@ The app keeps steps 1-3 and the tier in memory and calls the API only from the t
 
 Observer is granted at once. Prive and Institutional are recorded as `requestedTier` and granted when staff approve the KYC (`POST /admin/kyc/{id}/approve`).
 
-`profile`, `preferences` and `tier` are optional on register: without them the account is created with just step 1, and `PATCH /me`, `PUT /me/preferences`, `PUT /me/tier` complete it later (also used to edit them). A tier needs `profile` and `preferences` with it.
+`profile`, `preferences` and `tier` are required on register: no screen sets them later. `PATCH /me` edits the profile fields afterwards.
 
 The account only exists once both email and phone are verified. A pending sign-up expires after 1 hour; each code after 5 minutes.
 
@@ -195,15 +189,15 @@ The account only exists once both email and phone are verified. A pending sign-u
 
 - **Passwords:** Argon2id. 8-128 characters with upper, lower, digit and special character. Must not contain the email name or phone number.
 - **OTP:** 6 digits, valid 5 minutes, 5 wrong attempts per code, 45 s resend cooldown, 5 sends per challenge. Codes are stored only as keyed hashes.
-- **Testing without SMS or email:** set `OTP_TEST_CODE=123456` in `.env` and every code is `123456` (sign-up, login and reset). Everything else still applies: expiry, attempt and rate limits, and decoys for unknown addresses never verify. The server refuses to start with it in production, and logs a warning when it is on.
-- **No account discovery:** register, OTP login and forgot-password respond the same whether or not the email or phone is registered. Login has a single "incorrect email/phone or password" error and equal timing.
+- **Testing without SMS or email:** set `OTP_TEST_CODE=123456` in `.env` and every code is `123456` (sign-up and reset). Everything else still applies: expiry, attempt and rate limits, and decoys for unknown addresses never verify. The server refuses to start with it in production, and logs a warning when it is on.
+- **No account discovery:** register and forgot-password respond the same whether or not the email or phone is registered. Login has a single "incorrect email/phone or password" error and equal timing.
 - **Rate limits** (shared across instances, in Postgres):
   - per IP on every auth route
   - 5 codes per email or phone per hour
   - 5 failed logins per email or phone per 15 minutes, applied whether or not the account exists
 - **Tokens:** 15-minute access JWT (HS256, issuer and audience checked). The 30-day refresh token is rotated on every use, and every session ends after 90 days at most. Reusing an old refresh token revokes that session. Every authenticated request also checks the session in the database, so logout, password reset and suspension apply immediately.
 - **PII:** email and phone are encrypted with AES-256-GCM. Lookups use HMAC-SHA256 hashes.
-- **Audit log:** registrations, logins (including failures), OTP failures, token reuse, logouts, session revokes, password resets and onboarding changes. The table rejects updates and deletes.
+- **Audit log:** registrations, logins (including failures), OTP failures, token reuse, logouts, password resets and onboarding changes. The table rejects updates and deletes.
 - **Requests:** unknown body fields are rejected, bodies are capped at 100 KB, and auth responses are sent with `Cache-Control: no-store`.
 
 ### Changes needed in the mobile app
@@ -230,8 +224,6 @@ The account only exists once both email and phone are verified. A pending sign-u
 | GET    | `/companies/:id/trends?range=12M` | Full   | Monthly overall-satisfaction and positive-sentiment series. `range` is `12M`, `24M` or `ALL`                                     |
 | GET    | `/companies/:id/reviews`          | Public | Published reviews (see below)                                                                                                    |
 | POST   | `/reviews`                        | Prive  | Submit a review. Needs `Idempotency-Key`. Returns the full receipt (`receiptNo`, reviewer, company, status `PENDING_MODERATION`) |
-| GET    | `/reviews/me`                     | User   | My reviews. Optional `?status=` filter                                                                                           |
-| GET    | `/reviews/:id`                    | User   | Owner: the full receipt with evidence and status timeline. Others: the published review                                          |
 | PATCH  | `/reviews/:id/resolution`         | Prive  | Reviewer only: `resolutionStatus` and `followUpNote` (omit to keep it, `null` to clear it)                                       |
 
 **`GET /companies`**
@@ -307,7 +299,6 @@ Idempotency-Key: 7d0f6c2e-1b7a-4f0e-9a51-3f1c2b9e8a10
 | GET    | `/issuers/:id`                | Public | Offer details                                                                                    |
 | GET    | `/issuers/:id/rating-summary` | Public | Average score and count. Full members also get the weighted score and full breakdown             |
 | POST   | `/issuers/:id/ratings`        | Prive  | Submit a rating. Needs `Idempotency-Key`. Returns the receipt (`GIG-RT-YYYY-NNNNNN`)             |
-| GET    | `/ratings/me`                 | User   | My ratings. Optional `?status=` filter                                                           |
 
 - `sort` is `recent`, `closing_soon`, `top_rated` or `most_rated`.
 - A rating is `{ overallScore, factors, riskFactors }`:
@@ -363,24 +354,22 @@ Tables (private `app` schema): `representations`, `representation_signatures`, `
 | `signedSignature`, `Goal`, `closeIn`, `totalSignature`                                                                             | `signatureCount`, `goal`, `daysLeft`, `progressPercent`      |
 | Petition opened without an id                                                                                                      | Petition `id` in the URL                                     |
 
-## Learn, saved items, credits and notifications
+## Learn, saved items and credits
 
 | Method | Path                      | Access | Purpose                                                                                       |
 | ------ | ------------------------- | ------ | --------------------------------------------------------------------------------------------- |
 | GET    | `/learn`                  | Public | Content list. `q`, `sort` (`recent`, `top_rated`), `filter[format]`, `[category]`, `[access]` |
-| GET    | `/learn/:id`              | Public | `contentUrl` (null when `locked`), report `download` (Full only), `myRating`                  |
-| POST   | `/learn/:id/rating`       | User   | `{ rating: 1-5 }`; rating again replaces it. Returns the new average and count                |
+| GET    | `/learn/:id`              | Public | `contentUrl` (null when `locked`), report `download` (Full only)                              |
 | GET    | `/webinars?when=upcoming` | User   | `upcoming` (incl. live) or `past`; `joinUrl` for registered members, delayed recordings       |
 | POST   | `/webinars/:id/register`  | User   | Register; PREMIUM webinars need Full access                                                   |
 | GET    | `/me/saved?type=COMPANY`  | User   | Saved items, newest first, each with a `{ name, subtitle, imageUrl }` summary                 |
 | POST   | `/me/saved`               | User   | `{ type, id }`; `type` is `COMPANY`, `ISSUER`, `ROADSHOW` or `LEARN_ITEM`                     |
 | DELETE | `/me/saved/:type/:id`     | User   | Remove a saved item                                                                           |
 | GET    | `/me/credits`             | User   | `{ balance, entries }` with the ledger paged in `meta`                                        |
-| GET    | `/me/notifications`       | User   | Inbox; `?unread=true`; `meta.unread` is the badge count                                       |
-| POST   | `/me/notifications/read`  | User   | `{ ids?: [...] }`; omit `ids` to mark all read                                                |
-| POST   | `/me/devices`             | User   | `{ token, platform: IOS / ANDROID / WEB, appVersion? }` push token                            |
 
 PREMIUM learn content and webinars are for Full members; others see them with `locked: true`. Report downloads are 5-minute signed URLs from the private `learn-reports` bucket.
+
+**Notifications.** Admin decisions (KYC, moderation, membership changes), credit grants, answered questions and Pool joins write to `public.notifications`. The app has no inbox screen yet, so there is no endpoint to read them; add one with the screen.
 
 **Credits.** `credit_ledger` is append-only (updates and deletes are refused by a trigger); `app.users.credit_balance` caches the sum and can never go below 0. Every change goes through `public.apply_credit_change`. Staff grant and revoke credits with `POST /admin/credits/grant`.
 

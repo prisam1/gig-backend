@@ -11,18 +11,14 @@ import { creditsRouter } from '../../src/modules/credits/credits.routes';
 import { filesRouter } from '../../src/modules/files/files.routes';
 import { kycRouter } from '../../src/modules/kyc/kyc.routes';
 import { learnRouter } from '../../src/modules/learn/learn.routes';
-import {
-  devicesRouter,
-  notificationsRouter,
-} from '../../src/modules/notifications/notifications.routes';
-import { issuersRouter, ratingsRouter } from '../../src/modules/ratings/ratings.routes';
+import { issuersRouter } from '../../src/modules/ratings/ratings.routes';
 import { representationsRouter } from '../../src/modules/representations/representations.routes';
 import { reviewsRouter } from '../../src/modules/reviews/reviews.routes';
 import { roadshowsRouter } from '../../src/modules/roadshows/roadshows.routes';
 import { savedRouter } from '../../src/modules/saved/saved.routes';
 import { topRatedRouter } from '../../src/modules/topRated/topRated.routes';
 import { lookupsRouter } from '../../src/modules/users/lookups.routes';
-import { meRouter, usersRouter } from '../../src/modules/users/users.routes';
+import { meRouter } from '../../src/modules/users/users.routes';
 import { webinarsRouter } from '../../src/modules/webinars/webinars.routes';
 import { router } from '../../src/routes';
 import { fake } from '../helpers/fakeSupabase';
@@ -47,17 +43,13 @@ const MOUNTS = new Map<Router, string>([
   [authRouter, '/auth'],
   [savedRouter, '/me/saved'],
   [creditsRouter, '/me/credits'],
-  [notificationsRouter, '/me/notifications'],
-  [devicesRouter, '/me/devices'],
   [meRouter, '/me'],
-  [usersRouter, '/users'],
   [filesRouter, '/files'],
   [kycRouter, '/kyc'],
   [lookupsRouter, '/lookups'],
   [companiesRouter, '/companies'],
   [reviewsRouter, '/reviews'],
   [issuersRouter, '/issuers'],
-  [ratingsRouter, '/ratings'],
   [representationsRouter, '/representations'],
   [learnRouter, '/learn'],
   [webinarsRouter, '/webinars'],

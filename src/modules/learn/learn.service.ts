@@ -31,14 +31,6 @@ export interface LearnDetail extends LearnCard {
   contentUrl: string | null;
   /** 5-minute download URL for Full members; null otherwise or when there is no report. */
   download: (SignedDownload & { fileName: string }) | null;
-  /** The signed-in member's own rating, if any. */
-  myRating: number | null;
-}
-
-export interface LearnRatingResult {
-  rating: number;
-  average: number;
-  count: number;
 }
 
 type LearnRow = Tables<'learn_items'>;
@@ -116,18 +108,6 @@ async function findPublishedItem(id: string): Promise<LearnRow> {
   return row;
 }
 
-async function findOwnRating(itemId: string, user: AuthUser): Promise<number | null> {
-  const row = unwrap(
-    await supabaseAdmin
-      .from('learn_ratings')
-      .select('rating')
-      .eq('learn_item_id', itemId)
-      .eq('user_id', user.id)
-      .maybeSingle(),
-  );
-  return row?.rating ?? null;
-}
-
 /** Reports are downloadable by Full members only. */
 async function reportDownload(
   row: LearnRow,
@@ -142,42 +122,6 @@ async function reportDownload(
 export async function getLearnItem(id: string, user: AuthUser | undefined): Promise<LearnDetail> {
   const row = await findPublishedItem(id);
   const card = toCard(row, user);
-  const [download, myRating] = await Promise.all([
-    reportDownload(row, user),
-    user ? findOwnRating(id, user) : null,
-  ]);
-
-  return { ...card, contentUrl: card.locked ? null : row.content_url, download, myRating };
-}
-
-/** Rates (or re-rates) content the member can open. */
-export async function rateLearnItem(
-  id: string,
-  user: AuthUser,
-  rating: number,
-): Promise<LearnRatingResult> {
-  const item = await findPublishedItem(id);
-  if (isLocked(item, user)) {
-    throw new HttpError(403, 'Available to verified Prive and Institutional members', {
-      code: 'PREMIUM_CONTENT',
-    });
-  }
-
-  unwrap(
-    await supabaseAdmin
-      .from('learn_ratings')
-      .upsert(
-        { learn_item_id: id, user_id: user.id, rating },
-        { onConflict: 'learn_item_id,user_id' },
-      ),
-  );
-  // A trigger has refreshed the item's average and count.
-  const stats = unwrap(
-    await supabaseAdmin
-      .from('learn_items')
-      .select('rating_avg, rating_count')
-      .eq('id', id)
-      .single(),
-  );
-  return { rating, average: stats.rating_avg, count: stats.rating_count };
+  const download = await reportDownload(row, user);
+  return { ...card, contentUrl: card.locked ? null : row.content_url, download };
 }

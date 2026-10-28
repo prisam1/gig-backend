@@ -1,7 +1,7 @@
 import { env } from '../config/env';
 
 export type Channel = 'EMAIL' | 'PHONE';
-export type OtpPurpose = 'SIGNUP' | 'LOGIN' | 'PASSWORD_RESET';
+export type OtpPurpose = 'SIGNUP' | 'PASSWORD_RESET';
 export type Notice = 'ACCOUNT_EXISTS' | 'PASSWORD_CHANGED';
 
 interface Delivery {

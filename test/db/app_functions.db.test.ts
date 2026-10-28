@@ -173,7 +173,7 @@ describe('OTP guessing', () => {
     const { userId } = await signUp('attempts');
     expect(userId).toBeDefined();
     const c = challenge();
-    await call('app_otp_start', 'LOGIN', 'EMAIL', 'email-attempts', c, 300, CTX);
+    await call('app_otp_start', 'PASSWORD_RESET', 'EMAIL', 'email-attempts', c, 300, CTX);
     for (let i = 0; i < 5; i++) await verify(c, 'wrong');
     expect(await verify(c)).toEqual({ error: 'OTP_ATTEMPTS_EXCEEDED' });
   });
@@ -182,30 +182,40 @@ describe('OTP guessing', () => {
     await signUp('limit');
     const limits = [{ key: `otp-verify:${randomUUID()}`, max: 2, window: 3600 }];
     const first = challenge();
-    await call('app_otp_start', 'LOGIN', 'EMAIL', 'email-limit', first, 300, CTX);
+    await call('app_otp_start', 'PASSWORD_RESET', 'EMAIL', 'email-limit', first, 300, CTX);
     await verify(first, 'wrong', limits);
     await verify(first, 'wrong', limits);
 
     const second = challenge();
-    await call('app_otp_start', 'LOGIN', 'EMAIL', 'email-limit', second, 300, CTX);
+    await call('app_otp_start', 'PASSWORD_RESET', 'EMAIL', 'email-limit', second, 300, CTX);
     expect(await verify(second, second.codeHash, limits)).toMatchObject({ error: 'RATE_LIMITED' });
   });
 
-  it('keeps only the newest login code for an address valid', async () => {
+  it('keeps only the newest reset code for an address valid', async () => {
     await signUp('newest');
     const older = challenge();
     const newer = challenge();
-    await call('app_otp_start', 'LOGIN', 'EMAIL', 'email-newest', older, 300, CTX);
-    await call('app_otp_start', 'LOGIN', 'EMAIL', 'email-newest', newer, 300, CTX);
+    await call('app_otp_start', 'PASSWORD_RESET', 'EMAIL', 'email-newest', older, 300, CTX);
+    await call('app_otp_start', 'PASSWORD_RESET', 'EMAIL', 'email-newest', newer, 300, CTX);
 
     expect(await verify(older)).toEqual({ error: 'OTP_EXPIRED' });
-    expect(await verify(newer)).toMatchObject({ status: 'COMPLETED' });
+    expect(await verify(newer)).toEqual({ status: 'RESET_TOKEN_ISSUED' });
   });
 
-  it('starts a decoy login for an unknown address without revealing it', async () => {
+  it('starts a decoy reset for an unknown address without revealing it', async () => {
     const c = challenge();
-    expect(await call('app_otp_start', 'LOGIN', 'EMAIL', 'email-nobody', c, 300, CTX)).toEqual({ userExists: false });
+    expect(await call('app_otp_start', 'PASSWORD_RESET', 'EMAIL', 'email-nobody', c, 300, CTX)).toEqual({ userExists: false });
     expect(await verify(c)).toMatchObject({ error: 'OTP_INCORRECT' });
+  });
+
+  it('has no OTP login: only sign-up and password-reset challenges exist', async () => {
+    await signUp('no-otp-login');
+    await expect(call('app_otp_start', 'LOGIN', 'EMAIL', 'email-no-otp-login', challenge(), 300, CTX)).rejects.toThrow(/invalid purpose/);
+    await expect(db.query(
+      `insert into app.otp_challenges (public_id, purpose, channel, destination_hash, is_decoy, code_hash, expires_at)
+       values ($1, 'LOGIN', 'EMAIL', 'x', true, 'y', now() + interval '5 minutes')`,
+      [randomUUID()],
+    )).rejects.toThrow(/otp_challenges_purpose_check/);
   });
 });
 
@@ -235,14 +245,6 @@ describe('sessions', () => {
     });
     expect(await call('app_refresh', s.publicId, 'refresh-2', 'refresh-4', 30, CTX)).toEqual({ error: 'INVALID' });
     expect(await call('app_member', userPublicId, s.publicId)).toBeNull();
-  });
-
-  it('lets a user revoke only their own sessions', async () => {
-    const a = await signUp('revoke-a');
-    const b = await signUp('revoke-b');
-    expect(await call('app_revoke_session', a.userId, b.session.publicId, CTX)).toBe(false);
-    expect(await call('app_member', b.userPublicId, b.session.publicId)).not.toBeNull();
-    expect(await call('app_revoke_session', a.userId, a.session.publicId, CTX)).toBe(true);
   });
 
   it('creates a session after a correct password, and not for a suspended account', async () => {
@@ -277,15 +279,13 @@ describe('password reset', () => {
   });
 });
 
-describe('profile, tier and KYC', () => {
+describe('profile and KYC', () => {
   async function firstCode(type: string): Promise<string> {
     return (await one<{ code: string }>(`select code from app.lookup_options where type = $1 and code <> 'OTHERS' order by sort_order limit 1`, [type])).code;
   }
 
-  it('enforces the onboarding rules before a tier can be chosen', async () => {
+  it("validates profile edits and keeps one open KYC submission of the user's own files", async () => {
     const { userId } = await signUp('tier');
-    expect(await call('app_select_tier', userId, 'PRIVE', CTX)).toEqual({ error: 'ONBOARDING_INCOMPLETE' });
-
     expect(await call('app_update_profile', userId, { jobProfile: 'NOT_A_JOB' }, CTX)).toEqual({
       fields: { jobProfile: 'Unknown option: NOT_A_JOB' },
     });
@@ -298,23 +298,8 @@ describe('profile, tier and KYC', () => {
     });
     expect(await call('app_update_profile', userId, { jobProfile: job, experienceYears: 5, location: 'Mumbai' }, CTX)).toEqual({ ok: true });
 
-    const groups = await Promise.all(
-      (['INVESTMENT_FOCUS', 'RISK_LEVEL', 'INVESTMENT_STYLE', 'INVESTMENT_SECTOR'] as const).map(async (type, i) => ({
-        type, field: ['focus', 'risk', 'style', 'sector'][i], codes: [await firstCode(type)],
-      })),
-    );
-    expect(await call('app_set_preferences', userId, [{ ...groups[0], codes: ['NOPE'] }, ...groups.slice(1)], CTX)).toEqual({
-      fields: { focus: 'Unknown option: NOPE' },
-    });
-    expect(await call('app_set_preferences', userId, groups, CTX)).toEqual({ ok: true });
-
-    // Prive is only requested; the tier itself changes when KYC is approved.
-    expect(await call('app_select_tier', userId, 'PRIVE', CTX)).toEqual({ ok: true, requestedTier: 'PRIVE' });
-    expect(await one(`select tier, requested_tier from app.users where id = $1`, [userId])).toEqual({
-      tier: 'OBSERVER', requested_tier: 'PRIVE',
-    });
-
-    // KYC: one open submission, the user's own KYC files only, tier locked while under review.
+    // KYC for the tier chosen at sign-up: one open submission, the user's own KYC files only.
+    await db.query(`update app.users set requested_tier = 'PRIVE' where id = $1`, [userId]);
     const own = await call<{ id: string; publicId: string }>('app_create_file', userId, 'KYC_DOCUMENT', 'kyc-documents', `${randomUUID()}/id.pdf`, 'application/pdf', 1000);
     const avatar = await call<{ id: string }>('app_create_file', userId, 'AVATAR', 'avatars', `${randomUUID()}/a.png`, 'image/png', 1000);
     const stranger = await signUp('kyc-stranger');
@@ -329,10 +314,11 @@ describe('profile, tier and KYC', () => {
     expect(await one(`select count(*)::int as n from app.consents where user_id = $1 and type = 'KYC'`, [userId])).toEqual({ n: 1 });
     await expect(call('app_kyc_submit', userId, 'PRIVE', [{ fileId: own.id, documentType: 'ID_PROOF' }], null, CTX)).rejects.toThrow(/duplicate key|unique/);
 
-    expect(await call('app_select_tier', userId, 'INSTITUTIONAL', CTX)).toEqual({ error: 'KYC_PENDING' });
-    expect(await call('app_kyc_latest', userId)).toMatchObject({
-      publicId: submissionId, status: 'PENDING', documents: [{ fileId: own.publicId, documentType: 'ID_PROOF' }],
-    });
+    expect(await one(
+      `select s.status, d.file_id::text as file_id, d.document_type from app.kyc_submissions s
+       join app.kyc_documents d on d.submission_id = s.id where s.public_id = $1`,
+      [submissionId],
+    )).toEqual({ status: 'PENDING', file_id: own.id, document_type: 'ID_PROOF' });
 
     // Avatars must be the user's own AVATAR upload.
     expect(await call('app_update_profile', userId, { avatarFileId: foreign.id }, CTX)).toEqual({
@@ -390,8 +376,6 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
       tier: 'OBSERVER', requested_tier: 'PRIVE', tier_selected: true,
       experience_years: 5, location: 'Mumbai', has_job: true, preference_types: 4, history: 1,
     });
-    // Onboarding is complete, so KYC can follow straight away.
-    expect(await call('app_select_tier', userId, 'PRIVE', CTX)).toEqual({ ok: true, requestedTier: 'PRIVE' });
   });
 
   it('grants Observer at once', async () => {
@@ -415,7 +399,7 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
     expect(await one(`select count(*)::int as n from app.signup_requests where email_hash like 'email-bad-%'`)).toEqual({ n: 0 });
   });
 
-  it('still works without onboarding data (steps 2-3 later through /me)', async () => {
+  it('stores no onboarding when none is sent (the API always sends it)', async () => {
     const email = challenge();
     const phone = challenge();
     await start('no-onboarding', undefined, email, phone);

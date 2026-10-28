@@ -4,7 +4,7 @@ import { audit } from '../../lib/audit';
 import { decrypt, encrypt, keyedHash, randomToken, sha256 } from '../../lib/crypto';
 import { callDb } from '../../lib/db';
 import type { DbResult } from '../../lib/dbFunctions';
-import { maskDestination, sendNotice, sendOtp, type Channel, type OtpPurpose } from '../../lib/notifier';
+import { maskDestination, sendNotice, sendOtp, type Channel } from '../../lib/notifier';
 import { burnPasswordCheck, hashPassword, verifyPassword } from '../../lib/password';
 import { LIMITS, consume, limitArg, reset, tooMany } from '../../lib/rateLimit';
 import type { AuthContext } from '../../middleware/auth';
@@ -89,13 +89,6 @@ export async function register(input: z.infer<typeof registerSchema>, ctx: Clien
   await consume(LIMITS.otpSendPerDestination, eHash);
   await consume(LIMITS.otpSendPerDestination, pHash);
 
-  // Steps 2-3 and the tier, when the app sends them with step 1 (its OTP screen comes last).
-  const onboarding = {
-    ...(input.profile && { profile: input.profile }),
-    ...(input.preferences && { preferences: input.preferences }),
-    ...(input.tier && { tier: input.tier }),
-  };
-
   const email = issueCode();
   const phone = issueCode();
   const started = await callDb(
@@ -111,7 +104,8 @@ export async function register(input: z.infer<typeof registerSchema>, ctx: Clien
         passwordHash: await hashPassword(input.password),
         ttlSeconds: SIGNUP_TTL_SECONDS,
         otpTtlSeconds: OTP_TTL_SECONDS,
-        ...(Object.keys(onboarding).length > 0 && { onboarding }),
+        // Steps 2-3 and the tier (the app's OTP screen comes after its tier screen).
+        onboarding: { profile: input.profile, preferences: input.preferences, tier: input.tier },
       },
       p_email_challenge: email.stored,
       p_phone_challenge: phone.stored,
@@ -138,38 +132,33 @@ export async function register(input: z.infer<typeof registerSchema>, ctx: Clien
 }
 
 // ---------------------------------------------------------------------------------------------
-// POST /auth/otp/send: resend a code for an existing challenge, or start a login / reset one.
+// POST /auth/otp/send: resend the code of an existing sign-up or password-reset challenge.
 // ---------------------------------------------------------------------------------------------
 export async function sendOtpRequest(input: z.infer<typeof otpSendSchema>, ctx: ClientContext) {
   await consume(LIMITS.otpSendPerIp, ctx.ip);
-  if ('challengeId' in input) return resendChallenge(input.challengeId);
-  return startChallenge(input.purpose, input.identifier, ctx);
+  return resendChallenge(input.challengeId);
 }
 
-// Unknown and suspended accounts get a decoy challenge, so the response never reveals whether
-// an email or phone is registered. Only the newest code per address and purpose works.
-export async function startChallenge(purpose: Exclude<OtpPurpose, 'SIGNUP'>, identifier: Identifier, ctx: ClientContext) {
+// POST /auth/password/forgot: limited per IP like /auth/otp/send, so one machine cannot request
+// reset codes for many accounts. Unknown and suspended accounts get a decoy challenge, so the
+// response never reveals whether an email or phone is registered. Only the newest code per
+// address works.
+export async function forgotPassword(identifier: Identifier, ctx: ClientContext) {
+  await consume(LIMITS.otpSendPerIp, ctx.ip);
   const destinationHash = identifierHash(identifier);
   await consume(LIMITS.otpSendPerDestination, destinationHash);
 
   const challenge = issueCode();
   const { userExists } = await callDb('app_otp_start', {
-    p_purpose: purpose,
+    p_purpose: 'PASSWORD_RESET',
     p_channel: identifier.channel,
     p_destination_hash: destinationHash,
     p_challenge: challenge.stored,
     p_ttl_seconds: OTP_TTL_SECONDS,
     p_ctx: ctx,
   });
-  if (userExists) sendOtp(identifier.channel, identifier.value, challenge.code, purpose);
+  if (userExists) sendOtp(identifier.channel, identifier.value, challenge.code, 'PASSWORD_RESET');
   return challengeView(challenge.publicId, identifier.channel, maskDestination(identifier.channel, identifier.value));
-}
-
-// POST /auth/password/forgot: limited per IP like /auth/otp/send, so one machine cannot request
-// reset codes for many accounts.
-export async function forgotPassword(identifier: Identifier, ctx: ClientContext) {
-  await consume(LIMITS.otpSendPerIp, ctx.ip);
-  return startChallenge('PASSWORD_RESET', identifier, ctx);
 }
 
 // The keyed hash of the address a challenge belongs to, for per-address limits.
@@ -332,27 +321,6 @@ export async function refresh(input: z.infer<typeof refreshSchema>, ctx: ClientC
 // ---------------------------------------------------------------------------------------------
 export async function logout(auth: AuthContext, ctx: ClientContext) {
   await callDb('app_logout', { p_user_id: auth.userId, p_session_id: auth.sessionId, p_ctx: ctx });
-}
-
-export async function listSessions(auth: AuthContext) {
-  const rows = await callDb('app_list_sessions', { p_user_id: auth.userId });
-  return rows.map((r) => ({
-    ...r,
-    current: r.id === auth.sessionPublicId,
-  }));
-}
-
-export async function revokeSession(auth: AuthContext, sessionPublicId: string, ctx: ClientContext) {
-  const revoked = await callDb('app_revoke_session', {
-    p_user_id: auth.userId,
-    p_session_public_id: sessionPublicId,
-    p_ctx: ctx,
-  });
-  if (!revoked) throw new AppError(404, 'SESSION_NOT_FOUND', 'Session not found');
-}
-
-export async function revokeOtherSessions(auth: AuthContext, ctx: ClientContext) {
-  await callDb('app_revoke_other_sessions', { p_user_id: auth.userId, p_keep_session_id: auth.sessionId, p_ctx: ctx });
 }
 
 // ---------------------------------------------------------------------------------------------

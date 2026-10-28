@@ -61,7 +61,7 @@ describe('declared functions match the database', () => {
 });
 
 describe('real results pass the declared result shapes', () => {
-  it('sign-up, sessions, profile, tier, files and KYC', async () => {
+  it('sign-up with onboarding, sessions, profile, files and KYC', async () => {
     expect(await callDb('app_ping', {})).toBe(true);
     await callDb('app_purge_expired', {});
     expect(await callDb('app_rate_limit_hit', { p_key: `k:${randomUUID()}`, p_max: 5, p_window_seconds: 60 })).toEqual({
@@ -70,13 +70,26 @@ describe('real results pass the declared result shapes', () => {
     });
     await callDb('app_audit', { p_ctx: CTX, p_action: 'contract.test', p_user_id: null, p_metadata: {} });
 
-    // Sign-up: both codes verified creates the account and a session.
+    // Sign-up with the professional and investment details and the tier: both codes verified
+    // creates the account, its profile and preferences, and a session.
+    const option = async (type: string) => (await callDb('app_list_options', { p_type: type })).find((o) => o.code !== 'OTHERS')!.code;
+    const onboarding = {
+      profile: { experienceYears: 4, jobProfile: await option('JOB_PROFILE'), location: 'Pune' },
+      preferences: {
+        focus: [await option('INVESTMENT_FOCUS')],
+        risk: [await option('RISK_LEVEL')],
+        style: [await option('INVESTMENT_STYLE')],
+        sector: [await option('INVESTMENT_SECTOR')],
+      },
+      tier: 'PRIVE' as const,
+    };
     const email = code();
     const phone = code();
     const started = await callDb('app_signup_start', {
       p_signup: {
         name: 'Contract User', emailEnc: 'enc-e', emailHash: 'contract-email', countryCode: '+91',
         phoneEnc: 'enc-p', phoneHash: 'contract-phone', passwordHash: 'argon', ttlSeconds: 3600, otpTtlSeconds: 300,
+        onboarding,
       },
       p_email_challenge: email,
       p_phone_challenge: phone,
@@ -99,9 +112,7 @@ describe('real results pass the declared result shapes', () => {
     const userId = done.userId;
 
     const member = await callDb('app_member', { p_user_public_id: done.userPublicId, p_session_public_id: first.publicId });
-    expect(member).toMatchObject({ userId, tier: 'OBSERVER', requestedTier: null, fullName: 'Contract User' });
-    const sessions = await callDb('app_list_sessions', { p_user_id: userId });
-    expect(sessions[0]?.createdAt).toBeInstanceOf(Date);
+    expect(member).toMatchObject({ userId, tier: 'OBSERVER', requestedTier: 'PRIVE', fullName: 'Contract User' });
 
     // Login, refresh, OTP and reset.
     expect(await callDb('app_login_lookup', { p_channel: 'EMAIL', p_id_hash: 'contract-email' })).toMatchObject({ userId, status: 'ACTIVE' });
@@ -130,27 +141,11 @@ describe('real results pass the declared result shapes', () => {
     expect(await callDb('app_reset_lookup', { p_token_hash: `reset:${resetCode.publicId}` })).toMatchObject({ userId });
     expect(await callDb('app_reset_complete', { p_token_hash: `reset:${resetCode.publicId}`, p_password_hash: 'new', p_ctx: CTX })).toEqual({ ok: true });
 
-    // Profile, preferences, tier.
-    const option = async (type: string) => (await callDb('app_list_options', { p_type: type })).find((o) => o.code !== 'OTHERS')!.code;
-    expect(await callDb('app_update_profile', {
-      p_user_id: userId, p_changes: { jobProfile: await option('JOB_PROFILE'), experienceYears: 4, location: 'Pune' }, p_ctx: CTX,
-    })).toEqual({ ok: true });
-    expect(await callDb('app_set_preferences', {
-      p_user_id: userId,
-      p_groups: [
-        { type: 'INVESTMENT_FOCUS', field: 'focus', codes: [await option('INVESTMENT_FOCUS')] },
-        { type: 'RISK_LEVEL', field: 'risk', codes: [await option('RISK_LEVEL')] },
-        { type: 'INVESTMENT_STYLE', field: 'style', codes: [await option('INVESTMENT_STYLE')] },
-        { type: 'INVESTMENT_SECTOR', field: 'sector', codes: [await option('INVESTMENT_SECTOR')] },
-      ],
-      p_ctx: CTX,
-    })).toEqual({ ok: true });
-    expect(await callDb('app_select_tier', { p_user_id: userId, p_tier: 'PRIVE', p_ctx: CTX })).toEqual({ ok: true, requestedTier: 'PRIVE' });
+    // Profile.
+    expect(await callDb('app_update_profile', { p_user_id: userId, p_changes: { location: 'Mumbai' }, p_ctx: CTX })).toEqual({ ok: true });
     const me = await callDb('app_get_user', { p_user_id: userId });
-    expect(me).toMatchObject({ tier: 'OBSERVER', requestedTier: 'PRIVE', experienceYears: 4, followers: 0 });
+    expect(me).toMatchObject({ tier: 'OBSERVER', requestedTier: 'PRIVE', experienceYears: 4, location: 'Mumbai', followers: 0 });
     expect(me?.preferences).toHaveLength(4);
-    expect(await callDb('app_public_user', { p_public_id: done.userPublicId })).toMatchObject({ id: userId, createdAt: expect.any(Date) });
-    expect(await callDb('app_count_follows', { p_user_id: userId })).toEqual({ followers: 0, following: 0 });
 
     // Files and KYC.
     const file = await callDb('app_create_file', {
@@ -158,18 +153,11 @@ describe('real results pass the declared result shapes', () => {
       p_mime_type: 'application/pdf', p_size_bytes: 2048,
     });
     expect(await callDb('app_find_owned_files', { p_owner_id: userId, p_public_ids: [file.publicId] })).toEqual([file]);
-    const submission = await callDb('app_kyc_submit', {
+    expect(await callDb('app_kyc_submit', {
       p_user_id: userId, p_tier: 'PRIVE', p_documents: [{ fileId: file.id, documentType: 'ID_PROOF' }], p_consent_version: '2026-10', p_ctx: CTX,
-    });
-    expect(await callDb('app_kyc_latest', { p_user_id: userId })).toMatchObject({
-      publicId: submission, status: 'PENDING', submittedAt: expect.any(Date), reviewedAt: null,
-    });
+    })).toEqual(expect.any(String));
 
-    // Session management.
-    const other = session();
-    await callDb('app_login_complete', { p_user_id: userId, p_session: other, p_ctx: CTX });
-    expect(await callDb('app_revoke_session', { p_user_id: userId, p_session_public_id: other.publicId, p_ctx: CTX })).toBe(true);
-    await callDb('app_revoke_other_sessions', { p_user_id: userId, p_keep_session_id: member!.sessionId, p_ctx: CTX });
+    // Logout.
     await callDb('app_logout', { p_user_id: userId, p_session_id: member!.sessionId, p_ctx: CTX });
     await callDb('app_rate_limit_reset', { p_keys: ['none'] });
   });

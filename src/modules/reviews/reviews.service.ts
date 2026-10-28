@@ -12,7 +12,6 @@ import { accessLevel, assertCompanyExists } from '../catalog/catalog.service';
 import {
   DECLARATIONS_VERSION,
   type ListCompanyReviewsQuery,
-  type ListMyReviewsQuery,
   type ReviewSort,
   type SubmitReviewInput,
   type UpdateResolutionInput,
@@ -126,18 +125,6 @@ export interface ReviewReceipt {
   createdAt: string;
   updatedAt: string;
   publishedAt: string | null;
-}
-
-export interface MyReviewItem {
-  id: string;
-  receiptNo: string;
-  status: Enums<'review_status'>;
-  company: { id: string; name: string };
-  sentiment: Enums<'sentiment'>;
-  avgRating: number;
-  resolutionStatus: Enums<'resolution_status'>;
-  createdAt: string;
-  updatedAt: string;
 }
 
 export interface ResolutionUpdate {
@@ -549,55 +536,6 @@ export async function listCompanyReviews(
   return { items: data.map((row) => toPublicReview(row, access)), meta };
 }
 
-export async function listMyReviews(
-  user: AuthUser,
-  query: ListMyReviewsQuery,
-): Promise<{ items: MyReviewItem[]; meta: PageMeta }> {
-  const build = (head: boolean) => {
-    let q = supabaseAdmin
-      .from('reviews')
-      .select(
-        `id, receipt_no, status, sentiment, resolution_status, created_at, updated_at,
-         m_transparency, m_responsiveness, m_ease_of_process, m_trustworthiness,
-         m_overall_satisfaction, company:companies!inner(id, name)`,
-        { count: 'exact', head },
-      )
-      .eq('user_id', user.id)
-      .is('deleted_at', null);
-    if (query.status?.length) q = q.in('status', query.status);
-    return q;
-  };
-
-  const { from, to } = pageRange(query);
-  const { data, count, error } = await build(false)
-    .order('created_at', { ascending: false })
-    .order('id')
-    .range(from, to);
-  const meta = { page: query.page, pageSize: query.pageSize, total: count ?? 0 };
-
-  if (isRangeError(error)) {
-    const { count: total, error: countError } = await build(true);
-    if (countError) throw countError;
-    return { items: [], meta: { ...meta, total: total ?? 0 } };
-  }
-  if (error) throw error;
-
-  return {
-    items: data.map((row) => ({
-      id: row.id,
-      receiptNo: row.receipt_no,
-      status: row.status,
-      company: { id: row.company.id, name: row.company.name },
-      sentiment: row.sentiment,
-      avgRating: averageRating(toMetrics(row)),
-      resolutionStatus: row.resolution_status,
-      createdAt: row.created_at,
-      updatedAt: row.updated_at,
-    })),
-    meta,
-  };
-}
-
 async function findOwnReview(user: AuthUser, reviewId: string): Promise<ReviewReceipt | null> {
   const { data: row, error } = await supabaseAdmin
     .from('reviews')
@@ -665,22 +603,4 @@ async function findOwnReview(user: AuthUser, reviewId: string): Promise<ReviewRe
     updatedAt: row.updated_at,
     publishedAt: row.published_at,
   };
-}
-
-/** The owner gets the full receipt; anyone else sees the published review at their access level. */
-export async function getReview(
-  user: AuthUser,
-  reviewId: string,
-): Promise<ReviewReceipt | PublicReview> {
-  const own = await findOwnReview(user, reviewId);
-  if (own) return own;
-
-  const { data, error } = await supabaseAdmin
-    .from('review_feed')
-    .select('*')
-    .eq('id', reviewId)
-    .maybeSingle();
-  if (error) throw error;
-  if (!data) throw new HttpError(404, 'Review not found');
-  return toPublicReview(data, accessLevel(user));
 }

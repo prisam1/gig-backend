@@ -18,7 +18,6 @@ import {
   negativeBody,
   ownReviewRow,
   positiveBody,
-  reviewFeedRow,
 } from '../helpers/fixtures';
 
 vi.mock('../../src/lib/supabase', async () => {
@@ -423,119 +422,6 @@ describe('POST /api/v1/reviews: success', () => {
       code: 'CONFLICT',
       fields: { productScheme: 'You already have an active review for this product' },
     });
-  });
-});
-
-// ---------------------------------------------------------------------------------------------
-describe('GET /api/v1/reviews/me', () => {
-  it('requires sign-in', async () => {
-    expect((await request(app).get('/api/v1/reviews/me')).status).toBe(401);
-  });
-
-  it("lists the caller's reviews, newest first", async () => {
-    fake.on('from:reviews', { data: [ownReviewRow()], count: 1 });
-    const res = await request(app).get('/api/v1/reviews/me').set(auth('observer')).expect(200);
-
-    expect(res.body).toEqual({
-      data: [
-        {
-          id: REVIEW_ID,
-          receiptNo: 'GIG-RV-2026-000042',
-          status: 'PENDING_MODERATION',
-          company: { id: COMPANY_A, name: 'Astra Mutuals' },
-          sentiment: 'Negative',
-          avgRating: 1.8,
-          resolutionStatus: 'CLOSED_UNRESOLVED',
-          createdAt: '2026-10-27T10:00:00Z',
-          updatedAt: '2026-10-27T10:00:00Z',
-        },
-      ],
-      meta: { page: 1, pageSize: 20, total: 1 },
-    });
-    const call = fake.callsTo('from:reviews')[0];
-    expect(allChainArgs(call, 'eq')).toEqual([['user_id', TEST_USERS.observer.id]]);
-    expect(allChainArgs(call, 'is')).toEqual([['deleted_at', null]]);
-    expect(chainArgs(call, 'order')).toEqual(['created_at', { ascending: false }]);
-  });
-
-  it('filters by status', async () => {
-    fake.on('from:reviews', { data: [], count: 0 });
-    await request(app)
-      .get('/api/v1/reviews/me?status=PUBLISHED,REJECTED')
-      .set(auth('prive'))
-      .expect(200);
-    expect(chainArgs(fake.callsTo('from:reviews')[0], 'in')).toEqual([
-      'status',
-      ['PUBLISHED', 'REJECTED'],
-    ]);
-    expect(
-      (await request(app).get('/api/v1/reviews/me?status=DRAFT').set(auth('prive'))).status,
-    ).toBe(400);
-  });
-});
-
-// ---------------------------------------------------------------------------------------------
-describe('GET /api/v1/reviews/:id', () => {
-  it('requires sign-in', async () => {
-    expect((await request(app).get(`/api/v1/reviews/${REVIEW_ID}`)).status).toBe(401);
-  });
-
-  it('gives the reviewer the full receipt with evidence and timeline', async () => {
-    fake.on('from:reviews', { data: ownReviewRow() });
-    const res = await request(app)
-      .get(`/api/v1/reviews/${REVIEW_ID}`)
-      .set(auth('prive'))
-      .expect(200);
-
-    expect(res.body.data).toMatchObject({
-      detail: 'OWNER',
-      receiptNo: 'GIG-RV-2026-000042',
-      moderationNote: null,
-      allowContact: false,
-      displayMode: 'INITIALS',
-      evidence: [{ path: EVIDENCE_PATH, docType: 'STATEMENT', fileName: 'statement.pdf' }],
-      timeline: [{ type: 'SUBMITTED' }],
-    });
-    const call = fake.callsTo('from:reviews')[0];
-    expect(allChainArgs(call, 'eq')).toEqual([
-      ['id', REVIEW_ID],
-      ['user_id', TEST_USERS.prive.id],
-    ]);
-    expect(chainArgs(call, 'order')).toEqual([
-      'created_at',
-      { referencedTable: 'review_versions', ascending: true },
-    ]);
-  });
-
-  it("shows another user's published review at the viewer's access level", async () => {
-    fake.on('from:reviews', { data: null });
-    fake.on('from:review_feed', { data: reviewFeedRow() });
-
-    const observer = await request(app)
-      .get(`/api/v1/reviews/${REVIEW_ID}`)
-      .set(auth('observer'))
-      .expect(200);
-    expect(observer.body.data.detail).toBe('SUMMARY');
-    expect(observer.body.data).not.toHaveProperty('metrics');
-
-    const inst = await request(app)
-      .get(`/api/v1/reviews/${REVIEW_ID}`)
-      .set(auth('institutional'))
-      .expect(200);
-    expect(inst.body.data.detail).toBe('FULL');
-    expect(inst.body.data).not.toHaveProperty('receiptNo');
-  });
-
-  it('returns 404 for a review that is neither yours nor published', async () => {
-    fake.on('from:reviews', { data: null });
-    fake.on('from:review_feed', { data: null });
-    const res = await request(app).get(`/api/v1/reviews/${REVIEW_ID}`).set(auth('prive'));
-    expect(res.status).toBe(404);
-    expect(res.body.error).toEqual({ code: 'NOT_FOUND', message: 'Review not found' });
-  });
-
-  it('rejects an id that is not a UUID', async () => {
-    expect((await request(app).get('/api/v1/reviews/r1').set(auth('prive'))).status).toBe(400);
   });
 });
 

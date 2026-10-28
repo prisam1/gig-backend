@@ -7,7 +7,6 @@ import {
   reinvestStatusSchema,
   resolutionBucketSchema,
   resolutionStatusSchema,
-  reviewStatusSchema,
   sentimentSchema,
   uuidSchema,
 } from '../../lib/enums';
@@ -211,9 +210,3 @@ export const listCompanyReviewsQuery = z.object({
 });
 export type ListCompanyReviewsQuery = z.output<typeof listCompanyReviewsQuery>;
 
-// GET /reviews/me?status=&page=&pageSize=
-export const listMyReviewsQuery = z.object({
-  ...pagination,
-  status: csv(reviewStatusSchema).optional(),
-});
-export type ListMyReviewsQuery = z.output<typeof listMyReviewsQuery>;

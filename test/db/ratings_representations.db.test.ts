@@ -235,45 +235,6 @@ describe('ratingsRepository.submit', () => {
     expect(isUniqueViolationOf(error, RATING_INDEXES.idempotencyKey)).toBe(true);
   });
 
-  it("lists the user's ratings newest first, with a status filter and the total", async () => {
-    const first = await rate({ issuerId: await issuerId('sovereign-alpha-yield') });
-    const second = await rate({ issuerId: await issuerId('nexus-infrastructure-trust') });
-    await rate({ issuerId: await issuerId('nexus-infrastructure-trust'), userId: bob });
-    await db.query(
-      `update app.issuer_ratings set created_at = now() - interval '1 day' where public_id = $1`,
-      [first],
-    );
-    await db.query(`update app.issuer_ratings set status = 'PUBLISHED' where public_id = $1`, [
-      second,
-    ]);
-
-    const page = await ratingsRepository.findMine(alice, { page: 1, pageSize: 1 });
-    expect(page.total).toBe(2);
-    expect(page.items).toEqual([
-      expect.objectContaining({
-        publicId: second,
-        status: 'PUBLISHED',
-        issuer: {
-          id: await issuerId('nexus-infrastructure-trust'),
-          name: 'Nexus Infrastructure Trust',
-        },
-      }),
-    ]);
-    expect(
-      (await ratingsRepository.findMine(alice, { page: 2, pageSize: 1 })).items[0]?.publicId,
-    ).toBe(first);
-    expect(await ratingsRepository.findMine(alice, { page: 3, pageSize: 1 })).toEqual({
-      items: [],
-      total: 2,
-    });
-
-    const pending = await ratingsRepository.findMine(alice, {
-      page: 1,
-      pageSize: 20,
-      status: ['PENDING_MODERATION'],
-    });
-    expect(pending.items.map((r) => r.publicId)).toEqual([first]);
-  });
 });
 
 describe('issuer stats', () => {
