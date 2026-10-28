@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { env } from '../../config/env';
 import { generateOtp, keyedHash } from '../../lib/crypto';
 import type { Channel } from '../../lib/notifier';
 
@@ -19,7 +20,8 @@ export function codeHash(challengePublicId: string, code: string): string {
  * decoy hash that no code can match, used when nothing must be sent (unknown or taken address).
  */
 export function issueCode(publicId: string = randomUUID()) {
-  const code = generateOtp();
+  // OTP_TEST_CODE (development only, refused in production) makes every code a known value.
+  const code = env.OTP_TEST_CODE ?? generateOtp();
   return {
     publicId,
     code,

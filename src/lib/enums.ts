@@ -23,3 +23,8 @@ export const savedEntityTypeSchema = z.enum(E.saved_entity_type);
 export const devicePlatformSchema = z.enum(E.device_platform);
 export const questionCategorySchema = z.enum(E.question_category);
 export const poolExpectationSchema = z.enum(E.pool_expectation);
+
+export const contentStatusSchema = z.enum(E.content_status);
+export const questionStatusSchema = z.enum(E.question_status);
+export const offerStatusSchema = z.enum(E.offer_status);
+export const creditReasonSchema = z.enum(E.credit_reason);

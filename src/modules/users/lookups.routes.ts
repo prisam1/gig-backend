@@ -5,7 +5,7 @@ import { parse } from '../../middleware/validate';
 import { LOOKUP_TYPES } from './users.schemas';
 import { listOptions } from './users.service';
 
-const typeSchema = z.enum(Object.keys(LOOKUP_TYPES) as [keyof typeof LOOKUP_TYPES], 'Unknown option list');
+export const typeSchema = z.enum(Object.keys(LOOKUP_TYPES) as [keyof typeof LOOKUP_TYPES], 'Unknown option list');
 
 export const lookupsRouter = Router();
 

@@ -342,6 +342,90 @@ describe('profile, tier and KYC', () => {
   });
 });
 
+describe("sign-up in the app's order (all screens first, OTP last)", () => {
+  const code = async (type: string) =>
+    (await one<{ code: string }>(
+      `select code from app.lookup_options where type = $1 and active and code <> 'OTHERS' order by sort_order limit 1`,
+      [type],
+    )).code;
+
+  async function onboarding(tier: string) {
+    return {
+      profile: { experienceYears: 5, jobProfile: await code('JOB_PROFILE'), location: 'Mumbai' },
+      preferences: {
+        focus: [await code('INVESTMENT_FOCUS')],
+        risk: [await code('RISK_LEVEL')],
+        style: [await code('INVESTMENT_STYLE')],
+        sector: [await code('INVESTMENT_SECTOR')],
+      },
+      tier,
+    };
+  }
+
+  const start = (tag: string, data: unknown, email = challenge(), phone = challenge()) =>
+    call('app_signup_start', {
+      name: `User ${tag}`, emailEnc: `enc-email-${tag}`, emailHash: `email-${tag}`, countryCode: '+91',
+      phoneEnc: `enc-phone-${tag}`, phoneHash: `phone-${tag}`, passwordHash: `argon-${tag}`,
+      ttlSeconds: 3600, otpTtlSeconds: 300, onboarding: data,
+    }, email, phone, CTX);
+
+  it('creates the account with profile, preferences and the requested tier in one step', async () => {
+    const email = challenge();
+    const phone = challenge();
+    expect(await start('app-order', await onboarding('PRIVE'), email, phone)).toMatchObject({ emailTaken: false });
+    await verify(email);
+    const done = await verify(phone);
+    expect(done).toMatchObject({ status: 'COMPLETED' });
+
+    const userId = (done as { userId: string }).userId;
+    expect(await one(
+      `select u.tier, u.requested_tier, u.tier_selected_at is not null as tier_selected,
+              p.experience_years, p.location, p.job_profile_code is not null as has_job,
+              (select count(distinct type)::int from app.user_preferences where user_id = u.id) as preference_types,
+              (select count(*)::int from app.tier_history where user_id = u.id) as history
+       from app.users u join app.user_profiles p on p.user_id = u.id where u.id = $1`,
+      [userId],
+    )).toEqual({
+      // Prive is only requested; it is granted when KYC is approved.
+      tier: 'OBSERVER', requested_tier: 'PRIVE', tier_selected: true,
+      experience_years: 5, location: 'Mumbai', has_job: true, preference_types: 4, history: 1,
+    });
+    // Onboarding is complete, so KYC can follow straight away.
+    expect(await call('app_select_tier', userId, 'PRIVE', CTX)).toEqual({ ok: true, requestedTier: 'PRIVE' });
+  });
+
+  it('grants Observer at once', async () => {
+    const email = challenge();
+    const phone = challenge();
+    await start('app-order-observer', await onboarding('OBSERVER'), email, phone);
+    await verify(email);
+    const done = (await verify(phone)) as { userId: string };
+    expect(await one(`select tier, requested_tier, tier_selected_at is not null as selected from app.users where id = $1`, [done.userId]))
+      .toEqual({ tier: 'OBSERVER', requested_tier: null, selected: true });
+  });
+
+  it('refuses unknown option codes before anything is stored or sent', async () => {
+    const data = await onboarding('OBSERVER');
+    expect(await start('bad-job', { ...data, profile: { ...data.profile, jobProfile: 'NOT_A_JOB' } }))
+      .toEqual({ fields: { 'profile.jobProfile': 'Unknown option: NOT_A_JOB' } });
+    expect(await start('bad-sector', { ...data, preferences: { ...data.preferences, sector: ['NOPE'] } }))
+      .toEqual({ fields: { 'preferences.sector': 'Unknown option: NOPE' } });
+    expect(await start('bad-other', { ...data, profile: { ...data.profile, otherJob: 'Pilot' } }))
+      .toEqual({ fields: { 'profile.otherJob': 'Only allowed when the job profile is Others' } });
+    expect(await one(`select count(*)::int as n from app.signup_requests where email_hash like 'email-bad-%'`)).toEqual({ n: 0 });
+  });
+
+  it('still works without onboarding data (steps 2-3 later through /me)', async () => {
+    const email = challenge();
+    const phone = challenge();
+    await start('no-onboarding', undefined, email, phone);
+    await verify(email);
+    const done = (await verify(phone)) as { userId: string };
+    expect(await one(`select tier_selected_at is null as not_selected from app.users where id = $1`, [done.userId]))
+      .toEqual({ not_selected: true });
+  });
+});
+
 describe('audit log', () => {
   it('records sensitive actions and cannot be changed', async () => {
     await signUp('audit');

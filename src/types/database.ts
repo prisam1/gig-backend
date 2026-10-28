@@ -1482,7 +1482,16 @@ export type Database = {
       device_platform: 'IOS' | 'ANDROID' | 'WEB';
       learn_format: 'VIDEO' | 'ARTICLE' | 'REPORT' | 'PODCAST';
       notification_type:
-        'SYSTEM' | 'CREDITS' | 'POOL' | 'ROADSHOW' | 'WEBINAR' | 'REVIEW' | 'LEARN';
+        | 'SYSTEM'
+        | 'CREDITS'
+        | 'POOL'
+        | 'ROADSHOW'
+        | 'WEBINAR'
+        | 'REVIEW'
+        | 'LEARN'
+        | 'KYC'
+        | 'RATING'
+        | 'REPRESENTATION';
       offer_status: 'PENDING_REVIEW' | 'PUBLISHED' | 'WITHDRAWN' | 'REJECTED';
       pool_expectation:
         | 'BETTER_ROI_IRR'
@@ -1541,7 +1550,18 @@ export const Constants = {
       currency_code: ['INR', 'USD', 'EUR', 'GBP', 'AED'],
       device_platform: ['IOS', 'ANDROID', 'WEB'],
       learn_format: ['VIDEO', 'ARTICLE', 'REPORT', 'PODCAST'],
-      notification_type: ['SYSTEM', 'CREDITS', 'POOL', 'ROADSHOW', 'WEBINAR', 'REVIEW', 'LEARN'],
+      notification_type: [
+        'SYSTEM',
+        'CREDITS',
+        'POOL',
+        'ROADSHOW',
+        'WEBINAR',
+        'REVIEW',
+        'LEARN',
+        'KYC',
+        'RATING',
+        'REPRESENTATION',
+      ],
       offer_status: ['PENDING_REVIEW', 'PUBLISHED', 'WITHDRAWN', 'REJECTED'],
       pool_expectation: [
         'BETTER_ROI_IRR',

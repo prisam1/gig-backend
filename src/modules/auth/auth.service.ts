@@ -89,6 +89,13 @@ export async function register(input: z.infer<typeof registerSchema>, ctx: Clien
   await consume(LIMITS.otpSendPerDestination, eHash);
   await consume(LIMITS.otpSendPerDestination, pHash);
 
+  // Steps 2-3 and the tier, when the app sends them with step 1 (its OTP screen comes last).
+  const onboarding = {
+    ...(input.profile && { profile: input.profile }),
+    ...(input.preferences && { preferences: input.preferences }),
+    ...(input.tier && { tier: input.tier }),
+  };
+
   const email = issueCode();
   const phone = issueCode();
   const started = await callDb(
@@ -104,12 +111,16 @@ export async function register(input: z.infer<typeof registerSchema>, ctx: Clien
         passwordHash: await hashPassword(input.password),
         ttlSeconds: SIGNUP_TTL_SECONDS,
         otpTtlSeconds: OTP_TTL_SECONDS,
+        ...(Object.keys(onboarding).length > 0 && { onboarding }),
       },
       p_email_challenge: email.stored,
       p_phone_challenge: phone.stored,
       p_ctx: ctx,
     },
   );
+
+  // An unknown or inactive option code: nothing was stored and no code was sent.
+  if ('fields' in started) throw new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', started.fields);
 
   if (started.emailTaken) sendNotice('EMAIL', input.email, 'ACCOUNT_EXISTS');
   else sendOtp('EMAIL', input.email, email.code, 'SIGNUP');

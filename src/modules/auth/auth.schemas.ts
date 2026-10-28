@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { preferencesSchema, signupProfileSchema, tierChoiceSchema } from '../users/onboarding.schemas';
 
 // Field rules mirror the app's validators (src/utils/AuthValidation.ts) and reuse its messages.
 
@@ -96,9 +97,22 @@ export const registerSchema = z
     phone: z.string('Phone number is required').trim(),
     password: passwordSchema,
     ageConfirmed: z.literal(true, 'You must confirm you are 18 years of age or older'),
+    // Optional: sign-up steps 2-3 and the tier, for the app's order (all screens first, OTP last).
+    // Stored with the pending sign-up and applied when the account is created.
+    profile: signupProfileSchema.optional(),
+    preferences: preferencesSchema.optional(),
+    tier: tierChoiceSchema.optional(),
   })
   .strict()
   .transform((body, ctx) => {
+    if (body.tier && (!body.profile || !body.preferences)) {
+      ctx.addIssue({
+        code: 'custom',
+        path: ['tier'],
+        message: 'Send profile and preferences together with the tier',
+      });
+      return z.NEVER;
+    }
     const phone = normalizePhone(body.countryCode, body.phone);
     if (!phone) {
       ctx.addIssue({ code: 'custom', path: ['phone'], message: PHONE_RULES[body.countryCode].message });
