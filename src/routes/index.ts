@@ -11,6 +11,7 @@ import { devicesRouter, notificationsRouter } from '../modules/notifications/not
 import { reviewsRouter } from '../modules/reviews/reviews.routes';
 import { roadshowsRouter } from '../modules/roadshows/roadshows.routes';
 import { savedRouter } from '../modules/saved/saved.routes';
+import { topRatedRouter } from '../modules/topRated/topRated.routes';
 import { lookupsRouter } from '../modules/users/lookups.routes';
 import { meRouter, usersRouter } from '../modules/users/users.routes';
 import { webinarsRouter } from '../modules/webinars/webinars.routes';
@@ -111,6 +112,9 @@ router.use('/representations', representationsRouter);
 // ---------------------------------------------------------------------------------------------
 router.use('/learn', learnRouter);
 router.use('/webinars', webinarsRouter);
+
+// GET /top-rated?type=company|issuer   dashboard leaderboards (Public)
+router.use('/top-rated', topRatedRouter);
 
 // ---------------------------------------------------------------------------------------------
 // Roadshows (Phase 2)
