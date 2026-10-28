@@ -67,3 +67,40 @@ export const REPRESENTATION_DOCUMENT_TYPES = [
   'MEETING_MINUTES',
 ] as const;
 export type RepresentationDocumentType = (typeof REPRESENTATION_DOCUMENT_TYPES)[number];
+
+/** Track statuses only GIG staff set; the first three follow the signing window. */
+export const STAFF_TRACK_STATUSES = [
+  'UNDER_REVIEW',
+  'SUBMITTED_TO_REGULATOR',
+  'MEETING_REQUESTED',
+  'MEETING_SCHEDULED',
+  'REGULATOR_RESPONDED',
+  'RESOLVED',
+] as const satisfies readonly RepresentationTrackStatus[];
+
+// Admin. They match the CHECK constraints in supabase/migrations/20261028090000_admin.sql and
+// the auth migration's app.users.status.
+
+export const STAFF_ROLES = ['ADMIN', 'MODERATOR', 'ANALYST', 'SUPPORT'] as const;
+export type StaffRole = (typeof STAFF_ROLES)[number];
+
+export const ACCOUNT_STATUSES = ['ACTIVE', 'SUSPENDED', 'DELETED'] as const;
+export type AccountStatus = (typeof ACCOUNT_STATUSES)[number];
+
+/** What the moderation queue holds. */
+export const MODERATION_TYPES = ['REVIEW', 'RATING', 'QUESTION', 'OFFER'] as const;
+export type ModerationType = (typeof MODERATION_TYPES)[number];
+
+export const MODERATION_DECISIONS = ['APPROVE', 'REJECT', 'REQUEST_CHANGES', 'REMOVE'] as const;
+export type ModerationDecision = (typeof MODERATION_DECISIONS)[number];
+
+/** Queue statuses: PENDING is "waiting for a decision" whatever the item's own word for it. */
+export const MODERATION_QUEUE_STATUSES = [
+  'PENDING',
+  'PUBLISHED',
+  'CHANGES_REQUESTED',
+  'REJECTED',
+  'REMOVED',
+  'WITHDRAWN',
+] as const;
+export type ModerationQueueStatus = (typeof MODERATION_QUEUE_STATUSES)[number];

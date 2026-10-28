@@ -1,5 +1,6 @@
 import { Router } from 'express';
 import { callDb } from '../lib/db';
+import { adminRouter } from '../modules/admin/admin.routes';
 import { authRouter } from '../modules/auth/auth.routes';
 import { companiesRouter } from '../modules/catalog/catalog.routes';
 import { creditsRouter } from '../modules/credits/credits.routes';
@@ -124,3 +125,20 @@ router.use('/webinars', webinarsRouter);
 //   POST  /roadshows/:id/offers          post an offer (Inst.)
 // ---------------------------------------------------------------------------------------------
 router.use('/roadshows', roadshowsRouter);
+
+// ---------------------------------------------------------------------------------------------
+// Admin (Phase 1, extended in Phase 2): GIG staff only, per staff role
+//   GET        /admin/me                            roles and permissions
+//   GET/PATCH  /admin/users, /admin/users/:id       search users, change tier, suspend
+//   PUT        /admin/users/:id/roles               staff roles
+//   GET/POST   /admin/kyc, /admin/kyc/:id/approve · /reject      KYC decisions
+//   GET/POST   /admin/moderation/queue · /:id/decision            reviews, ratings, questions, offers
+//   CRUD       /admin/companies, /admin/issuers, /admin/representations, /admin/roadshows,
+//              /admin/learn                         content management
+//   POST       /admin/representations/:id/status    advance track status with documents
+//   POST       /admin/roadshows/:id/questions/:qid/answer         publish issuer answer
+//   POST       /admin/credits/grant                 grant or revoke credits
+//   GET        /admin/audit-logs                    audit trail
+//   POST       /admin/uploads                       signed upload URL for staff documents
+// ---------------------------------------------------------------------------------------------
+router.use('/admin', adminRouter);

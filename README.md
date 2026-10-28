@@ -2,7 +2,7 @@
 
 REST API for the GIG (Global Investorz Group) mobile app. Node.js + TypeScript + Express, with Supabase (Postgres) as the database.
 
-> **Status:** Phase 1 "Auth and onboarding", "Users, profile and KYC", "Catalog and reviews", "Ratings", "Representations" and "Learn, saved items, credits and notifications", and Phase 2 "Roadshows", are implemented. Top-rated lists and admin are not built yet.
+> **Status:** Phase 1 "Auth and onboarding", "Users, profile and KYC", "Catalog and reviews", "Ratings", "Representations", "Learn, saved items, credits and notifications" and "Admin", and Phase 2 "Roadshows", are implemented. Top-rated lists are not built yet.
 
 ## Getting started
 
@@ -70,6 +70,7 @@ src/
     catalog/  reviews/    # companies, trends, compare; review submission and receipts
     ratings/              # issuers, rating summary, rating submission and receipts
     representations/      # petitions, timeline, signatures and receipt PDFs, submission packs
+    admin/                # staff console: roles, users, KYC, moderation, content, credits, audit
 supabase/
   migrations/             # SQL migrations, applied in name order, never edited once applied
   seed.sql                # development data
@@ -168,7 +169,7 @@ Phase 1, plan weeks 5-7. Every route except `/lookups` requires your access toke
 
 **Uploads:** the app asks for a URL with `purpose` (`AVATAR`, `KYC_DOCUMENT` or `REVIEW_EVIDENCE`), `mimeType` and `sizeBytes`, then PUTs the file to `uploadUrl`. Files are stored at `<user public_id>/<random id>.<ext>`, so each user writes only to their own folder. Avatars go to the public `avatars` bucket; KYC documents and review evidence stay private. Use the `fileId` for `PATCH /me` (`avatarFileId`) and KYC documents, and the `path` for review evidence.
 
-**KYC:** one open submission per user. Submitting stores the documents, the consent (with time, IP, user agent and app version) and sets `kycStatus` to `PENDING`, in one transaction. Approval and rejection belong to the admin module, which is not built yet.
+**KYC:** one open submission per user. Submitting stores the documents, the consent (with time, IP, user agent and app version) and sets `kycStatus` to `PENDING`, in one transaction. GIG staff approve or reject it with `/admin/kyc/:id/approve` and `/admin/kyc/:id/reject` (see [Admin](#admin)).
 
 ### Sign-up flow
 
@@ -229,7 +230,7 @@ The account only exists once both email and phone are verified. A pending sign-u
 - `sort`: `recent`, `oldest`, `highest` or `lowest`.
 - Filters: `sentiment`, `resolution`, `assetClass`, `investedStatus`, `year`.
 
-New reviews stay `PENDING_MODERATION` and do not count towards public numbers until a moderator sets `status = 'PUBLISHED'`. That moderation step belongs to the admin module, which is not built yet. Company stats recompute automatically whenever a published review changes.
+New reviews stay `PENDING_MODERATION` and do not count towards public numbers until a moderator approves them (`POST /admin/moderation/:id/decision`). Company stats recompute automatically whenever a published review changes.
 
 ### Submitting a review
 
@@ -365,11 +366,7 @@ Tables (private `app` schema): `representations`, `representation_signatures`, `
 
 PREMIUM learn content and webinars are for Full members; others see them with `locked: true`. Report downloads are 5-minute signed URLs from the private `learn-reports` bucket.
 
-**Credits.** `credit_ledger` is append-only (updates and deletes are refused by a trigger); `app.users.credit_balance` caches the sum and can never go below 0. Every change goes through `public.apply_credit_change`. Until `/admin/credits/grant` exists, grant credits in the SQL editor:
-
-```sql
-select public.apply_credit_change('<user public_id>', 5, 'ADMIN_GRANT', null, null, 'Launch credits');
-```
+**Credits.** `credit_ledger` is append-only (updates and deletes are refused by a trigger); `app.users.credit_balance` caches the sum and can never go below 0. Every change goes through `public.apply_credit_change`. Staff grant and revoke credits with `POST /admin/credits/grant`.
 
 ## Roadshows
 
@@ -388,5 +385,96 @@ select public.apply_credit_change('<user public_id>', 5, 'ADMIN_GRANT', null, nu
 - **Power Pool join** runs in one transaction (`public.join_roadshow_pool`): checks the roadshow is published, open and pool-enabled, spends 1 credit, stores the membership and expectations, and adds an inbox notification. Errors: `402 INSUFFICIENT_CREDITS`, `409 ALREADY_IN_POOL`, `409 POOL_NOT_ENABLED`, `409 ROADSHOW_CLOSED`. A retry with the same key and body returns the same membership with `Idempotent-Replayed: true`.
 - **Expectations:** `BETTER_ROI_IRR`, `SHORTER_LOCK_IN`, `LOWER_ENTRY_LOAD`, `LOWER_EXIT_LOAD`, `PRIORITY_ALLOTMENT`, `FLEXIBLE_PAYMENT_TERMS`, `DISCOUNTED_OFFER_PRICE`, `REGULAR_DISCLOSURES`.
 - **Heat map:** members are split into capital-interest quartile bands; each cell is the share of a band asking for an improvement.
-- **Top Asked** lists staff-featured questions first, then answered ones. Question answers, featuring and offer publishing are admin work (not built yet).
+- **Top Asked** lists staff-featured questions first, then answered ones. Staff publish answers and feature questions with `POST /admin/roadshows/:id/questions/:qid/answer`, and approve questions and offers in the moderation queue.
 - `fx_rates` holds units per 1 USD; the FX feed job (not built yet) should overwrite it. A missing rate returns `503 FX_RATE_UNAVAILABLE`.
+
+## Admin
+
+Phase 1, plan weeks 14-15, extended in Phase 2. The GIG staff console API under `/admin`. Every route needs a signed-in account that holds a staff role; responses are sent with `Cache-Control: no-store`.
+
+### Staff roles
+
+Staff are ordinary accounts with one or more roles in `app.user_roles`. Roles are read on every request, so a change (or suspending the account) applies at once. Each route needs one permission (`src/modules/admin/admin.access.ts`):
+
+| Permission              | ADMIN | MODERATOR | ANALYST | SUPPORT | Covers                                                       |
+| ----------------------- | :---: | :-------: | :-----: | :-----: | ------------------------------------------------------------ |
+| `users.read`            |   ✓   |           |         |    ✓    | Search members; one member's account and contact details     |
+| `users.manage`          |   ✓   |           |         |         | Change tier, suspend, reactivate                             |
+| `roles.manage`          |   ✓   |           |         |         | Grant and revoke staff roles                                 |
+| `kyc.review`            |   ✓   |           |         |    ✓    | KYC queue, documents, approve and reject                     |
+| `moderation.read`       |   ✓   |     ✓     |    ✓    |         | Moderation queue                                             |
+| `moderation.decide`     |   ✓   |     ✓     |         |         | Approve, reject, request changes, take down                  |
+| `content.read`          |   ✓   |     ✓     |    ✓    |    ✓    | Companies, issuers, petitions, roadshows, learn (all states) |
+| `content.manage`        |   ✓   |           |         |         | Create, edit and delete content; roadshow and learn uploads  |
+| `representations.track` |   ✓   |     ✓     |         |         | Petition status, documents, signature removal                |
+| `questions.answer`      |   ✓   |     ✓     |         |         | Publish issuer answers                                       |
+| `credits.manage`        |   ✓   |           |         |         | Grant and revoke credits                                     |
+| `audit.read`            |   ✓   |           |         |         | Audit trail                                                  |
+
+No staff role is `403 FORBIDDEN`; a role without the permission is `403 INSUFFICIENT_ROLE`. Staff never act on their own account, content, KYC submission or credits (`409 SELF_ACTION`).
+
+**The first admin** is created in the SQL editor; after that, admins grant roles with `PUT /admin/users/:id/roles`:
+
+```sql
+insert into app.user_roles (user_id, role)
+select id, 'ADMIN' from app.users where public_id = '<user id>';
+```
+
+### Endpoints
+
+| Method        | Path                                                        | Permission                 | Purpose                                                                                       |
+| ------------- | ----------------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------- |
+| GET           | `/admin/me`                                                 | any staff                  | Roles and permissions, for the console's navigation                                           |
+| GET           | `/admin/users`                                              | `users.read`               | `q` = exact email, phone (`+91…` or national number) or part of a name; `filter[tier]`, `[kycStatus]`, `[status]`, `[staff]` |
+| GET           | `/admin/users/:id`                                          | `users.read`               | Account, decrypted email and phone, KYC, activity, tier history. Each view is audited         |
+| PATCH         | `/admin/users/:id`                                          | `users.manage`             | `{ tier?, status?: ACTIVE \| SUSPENDED, reason }`. Suspending ends every session              |
+| PUT           | `/admin/users/:id/roles`                                    | `roles.manage`             | `{ roles: [...] }` replaces the staff roles; `[]` removes staff access                        |
+| GET           | `/admin/kyc`                                                | `kyc.review`               | Queue: `filter[status]` (default `PENDING`), `filter[tier]`, `sort=oldest\|newest`            |
+| GET           | `/admin/kyc/:id`                                            | `kyc.review`               | Submission, consent and 5-minute document links (none for `INFECTED` files). Audited          |
+| POST          | `/admin/kyc/:id/approve`                                    | `kyc.review`               | Grants the submitted tier; the member is notified                                             |
+| POST          | `/admin/kyc/:id/reject`                                     | `kyc.review`               | `{ reason }`, shown to the member. The requested tier is kept so they can submit again        |
+| GET           | `/admin/moderation/queue`                                   | `moderation.read`          | Reviews, ratings, roadshow questions and offers, oldest first. `filter[type]`, `filter[status]` (default `PENDING`) |
+| GET           | `/admin/moderation/:id?type=`                               | `moderation.read`          | One item in full; review evidence with 5-minute links                                         |
+| POST          | `/admin/moderation/:id/decision`                            | `moderation.decide`        | `{ type, decision, note? }` (see below)                                                       |
+| CRUD          | `/admin/companies`, `/admin/issuers`                        | `content.read` / `.manage` | `state=ACTIVE\|DELETED\|ALL`. DELETE is a soft delete. Tags are replaced as a list            |
+| CRUD          | `/admin/representations`                                    | `content.read` / `.manage` | Scheduled petitions (future `opensAt`) and, with `state=ALL`, deleted ones; soft delete       |
+| POST          | `/admin/representations/:id/status`                         | `representations.track`    | `{ status, note?, documents? }`: moves the track forward; every signer is notified            |
+| POST          | `/admin/representations/:id/documents`                      | `representations.track`    | `{ documents }`: attach evidence and other files                                              |
+| GET           | `/admin/representations/:id/signatures`                     | `representations.track`    | Signers with their identity; `includeRemoved=true`                                            |
+| POST          | `/admin/representations/:id/signatures/:signatureId/remove` | `representations.track`    | `{ reason }`: the signature stops counting and the signer may sign again                      |
+| CRUD          | `/admin/roadshows`                                          | `content.read` / `.manage` | Drafts and archived included. Publishing stamps `publishedAt`; DELETE archives                |
+| PUT           | `/admin/roadshows/:id/financials`                           | `content.manage`           | `{ years: [{ fiscalYear, revenue, ... }] }` replaces every fiscal year                        |
+| POST / DELETE | `/admin/roadshows/:id/documents`, `.../documents/:docId`    | `content.manage`           | Attach or remove a DD document (PDF)                                                          |
+| POST          | `/admin/roadshows/:id/questions/:qid/answer`                | `questions.answer`         | `{ answer, featured? }`: publishes the question with the issuer's answer                      |
+| CRUD          | `/admin/learn`                                              | `content.read` / `.manage` | Drafts and archived included. `downloadPath` is a staff upload; DELETE archives               |
+| POST          | `/admin/credits/grant`                                      | `credits.manage`           | `{ userId, delta, note }`; a negative `delta` revokes. Needs `Idempotency-Key`                |
+| GET           | `/admin/audit-logs`                                         | `audit.read`               | Newest first: `filter[action]`, `[actionPrefix]` (e.g. `admin.kyc.`), `[actorId]`, `[from]`, `[to]` |
+| POST          | `/admin/uploads`                                            | per target                 | `{ target, mimeType, sizeBytes }` → signed upload URL and `path` (see below)                  |
+
+**Moderation decisions.** The database checks the item's status in the same transaction as the change (otherwise `409 INVALID_TRANSITION`). Publishing or taking down a review or rating refreshes the company or issuer stats, and the author is notified with the note.
+
+| Type               | `APPROVE`                    | `REJECT`                     | `REQUEST_CHANGES` | `REMOVE` (takedown)    |
+| ------------------ | ---------------------------- | ---------------------------- | ----------------- | ---------------------- |
+| `REVIEW`, `RATING` | pending or changes requested | pending or changes requested | pending           | published → `REMOVED`  |
+| `QUESTION`         | pending                      | pending                      | –                 | published → `REJECTED` |
+| `OFFER`            | `PENDING_REVIEW`             | `PENDING_REVIEW`             | –                 | published → `REJECTED` |
+
+Every decision except `APPROVE` needs a `note`. Reviews keep each decision, its note and the moderator in `review_versions`.
+
+**Petition track.** Staff set only `UNDER_REVIEW`, `SUBMITTED_TO_REGULATOR`, `MEETING_REQUESTED`, `MEETING_SCHEDULED`, `REGULATOR_RESPONDED` and `RESOLVED`, and only forward of the current (effective) status. Moving past `CLOSING_SOON` ends signing. The history entry records the note and the staff member, and the documents are attached to that step.
+
+**Staff uploads.** `POST /admin/uploads` returns a one-time upload URL and a `path` (`staff/<uuid>.<ext>`). PUT the file there, then send the `path` when attaching it; the API checks that the upload finished.
+
+| `target`                  | Bucket                     | Types         | Max   | Permission              |
+| ------------------------- | -------------------------- | ------------- | ----- | ----------------------- |
+| `REPRESENTATION_DOCUMENT` | `representation-documents` | PDF, JPG, PNG | 25 MB | `representations.track` |
+| `ROADSHOW_DOCUMENT`       | `roadshow-documents`       | PDF           | 50 MB | `content.manage`        |
+| `LEARN_REPORT`            | `learn-reports`            | PDF           | 50 MB | `content.manage`        |
+
+**Credits.** Grants and revokes go through `public.apply_credit_change`, so a balance never goes below 0 (`409 INSUFFICIENT_CREDITS`). The `Idempotency-Key` is scoped to the staff member: a retry with the same key and body returns the first entry with `Idempotent-Replayed: true`; the same key with a different body is `409 IDEMPOTENCY_CONFLICT`.
+
+**Audit.** KYC decisions, moderation, user and role changes, credit changes, petition changes and answers are audited inside their database transaction (`admin.*` actions, with the staff member as actor). Content CRUD, uploads and opening a KYC submission are audited by the API. Viewing a member's account (`admin.user.viewed`) and their KYC documents (`admin.kyc.viewed`) is recorded too.
+
+**Notifications.** Members are told about every decision that concerns them. New inbox types: `KYC`, `RATING` and `REPRESENTATION`. Reviews use `REVIEW`, questions and offers `ROADSHOW`, credits `CREDITS`, and tier changes `SYSTEM`.
+
+Tables (private `app` schema): `user_roles`, and `admin_requests` (idempotency for credit changes). Migration: `supabase/migrations/20261028090000_admin.sql`.
