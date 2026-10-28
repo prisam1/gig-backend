@@ -4,7 +4,7 @@ import { pagination, parse } from '../../lib/http';
 import { authUser, requireAuth } from '../../middleware/auth';
 import { getCreditStatement } from './credits.service';
 
-const statementQuery = z.object(pagination);
+export const statementQuery = z.object(pagination);
 
 /** `/me/credits`: the signed-in user's credits wallet. */
 export const creditsRouter = Router();

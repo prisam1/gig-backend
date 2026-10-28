@@ -478,3 +478,14 @@ Every decision except `APPROVE` needs a `note`. Reviews keep each decision, its 
 **Notifications.** Members are told about every decision that concerns them. New inbox types: `KYC`, `RATING` and `REPRESENTATION`. Reviews use `REVIEW`, questions and offers `ROADSHOW`, credits `CREDITS`, and tier changes `SYSTEM`.
 
 Tables (private `app` schema): `user_roles`, and `admin_requests` (idempotency for credit changes). Migration: `supabase/migrations/20261028090000_admin.sql`.
+
+## API docs (Swagger)
+
+With the server running (`npm run dev`), open **http://localhost:4000/api/docs** for Swagger UI;
+the raw OpenAPI 3.1 document is at `/api/docs/openapi.json`. Sign in with `POST /auth/login`,
+click **Authorize**, paste the `accessToken`, and use **Try it out** on any endpoint.
+
+Request bodies, query and path parameters are generated from the same zod schemas the routes
+validate with. Every route is listed in `src/docs/routes.ts`; `test/api/docs.api.test.ts` fails
+when a route is added or removed without updating it. Docs are on by default except in
+production; set `API_DOCS=true|false` to override.

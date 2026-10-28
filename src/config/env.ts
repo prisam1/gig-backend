@@ -34,6 +34,9 @@ const envSchema = z
 
     // How OTP codes reach users. "console" prints them to the server log and is refused in production.
     OTP_DELIVERY: z.enum(['console']).default('console'),
+
+    // Swagger UI at /api/docs. Defaults to on everywhere except production.
+    API_DOCS: z.enum(['true', 'false']).optional(),
   })
   .superRefine((e, ctx) => {
     const keys = [e.JWT_ACCESS_SECRET, e.DATA_ENCRYPTION_KEY, e.BLIND_INDEX_KEY];

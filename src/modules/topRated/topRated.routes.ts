@@ -7,7 +7,7 @@ import { ratingsService } from '../ratings/ratings.service';
 /** `/top-rated`: dashboard leaderboards, highest-rated companies or issuers first. */
 export const topRatedRouter = Router();
 
-const topRatedQuery = z.object({
+export const topRatedQuery = z.object({
   ...pagination,
   type: z.enum(['company', 'issuer']).default('company'),
 });
