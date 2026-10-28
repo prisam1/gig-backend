@@ -1,5 +1,6 @@
 import { z } from 'zod';
-import { DB_FUNCTIONS, type DbArgs, type DbFunction, type DbResult } from './dbFunctions';
+import { AppError } from '../middleware/errorHandler';
+import { DB_FUNCTIONS, READ_ONLY_DB_FUNCTIONS, type DbArgs, type DbFunction, type DbResult } from './dbFunctions';
 import { supabaseAdmin } from './supabase';
 
 // The only way into the database is supabase-js with the service-role key. The private "app"
@@ -22,13 +23,35 @@ export class DatabaseError extends Error {
   }
 }
 
+/** The database could not be reached (network failure). Answered as 503 so the app can retry. */
+export class DatabaseUnavailableError extends AppError {
+  constructor(fn: DbFunction, detail: string) {
+    super(503, 'SERVICE_UNAVAILABLE', 'The service is temporarily unavailable. Please try again.');
+    this.cause = `${fn}: ${detail}`;
+  }
+}
+
+// supabase-js reports a failed connection (DNS, reset, timeout) with an empty SQLSTATE.
+const isNetworkFailure = (error: { code: string; message: string }) =>
+  error.code === '' && /fetch failed|network|socket|ECONN|ETIMEDOUT|EAI_AGAIN|ENOTFOUND/i.test(error.message);
+
+const READ_ATTEMPTS = 3;
+const pause = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** How a function call reaches the database. The database tests swap this for PGlite. */
 export const dbTransport = {
   async rpc(fn: DbFunction, args: Record<string, unknown>): Promise<unknown> {
-    // The app_* functions are typed by DB_FUNCTIONS, not by the generated public schema types.
-    const { data, error } = await supabaseAdmin.rpc(fn as never, args as never);
-    if (error) throw new DatabaseError(error.code, error.message);
-    return data;
+    // Reads are retried after a network failure; a write is never sent twice, since the failed
+    // attempt may already have been applied.
+    const attempts = READ_ONLY_DB_FUNCTIONS.has(fn) ? READ_ATTEMPTS : 1;
+    for (let attempt = 1; ; attempt++) {
+      // The app_* functions are typed by DB_FUNCTIONS, not by the generated public schema types.
+      const { data, error } = await supabaseAdmin.rpc(fn as never, args as never);
+      if (!error) return data;
+      if (!isNetworkFailure(error)) throw new DatabaseError(error.code, error.message);
+      if (attempt >= attempts) throw new DatabaseUnavailableError(fn, error.message);
+      await pause(150 * attempt);
+    }
   },
 };
 

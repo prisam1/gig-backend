@@ -457,12 +457,37 @@ export const DB_FUNCTIONS = {
         passwordHash: z.string(),
         ttlSeconds: z.number().int(),
         otpTtlSeconds: z.number().int(),
+        // Sign-up steps 2-3 and the tier, validated by the database before anything is stored.
+        onboarding: z
+          .strictObject({
+            profile: z
+              .strictObject({
+                experienceYears: z.number().int(),
+                jobProfile: z.string(),
+                otherJob: z.string().optional(),
+                location: z.string(),
+              })
+              .optional(),
+            preferences: z
+              .strictObject({
+                focus: z.array(z.string()),
+                risk: z.array(z.string()),
+                style: z.array(z.string()),
+                sector: z.array(z.string()),
+              })
+              .optional(),
+            tier: tier.optional(),
+          })
+          .optional(),
       }),
       p_email_challenge: storedCode,
       p_phone_challenge: storedCode,
       p_ctx: ctx,
     }),
-    z.object({ signupId: uuid, expiresAt: timestamp, emailTaken: z.boolean(), phoneTaken: z.boolean() }),
+    z.union([
+      z.object({ signupId: uuid, expiresAt: timestamp, emailTaken: z.boolean(), phoneTaken: z.boolean() }),
+      z.object({ fields: z.record(z.string(), z.string()) }),
+    ]),
   ),
   app_otp_start: fn(
     args({
@@ -1216,5 +1241,50 @@ export const DB_FUNCTIONS = {
 };
 
 export type DbFunction = keyof typeof DB_FUNCTIONS;
+
+/**
+ * Functions that only read (declared stable in SQL). A network failure while calling one of these is
+ * retried, since running it again cannot change anything; every other failure is reported, never
+ * retried. test/db/db_contract.db.test.ts keeps this list in step with the SQL.
+ */
+export const READ_ONLY_DB_FUNCTIONS: ReadonlySet<DbFunction> = new Set<DbFunction>([
+  'app_admin_audit_logs',
+  'app_admin_find_representations',
+  'app_admin_find_users',
+  'app_admin_get_representation',
+  'app_admin_kyc_get',
+  'app_admin_kyc_queue',
+  'app_admin_moderation_item',
+  'app_admin_moderation_queue',
+  'app_admin_representation_signatures',
+  'app_count_follows',
+  'app_find_issuer',
+  'app_find_issuers',
+  'app_find_owned_files',
+  'app_find_representation',
+  'app_find_representations',
+  'app_get_user',
+  'app_issuer_stats',
+  'app_kyc_latest',
+  'app_list_options',
+  'app_list_sessions',
+  'app_login_lookup',
+  'app_member',
+  'app_otp_peek',
+  'app_ping',
+  'app_public_user',
+  'app_rating_by_idempotency_key',
+  'app_rating_own',
+  'app_ratings_mine',
+  'app_representation_evidence',
+  'app_representation_history',
+  'app_representation_signature',
+  'app_representation_signers',
+  'app_representation_submission_pack',
+  'app_reset_lookup',
+  'app_signature_by_idempotency_key',
+  'app_staff_roles',
+]);
+
 export type DbArgs<F extends DbFunction> = z.input<(typeof DB_FUNCTIONS)[F]['args']>;
 export type DbResult<F extends DbFunction> = z.output<(typeof DB_FUNCTIONS)[F]['result']>;

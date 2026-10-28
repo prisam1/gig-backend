@@ -95,7 +95,7 @@ export const routeDocs: RouteDoc[] = [
     'public',
     {
       description:
-        'Returns an EMAIL and a PHONE challenge. Verify both with POST /auth/otp/verify (codes are printed in the server log in dev); the second verify returns the tokens.',
+        'Returns an EMAIL and a PHONE challenge. Verify both with POST /auth/otp/verify (with OTP_TEST_CODE=123456 in .env every code is 123456; otherwise codes are printed in the server log in dev); the second verify creates the account and returns the tokens. profile, preferences and tier are optional: the app sends them here because its OTP screen comes after the tier screen, and they are applied when the account is created. Option codes come from GET /lookups/{type}.',
       body: auth.registerSchema,
       status: 202,
       example: {
@@ -105,6 +105,14 @@ export const routeDocs: RouteDoc[] = [
         phone: '9876543210',
         password: PASSWORD,
         ageConfirmed: true,
+        profile: { experienceYears: 5, jobProfile: 'BUSINESS_OWNER', location: 'Mumbai' },
+        preferences: {
+          focus: ['FINANCIAL_ASSETS'],
+          risk: ['MEDIUM_LEVEL'],
+          style: ['ACTIVE_INVESTING'],
+          sector: ['TECHNOLOGY', 'HEALTHCARE'],
+        },
+        tier: 'OBSERVER',
       },
     },
   ),
@@ -117,6 +125,7 @@ export const routeDocs: RouteDoc[] = [
     description:
       'Sign-up: PENDING until both challenges are verified, then COMPLETED with user and tokens. Password reset: returns resetToken.',
     body: auth.otpVerifySchema,
+    example: { challengeId: '00000000-0000-4000-8000-000000000000', code: '123456', device },
   }),
   r('post', '/auth/login', 'Auth', 'Sign in; returns access and refresh tokens', 'public', {
     body: auth.loginSchema,

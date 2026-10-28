@@ -171,13 +171,25 @@ Phase 1, plan weeks 5-7. Every route except `/lookups` requires your access toke
 
 **KYC:** one open submission per user. Submitting stores the documents, the consent (with time, IP, user agent and app version) and sets `kycStatus` to `PENDING`, in one transaction. GIG staff approve or reject it with `/admin/kyc/:id/approve` and `/admin/kyc/:id/reject` (see [Admin](#admin)).
 
-### Sign-up flow
+### Sign-up flow (the app's order: all screens first, OTP last)
 
-1. `POST /auth/register` returns a `signupId` and two challenges (email and phone).
-2. `POST /auth/otp/verify` for each challenge. The first returns `status: "PENDING"`; the second creates the account and returns `status: "COMPLETED"` with the user and tokens.
-3. `PATCH /me`, then `PUT /me/preferences`, then `PUT /me/tier`.
+The app keeps steps 1-3 and the tier in memory and calls the API only from the tier screen.
 
-The account only exists once both email and phone are verified. A pending sign-up expires after 1 hour.
+| App screen | API |
+| --- | --- |
+| Personal details, Professional details, Investment details | none (kept in the app). Option lists: `GET /lookups/{job-profiles, investment-focus, risk-levels, investment-styles, investment-sectors}` |
+| Investor / Feature comparison: tier chosen | `POST /auth/register` with step 1 + `profile` + `preferences` + `tier`. Returns two challenges (EMAIL, PHONE). Unknown option codes are refused here, before any code is sent |
+| Email + phone OTP screen | `POST /auth/otp/verify` for the EMAIL challenge (`PENDING`), then the PHONE challenge (`COMPLETED`: account created with profile, preferences and tier; returns `user` and `tokens`) |
+| Prive / Institutional: upload ID | `POST /files/upload-url` (purpose `KYC_DOCUMENT`) → PUT the file to `uploadUrl` → `POST /kyc/submissions` (with `consentAccepted: true` for Prive) |
+| Loading / Investor card / Welcome | `GET /me` |
+
+Observer is granted at once. Prive and Institutional are recorded as `requestedTier` and granted when staff approve the KYC (`POST /admin/kyc/{id}/approve`).
+
+`profile`, `preferences` and `tier` are optional on register: without them the account is created with just step 1, and `PATCH /me`, `PUT /me/preferences`, `PUT /me/tier` complete it later (also used to edit them). A tier needs `profile` and `preferences` with it.
+
+The account only exists once both email and phone are verified. A pending sign-up expires after 1 hour; each code after 5 minutes.
+
+**Testing without SMS/email:** with `OTP_TEST_CODE=123456` in `.env`, every code is `123456`. Request bodies for the whole flow are prefilled in Swagger (`/api/docs`).
 
 ### Security rules
 
@@ -197,13 +209,16 @@ The account only exists once both email and phone are verified. A pending sign-u
 ### Changes needed in the mobile app
 
 - **OTP input:** use 6 boxes instead of 4, for both the sign-up and the reset flows.
-- **Sign-up order:** verify the email and phone OTPs right after step 1, before the professional and investment steps. The account is only created after both codes are verified.
-- **Option lists:** send option **codes** from `/lookups` (for example `LOW_LEVEL`, `FOUNDER`), not labels.
+- **Call register from the tier screen** with everything collected so far (see the table above), then show the email + phone OTP screen for every tier.
+- **Prive and Institutional:** the same email + phone OTP screen as Observer, *then* the ID upload. Today Prive verifies only the phone and Institutional verifies nothing; the account can't exist before both codes are verified, and a file can't be uploaded before the account exists. The separate "Phone verification" screen is no longer needed (the phone is entered in step 1).
+- **18+ confirmation:** send `ageConfirmed: true` only after the user confirms (e.g. a checkbox on step 1). Today the app only shows a disclaimer on the Login screen.
+- **Option lists:** send option **codes** from `/lookups` (for example `LOW_LEVEL`, `BUSINESS_OWNER`), not labels. Job profile is a single choice (`selectedJobs` is a list today).
 - **Experience:** send a whole number of years (`"5+"` is not accepted).
+- **Profile photo (step 1):** upload it after the account exists: `POST /files/upload-url` (purpose `AVATAR`) → PUT → `PATCH /me` with `avatarFileId`.
 - **Login:** the field takes an email, or a phone number with country code (`+919876543210`).
 - **Phone at sign-up:** send the country code (`+91` by default, or `+971`).
-- **Forgot password:** the app needs a "new password" screen that calls `/auth/password/reset`.
-- **Tier choice:** choosing Prive or Institutional records a request (`requestedTier`). The tier itself changes only after KYC approval.
+- **Forgot password:** the app needs a "new password" screen: `POST /auth/password/forgot` → `POST /auth/otp/verify` (returns `resetToken`) → `POST /auth/password/reset`.
+- **Tokens:** keep `accessToken` (15 minutes) and `refreshToken` (30 days, single use) in the Keychain / Keystore; on a 401, call `POST /auth/refresh` once and retry.
 
 ## Catalog and reviews
 

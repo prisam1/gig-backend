@@ -69,6 +69,28 @@ describe('register', () => {
   it('rejects non-object bodies', () => {
     for (const body of [null, [], 'x', 42]) assert.equal(registerSchema.safeParse(body).success, false);
   });
+
+  it('accepts steps 2-3 and the tier with step 1 (the app sends them before its OTP screen)', () => {
+    const r = registerSchema.parse({
+      ...validRegister,
+      profile: { experienceYears: '5', jobProfile: 'BUSINESS_OWNER', location: 'Mumbai' },
+      preferences: { focus: ['FINANCIAL_ASSETS'], risk: ['MEDIUM_LEVEL'], style: ['ACTIVE_INVESTING'], sector: ['TECHNOLOGY'] },
+      tier: 'PRIVE',
+    });
+    assert.equal(r.profile?.experienceYears, 5);
+    assert.equal(r.tier, 'PRIVE');
+  });
+
+  it('needs profile and preferences together with a tier', () => {
+    assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, tier: 'OBSERVER' })), ['tier']);
+  });
+
+  it('applies the onboarding rules to steps 2-3 sent with registration', () => {
+    const preferences = { focus: ['A', 'B'], risk: ['LOW_LEVEL'], style: ['X'], sector: ['Y'] };
+    assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, preferences })), ['preferences.focus']);
+    const profile = { experienceYears: '5+', jobProfile: 'BUSINESS_OWNER', location: 'Mumbai' };
+    assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, profile })), ['profile.experienceYears']);
+  });
 });
 
 describe('identifier', () => {

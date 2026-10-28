@@ -7,7 +7,7 @@ import type { PGlite } from '@electric-sql/pglite';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { callDb, DatabaseError, dbTransport } from '../../src/lib/db';
-import { DB_FUNCTIONS } from '../../src/lib/dbFunctions';
+import { DB_FUNCTIONS, READ_ONLY_DB_FUNCTIONS } from '../../src/lib/dbFunctions';
 import { callFunction, createTestDatabase } from './pglite';
 
 const CTX = { ip: '203.0.113.9', userAgent: 'vitest', appVersion: '1.0.0', requestId: 'req-contract' };
@@ -36,6 +36,13 @@ const code = () => {
 const session = () => ({ ...SESSION, publicId: randomUUID(), refreshHash: `refresh:${randomUUID()}` });
 
 describe('declared functions match the database', () => {
+  it('retries exactly the functions the SQL declares read-only (stable)', async () => {
+    const { rows } = await db.query<{ name: string }>(`
+      select p.proname as name from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+      where n.nspname = 'public' and p.proname like 'app\\_%' and p.provolatile in ('s', 'i') order by 1`);
+    expect(rows.map((r) => r.name)).toEqual([...READ_ONLY_DB_FUNCTIONS].sort());
+  });
+
   it('declares exactly the app_* functions the migrations create', async () => {
     const { rows } = await db.query<{ name: string }>(`
       select p.proname as name from pg_proc p join pg_namespace n on n.oid = p.pronamespace
@@ -75,6 +82,7 @@ describe('real results pass the declared result shapes', () => {
       p_phone_challenge: phone,
       p_ctx: CTX,
     });
+    if ('fields' in started) throw new Error(`unexpected field errors: ${JSON.stringify(started.fields)}`);
     expect(started.expiresAt).toBeInstanceOf(Date);
     expect(await callDb('app_otp_peek', { p_public_id: email.publicId })).toEqual({ destinationHash: 'contract-email' });
 
