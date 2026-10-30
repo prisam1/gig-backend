@@ -59,7 +59,9 @@ src/
     http.ts               # response envelope, zod parsing, pagination helpers
     enums.ts              # zod schemas for the database enums
     ...                   # crypto (PII encryption), passwords, JWT, rate limits, audit, OTP delivery
-  types/database.ts       # typed Supabase schema (tables, views, functions, enums)
+  constants/              # fixed value lists, one file per API area (onboarding.ts: sign-up choices)
+  types/                  # TypeScript types, one file per API area (onboarding.ts), plus database.ts:
+                          # typed Supabase schema (tables, views, functions, enums)
   middleware/             # errors, auth + tier guards, validation, request context
   routes/index.ts         # /api/v1 router; feature routers are mounted here
   modules/                # one folder per feature: *.routes.ts, *.schemas.ts, *.service.ts
@@ -159,7 +161,7 @@ Phase 1, plan weeks 5-7. Every route except `/lookups` requires your access toke
 | PATCH         | `/me`                 | User   | Edit name, experience, job profile (or Others + text), location and avatar                         |
 | POST          | `/files/upload-url`   | User   | Signed upload URL; PDF/JPG/PNG up to 10 MB. Returns `fileId` and the Storage `path`                |
 | POST          | `/kyc/submissions`    | User   | Submit uploaded documents for the requested tier (+ consent, required for Prive)                   |
-| GET           | `/lookups/:type`      | Public | Every sign-up choice: `country-codes`, `job-profiles`, `investment-focus`, `risk-levels`, `investment-styles`, `investment-sectors`, `tiers`; also `rating-factors`, `risk-factors`, `investor-types`. Returns `[{ code, label }]`, cached 5 minutes |
+| GET           | `/lookups/:type`      | Public | Options for the rating wizard and representations: `rating-factors`, `risk-factors`, `investor-types`. Returns `[{ code, label }]`, cached 5 minutes |
 
 **Uploads:** the app asks for a URL with `purpose` (`AVATAR`, `KYC_DOCUMENT` or `REVIEW_EVIDENCE`), `mimeType` and `sizeBytes`, then PUTs the file to `uploadUrl`. Files are stored at `<user public_id>/<random id>.<ext>`, so each user writes only to their own folder. Avatars go to the public `avatars` bucket; KYC documents and review evidence stay private. Use the `fileId` for `PATCH /me` (`avatarFileId`) and KYC documents, and the `path` for review evidence.
 
@@ -171,11 +173,8 @@ The app keeps steps 1-3 and the tier in memory and calls the API only from the t
 
 | App screen | API |
 | --- | --- |
-| Personal details (step 1) | Phone country code: `GET /lookups/country-codes` |
-| Professional details (step 2) | Job profile: `GET /lookups/job-profiles` |
-| Investment details (step 3) | `GET /lookups/{investment-focus, risk-levels, investment-styles, investment-sectors}` |
-| Choose investor type | `GET /lookups/tiers` |
-| Investor / Feature comparison: tier chosen | `POST /auth/register` with step 1 + `profile` + `preferences` + `tier`. Returns two challenges (EMAIL, PHONE). Unknown option codes are refused here, before any code is sent |
+| Personal details, Professional details, Investment details, Choose investor type | None: the choices are fixed lists in the app (`src/constants/Investment.ts`) |
+| Investor / Feature comparison: tier chosen | `POST /auth/register` with step 1 + `profile` + `preferences` + `tier`. Returns two challenges (EMAIL, PHONE). Any option that is not in the app's lists is refused here, before any code is sent |
 | Email + phone OTP screen | `POST /auth/otp/verify` for the EMAIL challenge (`PENDING`), then the PHONE challenge (`COMPLETED`: account created with profile, preferences and tier; returns `user` and `tokens`) |
 | Prive / Institutional: upload ID | `POST /files/upload-url` (purpose `KYC_DOCUMENT`) → PUT the file to `uploadUrl` → `POST /kyc/submissions` (with `consentAccepted: true` for Prive) |
 | Loading / Investor card / Welcome | `GET /me` |
@@ -183,6 +182,8 @@ The app keeps steps 1-3 and the tier in memory and calls the API only from the t
 Observer is granted at once. Prive and Institutional are recorded as `requestedTier` and granted when staff approve the KYC (`POST /admin/kyc/{id}/approve`).
 
 `profile`, `preferences` and `tier` are required on register: no screen sets them later. `PATCH /me` edits the profile fields afterwards.
+
+**Option codes.** The app's lists are fixed, and the API accepts exactly their codes ([src/constants/onboarding.ts](src/constants/onboarding.ts), types in [src/types/onboarding.ts](src/types/onboarding.ts)): the label in UPPER_SNAKE_CASE with `&` spelled `AND` (`Buy & Hold` → `BUY_AND_HOLD`, `Others` → `OTHERS`). Anything else gets `400 VALIDATION_FAILED`. `otherJob` is required with `OTHERS` and refused with any other job profile. The database stores only the codes each user chose, never the lists or their labels; `GET /me` returns codes (`profile.jobProfile`, `preferences.focus` ...) and the app shows its own label for each. When an option is added to the app, add its code to `src/constants/onboarding.ts` (no migration needed).
 
 The account only exists once both email and phone are verified. A pending sign-up expires after 1 hour; each code after 5 minutes.
 
@@ -205,12 +206,10 @@ The account only exists once both email and phone are verified. A pending sign-u
 
 ### Changes needed in the mobile app
 
-- **OTP input:** use 6 boxes instead of 4, for both the sign-up and the reset flows.
 - **Call register from the tier screen** with everything collected so far (see the table above), then show the email + phone OTP screen for every tier.
 - **Prive and Institutional:** the same email + phone OTP screen as Observer, *then* the ID upload. Today Prive verifies only the phone and Institutional verifies nothing; the account can't exist before both codes are verified, and a file can't be uploaded before the account exists. The separate "Phone verification" screen is no longer needed (the phone is entered in step 1).
 - **18+ confirmation:** send `ageConfirmed: true` only after the user confirms (e.g. a checkbox on step 1). Today the app only shows a disclaimer on the Login screen.
-- **Option lists:** every choice in sign-up comes from `GET /lookups/{type}` (country codes, job profiles, the 4 preference lists, tiers) instead of the lists in `constants/Investment.ts` and `Investor.tsx`. Show the `label`, send the **code** (for example `LOW_LEVEL`, `BUSINESS_OWNER`, `PRIVE`, `+91`). Job profile is a single choice (`selectedJobs` is a list today). Tier colours stay in the app's theme.
-- **Phone country code:** step 1 needs a country-code selector filled from `GET /lookups/country-codes`.
+- **Option lists:** send each choice as its code (see **Option codes** above). Job profile is a single choice.
 - **Experience:** send a whole number of years (`"5+"` is not accepted).
 - **Profile photo (step 1):** upload it after the account exists: `POST /files/upload-url` (purpose `AVATAR`) → PUT → `PATCH /me` with `avatarFileId`.
 - **Login:** the field takes an email, or a phone number with country code (`+919876543210`).

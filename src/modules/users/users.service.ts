@@ -6,6 +6,7 @@ import { AppError } from '../../middleware/errorHandler';
 import type { ClientContext } from '../../middleware/requestContext';
 import { filesRepository } from '../files/files.repository';
 import { filesStorage } from '../files/files.storage';
+import type { Preferences } from '../../types/onboarding';
 import type { LookupType, updateMeSchema } from './users.schemas';
 
 // Avatars live in the public "avatars" bucket; every other file stays private.
@@ -34,13 +35,6 @@ export interface Option {
   label: string;
 }
 
-const PREFERENCE_KEYS = {
-  INVESTMENT_FOCUS: 'focus',
-  RISK_LEVEL: 'risk',
-  INVESTMENT_STYLE: 'style',
-  INVESTMENT_SECTOR: 'sector',
-} as const;
-
 export function listOptions(type: LookupType): Promise<Option[]> {
   return callDb('app_list_options', { p_type: type });
 }
@@ -49,16 +43,28 @@ export async function loadUser(userId: string) {
   const row = await callDb('app_get_user', { p_user_id: userId });
   if (!row) throw userNotFound();
 
-  const preferences: Record<(typeof PREFERENCE_KEYS)[keyof typeof PREFERENCE_KEYS], Option[]> = {
-    focus: [],
-    risk: [],
-    style: [],
-    sector: [],
-  };
-  for (const p of row.preferences) preferences[PREFERENCE_KEYS[p.type]].push({ code: p.code, label: p.label });
+  // Codes only: the app shows its own label for each one.
+  const preferences: Preferences = { focus: [], risk: [], style: [], sector: [] };
+  for (const p of row.preferences) {
+    switch (p.type) {
+      case 'INVESTMENT_FOCUS':
+        preferences.focus.push(p.code);
+        break;
+      case 'RISK_LEVEL':
+        preferences.risk.push(p.code);
+        break;
+      case 'INVESTMENT_STYLE':
+        preferences.style.push(p.code);
+        break;
+      case 'INVESTMENT_SECTOR':
+        preferences.sector.push(p.code);
+        break;
+    }
+  }
 
   const profileCompleted = row.experienceYears !== null && row.jobProfileCode !== null && row.location !== null;
-  const preferencesCompleted = Object.values(preferences).every((list) => list.length > 0);
+  const preferencesCompleted =
+    preferences.focus.length > 0 && preferences.risk.length > 0 && preferences.style.length > 0 && preferences.sector.length > 0;
   const tierSelected = row.tierSelectedAt !== null;
 
   return {
@@ -74,7 +80,7 @@ export async function loadUser(userId: string) {
     kycStatus: row.kycStatus,
     profile: {
       experienceYears: row.experienceYears,
-      jobProfile: row.jobProfileCode ? { code: row.jobProfileCode, label: row.jobProfileLabel } : null,
+      jobProfile: row.jobProfileCode,
       otherJob: row.otherJob,
       location: row.location,
     },

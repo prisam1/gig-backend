@@ -8,8 +8,6 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { TIERS } from '../../src/lib/membership';
-import { COUNTRY_CODES } from '../../src/modules/auth/auth.schemas';
 import { LOOKUP_TYPES } from '../../src/modules/users/users.schemas';
 
 const ROOT = join(__dirname, '..', '..');
@@ -283,19 +281,15 @@ describe('password reset', () => {
 });
 
 describe('profile and KYC', () => {
-  async function firstCode(type: string): Promise<string> {
-    return (await one<{ code: string }>(`select code from app.lookup_options where type = $1 and code <> 'OTHERS' order by sort_order limit 1`, [type])).code;
-  }
-
   it("validates profile edits and keeps one open KYC submission of the user's own files", async () => {
     const { userId } = await signUp('tier');
-    expect(await call('app_update_profile', userId, { jobProfile: 'NOT_A_JOB' }, CTX)).toEqual({
-      fields: { jobProfile: 'Unknown option: NOT_A_JOB' },
-    });
+    // Which codes exist is checked by the API (src/constants/onboarding.ts); the database keeps the
+    // code's format and the Others rule.
+    await expect(call('app_update_profile', userId, { jobProfile: 'not a code' }, CTX)).rejects.toThrow(/user_profiles_job_profile_code_check/);
     expect(await call('app_update_profile', userId, { jobProfile: 'OTHERS' }, CTX)).toEqual({
       fields: { otherJob: 'Specify your job profile' },
     });
-    const job = await firstCode('JOB_PROFILE');
+    const job = 'BUSINESS_OWNER';
     expect(await call('app_update_profile', userId, { jobProfile: job, otherJob: 'Pilot' }, CTX)).toEqual({
       fields: { otherJob: 'Only allowed when the job profile is Others' },
     });
@@ -332,20 +326,14 @@ describe('profile and KYC', () => {
 });
 
 describe("sign-up in the app's order (all screens first, OTP last)", () => {
-  const code = async (type: string) =>
-    (await one<{ code: string }>(
-      `select code from app.lookup_options where type = $1 and active and code <> 'OTHERS' order by sort_order limit 1`,
-      [type],
-    )).code;
-
-  async function onboarding(tier: string) {
+  function onboarding(tier: string) {
     return {
-      profile: { experienceYears: 5, jobProfile: await code('JOB_PROFILE'), location: 'Mumbai' },
+      profile: { experienceYears: 5, jobProfile: 'BUSINESS_OWNER', location: 'Mumbai' },
       preferences: {
-        focus: [await code('INVESTMENT_FOCUS')],
-        risk: [await code('RISK_LEVEL')],
-        style: [await code('INVESTMENT_STYLE')],
-        sector: [await code('INVESTMENT_SECTOR')],
+        focus: ['REAL_ASSETS'],
+        risk: ['LOW_LEVEL'],
+        style: ['ARBITRAGE', 'BUY_AND_HOLD'],
+        sector: ['PRIVATE_EQUITIES'],
       },
       tier,
     };
@@ -361,7 +349,7 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
   it('creates the account with profile, preferences and the requested tier in one step', async () => {
     const email = challenge();
     const phone = challenge();
-    expect(await start('app-order', await onboarding('PRIVE'), email, phone)).toMatchObject({ emailTaken: false });
+    expect(await start('app-order', onboarding('PRIVE'), email, phone)).toMatchObject({ emailTaken: false });
     await verify(email);
     const done = await verify(phone);
     expect(done).toMatchObject({ status: 'COMPLETED' });
@@ -379,24 +367,32 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
       tier: 'OBSERVER', requested_tier: 'PRIVE', tier_selected: true,
       experience_years: 5, location: 'Mumbai', has_job: true, preference_types: 4, history: 1,
     });
+
+    // GET /me gets the codes the user chose; the app shows its own labels.
+    const user = await call<{ jobProfileCode: string; preferences: { type: string; code: string }[] }>('app_get_user', userId);
+    expect(user.jobProfileCode).toBe('BUSINESS_OWNER');
+    expect(user).not.toHaveProperty('jobProfileLabel');
+    expect(user.preferences).toEqual([
+      { type: 'INVESTMENT_FOCUS', code: 'REAL_ASSETS' },
+      { type: 'INVESTMENT_SECTOR', code: 'PRIVATE_EQUITIES' },
+      { type: 'INVESTMENT_STYLE', code: 'ARBITRAGE' },
+      { type: 'INVESTMENT_STYLE', code: 'BUY_AND_HOLD' },
+      { type: 'RISK_LEVEL', code: 'LOW_LEVEL' },
+    ]);
   });
 
   it('grants Observer at once', async () => {
     const email = challenge();
     const phone = challenge();
-    await start('app-order-observer', await onboarding('OBSERVER'), email, phone);
+    await start('app-order-observer', onboarding('OBSERVER'), email, phone);
     await verify(email);
     const done = (await verify(phone)) as { userId: string };
     expect(await one(`select tier, requested_tier, tier_selected_at is not null as selected from app.users where id = $1`, [done.userId]))
       .toEqual({ tier: 'OBSERVER', requested_tier: null, selected: true });
   });
 
-  it('refuses unknown option codes before anything is stored or sent', async () => {
-    const data = await onboarding('OBSERVER');
-    expect(await start('bad-job', { ...data, profile: { ...data.profile, jobProfile: 'NOT_A_JOB' } }))
-      .toEqual({ fields: { 'profile.jobProfile': 'Unknown option: NOT_A_JOB' } });
-    expect(await start('bad-sector', { ...data, preferences: { ...data.preferences, sector: ['NOPE'] } }))
-      .toEqual({ fields: { 'preferences.sector': 'Unknown option: NOPE' } });
+  it('refuses the Others text with another job profile before anything is stored or sent', async () => {
+    const data = onboarding('OBSERVER');
     expect(await start('bad-other', { ...data, profile: { ...data.profile, otherJob: 'Pilot' } }))
       .toEqual({ fields: { 'profile.otherJob': 'Only allowed when the job profile is Others' } });
     expect(await one(`select count(*)::int as n from app.signup_requests where email_hash like 'email-bad-%'`)).toEqual({ n: 0 });
@@ -413,41 +409,30 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
   });
 });
 
-describe('sign-up option lists (GET /lookups/{type})', () => {
+describe('sign-up options (fixed in the app, not stored)', () => {
   const list = (type: string) => call<{ code: string; label: string }[]>('app_list_options', type);
 
-  it('serves every choice of the sign-up screens, with the app\'s options', async () => {
-    const sizes: Record<string, number> = {};
-    for (const type of ['COUNTRY_CODE', 'JOB_PROFILE', 'INVESTMENT_FOCUS', 'RISK_LEVEL', 'INVESTMENT_STYLE', 'INVESTMENT_SECTOR', 'TIER']) {
-      sizes[type] = (await list(type)).length;
+  it('keeps no copy of the sign-up lists', async () => {
+    expect(await one(`select count(*)::int as n from app.lookup_options
+      where type not in ('RATING_FACTOR', 'RISK_FACTOR', 'INVESTOR_TYPE')`)).toEqual({ n: 0 });
+    for (const type of ['JOB_PROFILE', 'INVESTMENT_SECTOR', 'TIER', 'COUNTRY_CODE']) {
+      await expect(db.query(`insert into app.lookup_options (type, code, label) values ($1, 'X', 'x')`, [type]))
+        .rejects.toThrow(/lookup_options_type_check/);
     }
-    expect(sizes).toEqual({
-      COUNTRY_CODE: 2, JOB_PROFILE: 50, INVESTMENT_FOCUS: 10, RISK_LEVEL: 3, INVESTMENT_STYLE: 40, INVESTMENT_SECTOR: 40, TIER: 3,
-    });
-    expect(await list('TIER')).toEqual([
-      { code: 'OBSERVER', label: 'Observer' },
-      { code: 'PRIVE', label: 'Prive' },
-      { code: 'INSTITUTIONAL', label: 'Institutional' },
-    ]);
-    expect(await list('COUNTRY_CODE')).toEqual([{ code: '+91', label: 'India' }, { code: '+971', label: 'UAE' }]);
   });
 
-  it('offers exactly the tiers and country codes POST /auth/register accepts', async () => {
-    expect((await list('TIER')).map((o) => o.code)).toEqual([...TIERS]);
-    expect((await list('COUNTRY_CODE')).map((o) => o.code)).toEqual([...COUNTRY_CODES]);
+  it('stores only well-formed codes for a user\'s choices', async () => {
+    const { userId } = await signUp('option-format');
+    await expect(db.query(
+      `insert into app.user_preferences (user_id, type, option_code) values ($1, 'INVESTMENT_SECTOR', 'Private Equities')`,
+      [userId],
+    )).rejects.toThrow(/user_preferences_option_code_check/);
   });
 
-  it('has options for every list the API serves', async () => {
+  it('has options for every list GET /lookups serves', async () => {
     for (const type of Object.values(LOOKUP_TYPES)) {
       expect((await list(type)).length, type).toBeGreaterThan(0);
     }
-  });
-
-  it('accepts a dialling code only as a country code', async () => {
-    await expect(db.query(`insert into app.lookup_options (type, code, label) values ('JOB_PROFILE', '+44', 'x')`))
-      .rejects.toThrow(/lookup_options_code_check/);
-    await expect(db.query(`insert into app.lookup_options (type, code, label) values ('COUNTRY_CODE', '44', 'x')`))
-      .rejects.toThrow(/lookup_options_code_check/);
   });
 });
 

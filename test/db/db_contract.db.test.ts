@@ -72,14 +72,13 @@ describe('real results pass the declared result shapes', () => {
 
     // Sign-up with the professional and investment details and the tier: both codes verified
     // creates the account, its profile and preferences, and a session.
-    const option = async (type: string) => (await callDb('app_list_options', { p_type: type })).find((o) => o.code !== 'OTHERS')!.code;
     const onboarding = {
-      profile: { experienceYears: 4, jobProfile: await option('JOB_PROFILE'), location: 'Pune' },
+      profile: { experienceYears: 4, jobProfile: 'STUDENT' as const, location: 'Pune' },
       preferences: {
-        focus: [await option('INVESTMENT_FOCUS')],
-        risk: [await option('RISK_LEVEL')],
-        style: [await option('INVESTMENT_STYLE')],
-        sector: [await option('INVESTMENT_SECTOR')],
+        focus: ['DIGITAL_ASSETS' as const],
+        risk: ['HIGH_LEVEL' as const],
+        style: ['VALUE_INVESTING' as const],
+        sector: ['FINTECH' as const],
       },
       tier: 'PRIVE' as const,
     };

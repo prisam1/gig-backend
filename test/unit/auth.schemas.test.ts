@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { preferencesSchema, tierChoiceSchema } from '../../src/modules/users/onboarding.schemas';
+import { preferencesSchema, signupProfileSchema, tierChoiceSchema } from '../../src/modules/users/onboarding.schemas';
 import { updateMeSchema } from '../../src/modules/users/users.schemas';
 import { identifierSchema, loginSchema, otpSendSchema, otpVerifySchema, registerSchema } from '../../src/modules/auth/auth.schemas';
 
@@ -94,7 +94,7 @@ describe('register', () => {
   });
 
   it('applies the onboarding rules to steps 2-3 sent with registration', () => {
-    const preferences = { focus: ['A', 'B'], risk: ['LOW_LEVEL'], style: ['X'], sector: ['Y'] };
+    const preferences = { focus: ['REAL_ASSETS', 'COMMODITIES'], risk: ['LOW_LEVEL'], style: ['ARBITRAGE'], sector: ['FINTECH'] };
     assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, preferences })), ['preferences.focus']);
     const profile = { experienceYears: '5+', jobProfile: 'BUSINESS_OWNER', location: 'Mumbai' };
     assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, profile })), ['profile.experienceYears']);
@@ -155,11 +155,36 @@ describe('onboarding', () => {
   it('enforces preference counts', () => {
     const base = { focus: ['REAL_ASSETS'], risk: ['LOW_LEVEL'], style: ['ARBITRAGE'], sector: ['FINTECH'] };
     assert.ok(preferencesSchema.safeParse(base).success);
-    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, focus: ['A', 'B'] })), ['focus']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, focus: ['REAL_ASSETS', 'COMMODITIES'] })), ['focus']);
     assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, risk: [] })), ['risk']);
-    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, style: ['A', 'B', 'C', 'D'] })), ['style']);
-    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, sector: ['A', 'A'] })), ['sector']);
-    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, sector: ['lower'] })), ['sector.0']);
+    const fourStyles = ['ARBITRAGE', 'BUY_AND_HOLD', 'CORE_INVESTING', 'VALUE_INVESTING'];
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, style: fourStyles })), ['style']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, sector: ['FINTECH', 'FINTECH'] })), ['sector']);
+  });
+
+  // The choices are fixed in the app: only their codes are accepted, from any client.
+  it('accepts only the app\'s option codes', () => {
+    const base = { focus: ['REAL_ASSETS'], risk: ['LOW_LEVEL'], style: ['ARBITRAGE'], sector: ['PRIVATE_EQUITIES'] };
+    assert.ok(preferencesSchema.safeParse(base).success);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, focus: ['GOLD'] })), ['focus.0']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, risk: ['EXTREME_LEVEL'] })), ['risk.0']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, style: ['ARBITRAGE', 'arbitrage'] })), ['style.1']);
+    // A code from another list is not accepted either.
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, sector: ['ARBITRAGE'] })), ['sector.0']);
+    for (const jobProfile of ['CEO', 'Business Owner', 'BUSINESS_OWNER ', '']) {
+      assert.equal(updateMeSchema.safeParse({ jobProfile }).success, false, jobProfile);
+    }
+    assert.ok(updateMeSchema.safeParse({ jobProfile: 'LEARNER_EDUCATOR' }).success);
+  });
+
+  it('takes the typed job profile only with Others', () => {
+    const profile = { experienceYears: 5, location: 'Mumbai' };
+    assert.ok(signupProfileSchema.safeParse({ ...profile, jobProfile: 'OTHERS', otherJob: 'Collector' }).success);
+    assert.deepEqual(fields(signupProfileSchema.safeParse({ ...profile, jobProfile: 'OTHERS' })), ['otherJob']);
+    assert.deepEqual(
+      fields(signupProfileSchema.safeParse({ ...profile, jobProfile: 'STUDENT', otherJob: 'Collector' })),
+      ['otherJob'],
+    );
   });
 
   it('only accepts known tiers', () => {

@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { COUNTRY_CODES, DEVICE_PLATFORMS } from '../modules/auth/auth.schemas';
-import { PREFERENCE_TYPES } from '../modules/users/onboarding.schemas';
+import { PREFERENCE_TYPES } from '../constants/onboarding';
+import {
+  focusCodeSchema,
+  jobProfileSchema,
+  riskCodeSchema,
+  sectorCodeSchema,
+  styleCodeSchema,
+} from '../modules/users/onboarding.schemas';
 import {
   ACCOUNT_STATUSES,
   DISPLAY_MODES,
@@ -581,15 +588,22 @@ export const DB_FUNCTIONS = {
         createdAt: timestamp,
         name: z.string(),
         experienceYears: z.number().int().nullable(),
-        jobProfileCode: z.string().nullable(),
-        jobProfileLabel: z.string().nullable(),
+        jobProfileCode: jobProfileSchema.nullable(),
         otherJob: z.string().nullable(),
         location: z.string().nullable(),
         avatarBucket: z.string().nullable(),
         avatarObjectKey: z.string().nullable(),
         followers: z.number().int(),
         following: z.number().int(),
-        preferences: z.array(z.object({ type: z.enum(PREFERENCE_TYPES), code: z.string(), label: z.string() })),
+        // The codes the user chose; the app shows its own labels for them.
+        preferences: z.array(
+          z.discriminatedUnion('type', [
+            z.object({ type: z.literal(PREFERENCE_TYPES.focus), code: focusCodeSchema }),
+            z.object({ type: z.literal(PREFERENCE_TYPES.risk), code: riskCodeSchema }),
+            z.object({ type: z.literal(PREFERENCE_TYPES.style), code: styleCodeSchema }),
+            z.object({ type: z.literal(PREFERENCE_TYPES.sector), code: sectorCodeSchema }),
+          ]),
+        ),
       })
       .nullable(),
   ),

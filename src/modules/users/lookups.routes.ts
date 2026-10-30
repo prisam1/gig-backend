@@ -1,4 +1,4 @@
-// Users, profile and KYC (Phase 1): option lists for the sign-up screens, under /api/v1/lookups.
+// Option lists under /api/v1/lookups: the rating wizard and the representation signing flow.
 import { Router } from 'express';
 import { z } from 'zod';
 import { parse } from '../../middleware/validate';
