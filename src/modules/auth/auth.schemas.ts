@@ -121,15 +121,18 @@ export const registerSchema = z
     return { ...body, phone };
   });
 
-// Sign-up step 1, before the user goes on: are the email and phone free?
+// Sign-up step 1: is the email free, is the phone free? Each can be checked on its own (the app checks
+// each field as soon as it is complete), or both together (Next).
 export const registerCheckSchema = z
   .object({
-    email: emailSchema,
+    email: emailSchema.optional(),
     countryCode: z.enum(COUNTRY_CODES, 'Unsupported country code').default('+91'),
-    phone: z.string('Phone number is required').trim(),
+    phone: z.string('Phone number is required').trim().optional(),
   })
   .strict()
+  .refine((body) => body.email !== undefined || body.phone !== undefined, 'Send an email or a phone number to check')
   .transform((body, ctx) => {
+    if (body.phone === undefined) return { email: body.email, phone: undefined };
     const phone = normalizePhone(body.countryCode, body.phone);
     if (!phone) {
       ctx.addIssue({ code: 'custom', path: ['phone'], message: PHONE_RULES[body.countryCode].message });

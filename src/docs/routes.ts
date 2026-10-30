@@ -87,7 +87,7 @@ export const routeDocs: RouteDoc[] = [
   // Auth
   r('post', '/auth/register/check', 'Auth', 'Check that the email and phone are free (sign-up step 1)', 'public', {
     description:
-      '200 { available: true } when neither belongs to an account. Otherwise 409 ACCOUNT_EXISTS with fields.email and/or fields.phone: "This email is already registered with another account." POST /auth/register checks again.',
+      'Send the email, the phone, or both (the app checks each field as soon as it is complete). 200 { available: true } when none belongs to an account. Otherwise 409 ACCOUNT_EXISTS with a separate message per taken field: fields.email "This email is already registered with another account.", fields.phone "This phone number is already registered with another account." POST /auth/register checks again.',
     body: auth.registerCheckSchema,
     example: { email: EMAIL, countryCode: '+91', phone: '9876543210' },
   }),

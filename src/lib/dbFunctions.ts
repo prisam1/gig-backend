@@ -481,7 +481,8 @@ export const DB_FUNCTIONS = {
   ),
   // Sign-up step 1: which of the two addresses already belong to an account.
   app_contact_taken: fn(
-    args({ p_email_hash: z.string(), p_phone_hash: z.string() }),
+    // null: that address is not being checked.
+    args({ p_email_hash: z.string().nullable(), p_phone_hash: z.string().nullable() }),
     z.object({ emailTaken: z.boolean(), phoneTaken: z.boolean() }),
   ),
   app_otp_start: fn(

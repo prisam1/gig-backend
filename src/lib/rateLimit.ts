@@ -12,8 +12,8 @@ export interface Limit {
 // Subjects (IPs, emails, phones) are hashed before they become keys.
 export const LIMITS = {
   registerPerIp: { name: 'register:ip', max: 10, windowSeconds: 3600 },
-  // Sign-up step 1 asks whether the email and phone are free.
-  registerCheckPerIp: { name: 'register-check:ip', max: 30, windowSeconds: 3600 },
+  // Sign-up step 1 asks whether the email and phone are free, each as soon as it is typed.
+  registerCheckPerIp: { name: 'register-check:ip', max: 60, windowSeconds: 3600 },
   otpSendPerIp: { name: 'otp-send:ip', max: 20, windowSeconds: 3600 },
   otpSendPerDestination: { name: 'otp-send:dest', max: 5, windowSeconds: 3600 },
   otpVerifyPerIp: { name: 'otp-verify:ip', max: 30, windowSeconds: 900 },

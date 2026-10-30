@@ -83,23 +83,23 @@ function otpError(f: DbFailure): AppError {
 // under each taken field, on step 1 (checkSignupContact) and again here.
 // ---------------------------------------------------------------------------------------------
 
+// Each taken address has its own message under its own field; they are never combined.
+const EMAIL_TAKEN = 'This email is already registered with another account.';
+const PHONE_TAKEN = 'This phone number is already registered with another account.';
+
 function accountExists(taken: { email: boolean; phone: boolean }): AppError {
   const fields: Record<string, string> = {};
-  if (taken.email) fields['email'] = 'This email is already registered with another account.';
-  if (taken.phone) fields['phone'] = 'This phone number is already registered with another account.';
-  const message =
-    taken.email && taken.phone
-      ? 'This email and phone number are already registered with another account.'
-      : (fields['email'] ?? fields['phone'] ?? '');
-  return new AppError(409, 'ACCOUNT_EXISTS', message, fields);
+  if (taken.email) fields['email'] = EMAIL_TAKEN;
+  if (taken.phone) fields['phone'] = PHONE_TAKEN;
+  return new AppError(409, 'ACCOUNT_EXISTS', taken.email ? EMAIL_TAKEN : PHONE_TAKEN, fields);
 }
 
-/** POST /auth/register/check: sign-up step 1 asks whether the email and phone are free. */
+/** POST /auth/register/check: sign-up step 1 asks whether the email, the phone, or both are free. */
 export async function checkSignupContact(input: z.infer<typeof registerCheckSchema>, ctx: ClientContext) {
   await consume(LIMITS.registerCheckPerIp, ctx.ip);
   const taken = await callDb('app_contact_taken', {
-    p_email_hash: emailHash(input.email),
-    p_phone_hash: phoneHash(input.phone),
+    p_email_hash: input.email === undefined ? null : emailHash(input.email),
+    p_phone_hash: input.phone === undefined ? null : phoneHash(input.phone),
   });
   if (taken.emailTaken || taken.phoneTaken) throw accountExists({ email: taken.emailTaken, phone: taken.phoneTaken });
   return { available: true as const };

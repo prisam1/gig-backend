@@ -176,6 +176,9 @@ describe('sign-up', () => {
     expect(await call('app_contact_taken', 'email-check', 'phone-free')).toEqual({ emailTaken: true, phoneTaken: false });
     expect(await call('app_contact_taken', 'email-free', 'phone-check')).toEqual({ emailTaken: false, phoneTaken: true });
     expect(await call('app_contact_taken', 'email-free', 'phone-free')).toEqual({ emailTaken: false, phoneTaken: false });
+    // One address on its own (the app checks each field as soon as it is complete).
+    expect(await call('app_contact_taken', 'email-check', null)).toEqual({ emailTaken: true, phoneTaken: false });
+    expect(await call('app_contact_taken', null, 'phone-check')).toEqual({ emailTaken: false, phoneTaken: true });
   });
 });
 

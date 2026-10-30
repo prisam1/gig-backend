@@ -38,11 +38,27 @@ describe('duplicate email or phone at sign-up', () => {
     it.each([
       [true, false, { email: EMAIL_TAKEN }, EMAIL_TAKEN],
       [false, true, { phone: PHONE_TAKEN }, PHONE_TAKEN],
-      [true, true, { email: EMAIL_TAKEN, phone: PHONE_TAKEN }, 'This email and phone number are already registered with another account.'],
-    ])('email taken %s, phone taken %s: 409 with a message under each taken field', async (email, phone, fields, message) => {
+      [true, true, { email: EMAIL_TAKEN, phone: PHONE_TAKEN }, EMAIL_TAKEN],
+    ])('email taken %s, phone taken %s: 409 with a separate message under each taken field', async (email, phone, fields, message) => {
       const res = await check(email, phone);
       expect(res.status).toBe(409);
       expect(res.body.error).toEqual({ code: 'ACCOUNT_EXISTS', message, fields });
+    });
+
+    it.each([
+      [{ email: 'asha.mehta@example.com' }, { p_email_hash: expect.any(String), p_phone_hash: null }, 'email'],
+      [{ phone: '9876543210' }, { p_email_hash: null, p_phone_hash: expect.any(String) }, 'phone'],
+    ])('checks one field on its own (%o)', async (body, args, field) => {
+      const rpc = vi.spyOn(dbTransport, 'rpc').mockResolvedValue({ emailTaken: field === 'email', phoneTaken: field === 'phone' });
+      const res = await request(app).post('/api/v1/auth/register/check').send(body);
+      expect(rpc).toHaveBeenCalledWith('app_contact_taken', args);
+      expect(res.status).toBe(409);
+      expect(Object.keys(res.body.error.fields)).toEqual([field]);
+    });
+
+    it('needs an email or a phone', async () => {
+      const res = await request(app).post('/api/v1/auth/register/check').send({});
+      expect(res.status).toBe(400);
     });
 
     it.each([
