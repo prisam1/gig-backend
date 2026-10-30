@@ -136,6 +136,8 @@ export const routeDocs: RouteDoc[] = [
   }),
   r('post', '/auth/logout', 'Auth', 'Sign out of this session', 'user', { status: 204 }),
   r('post', '/auth/password/forgot', 'Auth', 'Start a password reset', 'public', {
+    description:
+      'Sends a code when an active account has the email or phone, and returns its challenge. Otherwise 404 ACCOUNT_NOT_FOUND with fields.identifier: "No account found with this email. Please create your account." Verify the code with POST /auth/otp/verify.',
     body: auth.forgotPasswordSchema,
     status: 202,
     example: { identifier: EMAIL },

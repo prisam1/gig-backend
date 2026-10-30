@@ -203,10 +203,13 @@ describe('OTP guessing', () => {
     expect(await verify(newer)).toEqual({ status: 'RESET_TOKEN_ISSUED' });
   });
 
-  it('starts a decoy reset for an unknown address without revealing it', async () => {
+  it('starts no reset for an address without an account, and audits the attempt', async () => {
     const c = challenge();
     expect(await call('app_otp_start', 'PASSWORD_RESET', 'EMAIL', 'email-nobody', c, 300, CTX)).toEqual({ userExists: false });
-    expect(await verify(c)).toMatchObject({ error: 'OTP_INCORRECT' });
+    expect(await one(`select count(*)::int as n from app.otp_challenges where destination_hash = 'email-nobody'`)).toEqual({ n: 0 });
+    expect(await verify(c)).toMatchObject({ error: 'OTP_INVALID' });
+    expect(await one(`select count(*)::int as n from app.audit_logs where action = 'auth.password.reset_unknown_account'`))
+      .toEqual({ n: 1 });
   });
 
   it('has no OTP login: only sign-up and password-reset challenges exist', async () => {

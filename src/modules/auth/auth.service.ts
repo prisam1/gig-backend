@@ -139,10 +139,10 @@ export async function sendOtpRequest(input: z.infer<typeof otpSendSchema>, ctx: 
   return resendChallenge(input.challengeId);
 }
 
-// POST /auth/password/forgot: limited per IP like /auth/otp/send, so one machine cannot request
-// reset codes for many accounts. Unknown and suspended accounts get a decoy challenge, so the
-// response never reveals whether an email or phone is registered. Only the newest code per
-// address works.
+// POST /auth/password/forgot: a code is sent only when an active account has the email or phone;
+// otherwise the user is told to create an account (404 ACCOUNT_NOT_FOUND). Limited per IP and per
+// address before the lookup, so the answer cannot be used to check many addresses quickly. Only
+// the newest code per address works.
 export async function forgotPassword(identifier: Identifier, ctx: ClientContext) {
   await consume(LIMITS.otpSendPerIp, ctx.ip);
   const destinationHash = identifierHash(identifier);
@@ -157,7 +157,12 @@ export async function forgotPassword(identifier: Identifier, ctx: ClientContext)
     p_ttl_seconds: OTP_TTL_SECONDS,
     p_ctx: ctx,
   });
-  if (userExists) sendOtp(identifier.channel, identifier.value, challenge.code, 'PASSWORD_RESET');
+  if (!userExists) {
+    const what = identifier.channel === 'EMAIL' ? 'email' : 'phone number';
+    const message = `No account found with this ${what}. Please create your account.`;
+    throw new AppError(404, 'ACCOUNT_NOT_FOUND', message, { identifier: message });
+  }
+  sendOtp(identifier.channel, identifier.value, challenge.code, 'PASSWORD_RESET');
   return challengeView(challenge.publicId, identifier.channel, maskDestination(identifier.channel, identifier.value));
 }
 
