@@ -22,11 +22,3 @@ export const listLearnQuery = z.object({
 export type ListLearnQuery = z.output<typeof listLearnQuery>;
 
 export const learnIdParams = z.object({ id: uuidSchema });
-
-export const rateLearnBody = z.object({
-  rating: z
-    .number({ message: 'Rating is required' })
-    .int({ message: 'Rating must be a whole number' })
-    .min(1, { message: 'Rating must be between 1 and 5' })
-    .max(5, { message: 'Rating must be between 1 and 5' }),
-});

@@ -12,11 +12,13 @@ export interface Limit {
 // Subjects (IPs, emails, phones) are hashed before they become keys.
 export const LIMITS = {
   registerPerIp: { name: 'register:ip', max: 10, windowSeconds: 3600 },
+  // Sign-up step 1 asks whether the email and phone are free, each as soon as it is typed.
+  registerCheckPerIp: { name: 'register-check:ip', max: 60, windowSeconds: 3600 },
   otpSendPerIp: { name: 'otp-send:ip', max: 20, windowSeconds: 3600 },
   otpSendPerDestination: { name: 'otp-send:dest', max: 5, windowSeconds: 3600 },
   otpVerifyPerIp: { name: 'otp-verify:ip', max: 30, windowSeconds: 900 },
   // Counted per guess on one email or phone, from any IP, so spreading guesses over many IPs
-  // does not help. A correct code resets the count. 6 digits => at most 20 guesses a day.
+  // does not help. A correct code resets the count. 4 digits => at most 20 guesses a day (0.2% of the codes).
   otpVerifyPerDestinationHour: { name: 'otp-verify:dest:h', max: 10, windowSeconds: 3600 },
   otpVerifyPerDestinationDay: { name: 'otp-verify:dest:d', max: 20, windowSeconds: 86400 },
   loginPerIp: { name: 'login:ip', max: 20, windowSeconds: 900 },
@@ -27,7 +29,6 @@ export const LIMITS = {
   passwordResetPerIp: { name: 'pw-reset:ip', max: 10, windowSeconds: 3600 },
   uploadUrlPerUser: { name: 'upload-url:user', max: 30, windowSeconds: 3600 },
   kycSubmitPerUser: { name: 'kyc-submit:user', max: 5, windowSeconds: 3600 },
-  followPerUser: { name: 'follow:user', max: 60, windowSeconds: 60 },
   ratingSubmitPerUser: { name: 'rating-submit:user', max: 20, windowSeconds: 3600 },
   signaturePerUser: { name: 'signature:user', max: 20, windowSeconds: 3600 },
   // Every API request (health checks excepted). The load balancer's WAF adds its own limit.

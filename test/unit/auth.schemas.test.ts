@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'vitest';
-import { preferencesSchema, tierSchema, updateMeSchema } from '../../src/modules/users/users.schemas';
+import { preferencesSchema, signupProfileSchema, tierChoiceSchema } from '../../src/modules/users/onboarding.schemas';
+import { updateMeSchema } from '../../src/modules/users/users.schemas';
 import { identifierSchema, loginSchema, otpSendSchema, otpVerifySchema, registerSchema } from '../../src/modules/auth/auth.schemas';
 
 const validRegister = {
@@ -9,6 +10,9 @@ const validRegister = {
   phone: '9857485965',
   password: 'Str0ng!Pass',
   ageConfirmed: true,
+  profile: { experienceYears: 5, jobProfile: 'BUSINESS_OWNER', location: 'Mumbai' },
+  preferences: { focus: ['FINANCIAL_ASSETS'], risk: ['MEDIUM_LEVEL'], style: ['ACTIVE_INVESTING'], sector: ['TECHNOLOGY'] },
+  tier: 'OBSERVER',
 };
 
 function fields(result: { success: boolean; error?: { issues: { path: PropertyKey[] }[] } }) {
@@ -62,8 +66,9 @@ describe('register', () => {
     assert.ok(registerSchema.safeParse({ ...validRegister, name: 'अक्सा ख़ान' }).success);
   });
 
-  it('rejects unknown fields such as a self-assigned tier', () => {
-    assert.equal(registerSchema.safeParse({ ...validRegister, tier: 'PRIVE' }).success, false);
+  it('rejects unknown fields such as a self-assigned role, and tiers that do not exist', () => {
+    assert.equal(registerSchema.safeParse({ ...validRegister, role: 'ADMIN' }).success, false);
+    assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, tier: 'ADMIN' })), ['tier']);
   });
 
   it('rejects non-object bodies', () => {
@@ -77,16 +82,19 @@ describe('register', () => {
       preferences: { focus: ['FINANCIAL_ASSETS'], risk: ['MEDIUM_LEVEL'], style: ['ACTIVE_INVESTING'], sector: ['TECHNOLOGY'] },
       tier: 'PRIVE',
     });
-    assert.equal(r.profile?.experienceYears, 5);
+    assert.equal(r.profile.experienceYears, 5);
     assert.equal(r.tier, 'PRIVE');
   });
 
-  it('needs profile and preferences together with a tier', () => {
-    assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, tier: 'OBSERVER' })), ['tier']);
+  it('requires the professional details, investment details and tier (no screen sets them later)', () => {
+    for (const key of ['profile', 'preferences', 'tier'] as const) {
+      const { [key]: _omitted, ...body } = validRegister;
+      assert.deepEqual(fields(registerSchema.safeParse(body)), [key], key);
+    }
   });
 
   it('applies the onboarding rules to steps 2-3 sent with registration', () => {
-    const preferences = { focus: ['A', 'B'], risk: ['LOW_LEVEL'], style: ['X'], sector: ['Y'] };
+    const preferences = { focus: ['REAL_ASSETS', 'COMMODITIES'], risk: ['LOW_LEVEL'], style: ['ARBITRAGE'], sector: ['FINTECH'] };
     assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, preferences })), ['preferences.focus']);
     const profile = { experienceYears: '5+', jobProfile: 'BUSINESS_OWNER', location: 'Mumbai' };
     assert.deepEqual(fields(registerSchema.safeParse({ ...validRegister, profile })), ['profile.experienceYears']);
@@ -108,13 +116,13 @@ describe('identifier', () => {
 });
 
 describe('login and OTP', () => {
-  it('requires a 6-digit code and a UUID challenge', () => {
+  it('requires a 4-digit code and a UUID challenge', () => {
     const challengeId = '7f1c2a4e-1b2c-4d3e-8f90-123456789abc';
-    assert.ok(otpVerifySchema.safeParse({ challengeId, code: '012345' }).success);
-    for (const code of ['1234', '12345a', '1234567', 123456]) {
+    assert.ok(otpVerifySchema.safeParse({ challengeId, code: '0123' }).success);
+    for (const code of ['123', '123a', '12345', '123456', 1234]) {
       assert.equal(otpVerifySchema.safeParse({ challengeId, code }).success, false, String(code));
     }
-    assert.equal(otpVerifySchema.safeParse({ challengeId: 'not-a-uuid', code: '123456' }).success, false);
+    assert.equal(otpVerifySchema.safeParse({ challengeId: 'not-a-uuid', code: '1234' }).success, false);
   });
 
   it('defaults the device platform and rejects unknown ones', () => {
@@ -123,9 +131,11 @@ describe('login and OTP', () => {
     assert.equal(loginSchema.safeParse({ identifier: 'a@b.co', password: 'x', device: { platform: 'TV' } }).success, false);
   });
 
-  it('does not allow starting a SIGNUP challenge through /otp/send', () => {
-    assert.equal(otpSendSchema.safeParse({ purpose: 'SIGNUP', identifier: 'a@b.co' }).success, false);
-    assert.ok(otpSendSchema.safeParse({ purpose: 'LOGIN', identifier: 'a@b.co' }).success);
+  it('only resends existing challenges through /otp/send', () => {
+    assert.ok(otpSendSchema.safeParse({ challengeId: '7f1c2a4e-1b2c-4d3e-8f90-123456789abc' }).success);
+    for (const purpose of ['SIGNUP', 'LOGIN', 'PASSWORD_RESET']) {
+      assert.equal(otpSendSchema.safeParse({ purpose, identifier: 'a@b.co' }).success, false, purpose);
+    }
   });
 });
 
@@ -145,15 +155,40 @@ describe('onboarding', () => {
   it('enforces preference counts', () => {
     const base = { focus: ['REAL_ASSETS'], risk: ['LOW_LEVEL'], style: ['ARBITRAGE'], sector: ['FINTECH'] };
     assert.ok(preferencesSchema.safeParse(base).success);
-    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, focus: ['A', 'B'] })), ['focus']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, focus: ['REAL_ASSETS', 'COMMODITIES'] })), ['focus']);
     assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, risk: [] })), ['risk']);
-    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, style: ['A', 'B', 'C', 'D'] })), ['style']);
-    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, sector: ['A', 'A'] })), ['sector']);
-    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, sector: ['lower'] })), ['sector.0']);
+    const fourStyles = ['ARBITRAGE', 'BUY_AND_HOLD', 'CORE_INVESTING', 'VALUE_INVESTING'];
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, style: fourStyles })), ['style']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, sector: ['FINTECH', 'FINTECH'] })), ['sector']);
+  });
+
+  // The choices are fixed in the app: only their codes are accepted, from any client.
+  it('accepts only the app\'s option codes', () => {
+    const base = { focus: ['REAL_ASSETS'], risk: ['LOW_LEVEL'], style: ['ARBITRAGE'], sector: ['PRIVATE_EQUITIES'] };
+    assert.ok(preferencesSchema.safeParse(base).success);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, focus: ['GOLD'] })), ['focus.0']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, risk: ['EXTREME_LEVEL'] })), ['risk.0']);
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, style: ['ARBITRAGE', 'arbitrage'] })), ['style.1']);
+    // A code from another list is not accepted either.
+    assert.deepEqual(fields(preferencesSchema.safeParse({ ...base, sector: ['ARBITRAGE'] })), ['sector.0']);
+    for (const jobProfile of ['CEO', 'Business Owner', 'BUSINESS_OWNER ', '']) {
+      assert.equal(updateMeSchema.safeParse({ jobProfile }).success, false, jobProfile);
+    }
+    assert.ok(updateMeSchema.safeParse({ jobProfile: 'LEARNER_EDUCATOR' }).success);
+  });
+
+  it('takes the typed job profile only with Others', () => {
+    const profile = { experienceYears: 5, location: 'Mumbai' };
+    assert.ok(signupProfileSchema.safeParse({ ...profile, jobProfile: 'OTHERS', otherJob: 'Collector' }).success);
+    assert.deepEqual(fields(signupProfileSchema.safeParse({ ...profile, jobProfile: 'OTHERS' })), ['otherJob']);
+    assert.deepEqual(
+      fields(signupProfileSchema.safeParse({ ...profile, jobProfile: 'STUDENT', otherJob: 'Collector' })),
+      ['otherJob'],
+    );
   });
 
   it('only accepts known tiers', () => {
-    assert.ok(tierSchema.safeParse({ tier: 'PRIVE' }).success);
-    assert.equal(tierSchema.safeParse({ tier: 'ADMIN' }).success, false);
+    assert.ok(tierChoiceSchema.safeParse('PRIVE').success);
+    assert.equal(tierChoiceSchema.safeParse('ADMIN').success, false);
   });
 });

@@ -1,6 +1,13 @@
 import { z } from 'zod';
 import { COUNTRY_CODES, DEVICE_PLATFORMS } from '../modules/auth/auth.schemas';
-import { PREFERENCE_TYPES } from '../modules/users/users.schemas';
+import { PREFERENCE_TYPES } from '../constants/onboarding';
+import {
+  focusCodeSchema,
+  jobProfileSchema,
+  riskCodeSchema,
+  sectorCodeSchema,
+  styleCodeSchema,
+} from '../modules/users/onboarding.schemas';
 import {
   ACCOUNT_STATUSES,
   DISPLAY_MODES,
@@ -128,7 +135,7 @@ const storedFile = z.object({
 });
 
 const writeResult = z.union([
-  z.object({ ok: z.literal(true), requestedTier: verifiedTier.nullable().optional() }),
+  z.object({ ok: z.literal(true) }),
   z.object({ fields: z.record(z.string(), z.string()) }),
   z.object({ error: z.string() }),
 ]);
@@ -424,25 +431,6 @@ export const DB_FUNCTIONS = {
   // Sessions
   app_member: fn(args({ p_user_public_id: uuid, p_session_public_id: uuid }), member.nullable()),
   app_logout: fn(args({ p_user_id: internalId, p_session_id: internalId, p_ctx: ctx }), nothing),
-  app_list_sessions: fn(
-    args({ p_user_id: internalId }),
-    z.array(
-      z.object({
-        id: uuid,
-        deviceName: z.string().nullable(),
-        platform: z.enum(DEVICE_PLATFORMS),
-        appVersion: z.string().nullable(),
-        ip: z.string().nullable(),
-        createdAt: timestamp,
-        lastUsedAt: timestamp,
-      }),
-    ),
-  ),
-  app_revoke_session: fn(args({ p_user_id: internalId, p_session_public_id: uuid, p_ctx: ctx }), z.boolean()),
-  app_revoke_other_sessions: fn(
-    args({ p_user_id: internalId, p_keep_session_id: internalId, p_ctx: ctx }),
-    nothing,
-  ),
 
   // Sign-up, OTP and login
   app_signup_start: fn(
@@ -485,13 +473,21 @@ export const DB_FUNCTIONS = {
       p_ctx: ctx,
     }),
     z.union([
-      z.object({ signupId: uuid, expiresAt: timestamp, emailTaken: z.boolean(), phoneTaken: z.boolean() }),
+      z.object({ signupId: uuid, expiresAt: timestamp }),
       z.object({ fields: z.record(z.string(), z.string()) }),
+      // The email and/or phone already belong to an account: nothing was stored.
+      z.object({ taken: z.object({ email: z.boolean(), phone: z.boolean() }) }),
     ]),
+  ),
+  // Sign-up step 1: which of the two addresses already belong to an account.
+  app_contact_taken: fn(
+    // null: that address is not being checked.
+    args({ p_email_hash: z.string().nullable(), p_phone_hash: z.string().nullable() }),
+    z.object({ emailTaken: z.boolean(), phoneTaken: z.boolean() }),
   ),
   app_otp_start: fn(
     args({
-      p_purpose: z.enum(['LOGIN', 'PASSWORD_RESET']),
+      p_purpose: z.literal('PASSWORD_RESET'),
       p_channel: channel,
       p_destination_hash: z.string(),
       p_challenge: storedCode,
@@ -513,7 +509,7 @@ export const DB_FUNCTIONS = {
     z.union([
       z.object({
         channel,
-        purpose: z.enum(['SIGNUP', 'LOGIN', 'PASSWORD_RESET']),
+        purpose: z.enum(['SIGNUP', 'PASSWORD_RESET']),
         isDecoy: z.boolean(),
         destinationEnc: z.string().nullable(),
       }),
@@ -584,7 +580,7 @@ export const DB_FUNCTIONS = {
     z.object({ ok: z.boolean() }),
   ),
 
-  // Users, profile, preferences, tier and follows
+  // Users and profile
   app_list_options: fn(args({ p_type: z.string() }), z.array(z.object({ code: z.string(), label: z.string() }))),
   app_get_user: fn(
     args({ p_user_id: internalId }),
@@ -600,15 +596,22 @@ export const DB_FUNCTIONS = {
         createdAt: timestamp,
         name: z.string(),
         experienceYears: z.number().int().nullable(),
-        jobProfileCode: z.string().nullable(),
-        jobProfileLabel: z.string().nullable(),
+        jobProfileCode: jobProfileSchema.nullable(),
         otherJob: z.string().nullable(),
         location: z.string().nullable(),
         avatarBucket: z.string().nullable(),
         avatarObjectKey: z.string().nullable(),
         followers: z.number().int(),
         following: z.number().int(),
-        preferences: z.array(z.object({ type: z.enum(PREFERENCE_TYPES), code: z.string(), label: z.string() })),
+        // The codes the user chose; the app shows its own labels for them.
+        preferences: z.array(
+          z.discriminatedUnion('type', [
+            z.object({ type: z.literal(PREFERENCE_TYPES.focus), code: focusCodeSchema }),
+            z.object({ type: z.literal(PREFERENCE_TYPES.risk), code: riskCodeSchema }),
+            z.object({ type: z.literal(PREFERENCE_TYPES.style), code: styleCodeSchema }),
+            z.object({ type: z.literal(PREFERENCE_TYPES.sector), code: sectorCodeSchema }),
+          ]),
+        ),
       })
       .nullable(),
   ),
@@ -627,39 +630,6 @@ export const DB_FUNCTIONS = {
     }),
     writeResult,
   ),
-  app_set_preferences: fn(
-    args({
-      p_user_id: internalId,
-      p_groups: z.array(
-        z.strictObject({ type: z.enum(PREFERENCE_TYPES), field: z.string(), codes: z.array(z.string()) }),
-      ),
-      p_ctx: ctx,
-    }),
-    writeResult,
-  ),
-  app_select_tier: fn(args({ p_user_id: internalId, p_tier: tier, p_ctx: ctx }), writeResult),
-  app_public_user: fn(
-    args({ p_public_id: uuid }),
-    z
-      .object({
-        id: internalId,
-        publicId: uuid,
-        tier,
-        kycStatus,
-        createdAt: timestamp,
-        name: z.string(),
-        location: z.string().nullable(),
-        avatarBucket: z.string().nullable(),
-        avatarObjectKey: z.string().nullable(),
-      })
-      .nullable(),
-  ),
-  app_count_follows: fn(
-    args({ p_user_id: internalId }),
-    z.object({ followers: z.number().int(), following: z.number().int() }),
-  ),
-  app_follow: fn(args({ p_follower_id: internalId, p_followee_id: internalId }), nothing),
-  app_unfollow: fn(args({ p_follower_id: internalId, p_followee_id: internalId }), nothing),
 
   // Files and KYC
   app_create_file: fn(
@@ -683,20 +653,6 @@ export const DB_FUNCTIONS = {
       p_ctx: ctx,
     }),
     uuid,
-  ),
-  app_kyc_latest: fn(
-    args({ p_user_id: internalId }),
-    z
-      .object({
-        publicId: uuid,
-        tier: verifiedTier,
-        status: z.enum(KYC_SUBMISSION_STATUSES),
-        reason: z.string().nullable(),
-        submittedAt: timestamp,
-        reviewedAt: timestamp.nullable(),
-        documents: z.array(z.object({ fileId: uuid, documentType: z.enum(KYC_DOCUMENT_TYPES) })),
-      })
-      .nullable(),
   ),
 
   // Ratings
@@ -761,24 +717,6 @@ export const DB_FUNCTIONS = {
         riskCodes: z.array(z.string()),
       })
       .nullable(),
-  ),
-  app_ratings_mine: fn(
-    args({
-      p_user_id: internalId,
-      p_statuses: z.array(z.enum(RATING_STATUSES)).nullable(),
-      p_limit: z.number().int(),
-      p_offset: z.number().int(),
-    }),
-    page(
-      z.object({
-        publicId: uuid,
-        receiptNo: z.string(),
-        status: z.enum(RATING_STATUSES),
-        overallScore: z.number().int(),
-        createdAt: timestamp,
-        issuer: issuerRef,
-      }),
-    ),
   ),
 
   // Representations
@@ -1248,6 +1186,7 @@ export type DbFunction = keyof typeof DB_FUNCTIONS;
  * retried. test/db/db_contract.db.test.ts keeps this list in step with the SQL.
  */
 export const READ_ONLY_DB_FUNCTIONS: ReadonlySet<DbFunction> = new Set<DbFunction>([
+  'app_contact_taken',
   'app_admin_audit_logs',
   'app_admin_find_representations',
   'app_admin_find_users',
@@ -1257,7 +1196,6 @@ export const READ_ONLY_DB_FUNCTIONS: ReadonlySet<DbFunction> = new Set<DbFunctio
   'app_admin_moderation_item',
   'app_admin_moderation_queue',
   'app_admin_representation_signatures',
-  'app_count_follows',
   'app_find_issuer',
   'app_find_issuers',
   'app_find_owned_files',
@@ -1265,17 +1203,13 @@ export const READ_ONLY_DB_FUNCTIONS: ReadonlySet<DbFunction> = new Set<DbFunctio
   'app_find_representations',
   'app_get_user',
   'app_issuer_stats',
-  'app_kyc_latest',
   'app_list_options',
-  'app_list_sessions',
   'app_login_lookup',
   'app_member',
   'app_otp_peek',
   'app_ping',
-  'app_public_user',
   'app_rating_by_idempotency_key',
   'app_rating_own',
-  'app_ratings_mine',
   'app_representation_evidence',
   'app_representation_history',
   'app_representation_signature',

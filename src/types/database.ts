@@ -550,41 +550,6 @@ export type Database = {
           },
         ];
       };
-      device_tokens: {
-        Row: {
-          token: string;
-          user_id: string;
-          platform: Database['public']['Enums']['device_platform'];
-          app_version: string | null;
-          created_at: string;
-          last_seen_at: string;
-        };
-        Insert: {
-          token: string;
-          user_id: string;
-          platform: Database['public']['Enums']['device_platform'];
-          app_version?: string | null;
-          created_at?: string;
-          last_seen_at?: string;
-        };
-        Update: {
-          token?: string;
-          user_id?: string;
-          platform?: Database['public']['Enums']['device_platform'];
-          app_version?: string | null;
-          created_at?: string;
-          last_seen_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'device_tokens_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['public_id'];
-          },
-        ];
-      };
       fx_rates: {
         Row: {
           currency: Database['public']['Enums']['currency_code'];
@@ -659,45 +624,6 @@ export type Database = {
           updated_at?: string;
         };
         Relationships: [];
-      };
-      learn_ratings: {
-        Row: {
-          learn_item_id: string;
-          user_id: string;
-          rating: number;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: {
-          learn_item_id: string;
-          user_id: string;
-          rating: number;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: {
-          learn_item_id?: string;
-          user_id?: string;
-          rating?: number;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Relationships: [
-          {
-            foreignKeyName: 'learn_ratings_learn_item_id_fkey';
-            columns: ['learn_item_id'];
-            isOneToOne: false;
-            referencedRelation: 'learn_items';
-            referencedColumns: ['id'];
-          },
-          {
-            foreignKeyName: 'learn_ratings_user_id_fkey';
-            columns: ['user_id'];
-            isOneToOne: false;
-            referencedRelation: 'users';
-            referencedColumns: ['public_id'];
-          },
-        ];
       };
       notifications: {
         Row: {

@@ -3,7 +3,7 @@ import { env } from '../../config/env';
 import { generateOtp, keyedHash } from '../../lib/crypto';
 import type { Channel } from '../../lib/notifier';
 
-// Matches the plan: 6-digit codes, valid 5 minutes, 5 attempts per code, 45 s resend cooldown
+// 4-digit codes (the app has 4 boxes), valid 5 minutes, 5 attempts per code, 45 s resend cooldown
 // (the app's timer), at most 5 sends per challenge.
 export const OTP_TTL_SECONDS = 300;
 export const OTP_MAX_ATTEMPTS = 5;

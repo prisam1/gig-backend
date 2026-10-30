@@ -97,22 +97,14 @@ export const registerSchema = z
     phone: z.string('Phone number is required').trim(),
     password: passwordSchema,
     ageConfirmed: z.literal(true, 'You must confirm you are 18 years of age or older'),
-    // Optional: sign-up steps 2-3 and the tier, for the app's order (all screens first, OTP last).
-    // Stored with the pending sign-up and applied when the account is created.
-    profile: signupProfileSchema.optional(),
-    preferences: preferencesSchema.optional(),
-    tier: tierChoiceSchema.optional(),
+    // Sign-up steps 2-3 and the tier: the app sends everything from its tier screen, before the
+    // OTP screen. Stored with the pending sign-up and applied when the account is created.
+    profile: signupProfileSchema,
+    preferences: preferencesSchema,
+    tier: tierChoiceSchema,
   })
   .strict()
   .transform((body, ctx) => {
-    if (body.tier && (!body.profile || !body.preferences)) {
-      ctx.addIssue({
-        code: 'custom',
-        path: ['tier'],
-        message: 'Send profile and preferences together with the tier',
-      });
-      return z.NEVER;
-    }
     const phone = normalizePhone(body.countryCode, body.phone);
     if (!phone) {
       ctx.addIssue({ code: 'custom', path: ['phone'], message: PHONE_RULES[body.countryCode].message });
@@ -129,17 +121,34 @@ export const registerSchema = z
     return { ...body, phone };
   });
 
-const otpCodeSchema = z.string('Code is required').regex(/^\d{6}$/, 'Code must be 6 digits');
+// Sign-up step 1: is the email free, is the phone free? Each can be checked on its own (the app checks
+// each field as soon as it is complete), or both together (Next).
+export const registerCheckSchema = z
+  .object({
+    email: emailSchema.optional(),
+    countryCode: z.enum(COUNTRY_CODES, 'Unsupported country code').default('+91'),
+    phone: z.string('Phone number is required').trim().optional(),
+  })
+  .strict()
+  .refine((body) => body.email !== undefined || body.phone !== undefined, 'Send an email or a phone number to check')
+  .transform((body, ctx) => {
+    if (body.phone === undefined) return { email: body.email, phone: undefined };
+    const phone = normalizePhone(body.countryCode, body.phone);
+    if (!phone) {
+      ctx.addIssue({ code: 'custom', path: ['phone'], message: PHONE_RULES[body.countryCode].message });
+      return z.NEVER;
+    }
+    return { email: body.email, phone };
+  });
+
+const otpCodeSchema = z.string('Code is required').regex(/^\d{4}$/, 'Code must be 4 digits');
 
 export const otpVerifySchema = z
   .object({ challengeId: z.uuid('Invalid challenge'), code: otpCodeSchema, device: deviceSchema })
   .strict();
 
-// Either resend an existing challenge, or start a login / password-reset challenge.
-export const otpSendSchema = z.union([
-  z.object({ challengeId: z.uuid('Invalid challenge') }).strict(),
-  z.object({ purpose: z.enum(['LOGIN', 'PASSWORD_RESET']), identifier: identifierSchema }).strict(),
-]);
+// Resend the code of an existing challenge (sign-up or password reset).
+export const otpSendSchema = z.object({ challengeId: z.uuid('Invalid challenge') }).strict();
 
 export const loginSchema = z
   .object({
@@ -158,5 +167,3 @@ export const forgotPasswordSchema = z.object({ identifier: identifierSchema }).s
 export const resetPasswordSchema = z
   .object({ resetToken: z.string('Reset token is required').min(1).max(200), newPassword: passwordSchema })
   .strict();
-
-export const sessionIdSchema = z.uuid('Invalid session id');

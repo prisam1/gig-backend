@@ -4,6 +4,7 @@ import request from 'supertest';
 import { describe, expect, it, vi } from 'vitest';
 import { authProvider } from '../src/lib/auth';
 import { signAccessToken } from '../src/lib/tokens';
+import { routeDocs } from '../src/docs/routes';
 import { AppError } from '../src/middleware/errorHandler';
 import { AUTH_HEADER, OTHER_USER_ID, app, signInAs } from './helpers';
 
@@ -13,28 +14,34 @@ const signOptions = { issuer: 'gig-backend', audience: 'gig-app', subject: rando
 
 const base64url = (value: object) => Buffer.from(JSON.stringify(value)).toString('base64url');
 
-// Every route that needs a signed-in user ("User", "Prive" or "Full" access in the API spec).
-const PROTECTED: [method: 'get' | 'post' | 'put' | 'patch' | 'delete', path: string][] = [
-  ['post', '/api/v1/auth/logout'],
-  ['get', '/api/v1/auth/sessions'],
-  ['delete', '/api/v1/auth/sessions'],
-  ['get', '/api/v1/me'],
-  ['patch', '/api/v1/me'],
-  ['put', '/api/v1/me/preferences'],
-  ['put', '/api/v1/me/tier'],
-  ['get', `/api/v1/users/${OTHER_USER_ID}`],
-  ['post', `/api/v1/users/${OTHER_USER_ID}/follow`],
-  ['delete', `/api/v1/users/${OTHER_USER_ID}/follow`],
-  ['post', '/api/v1/files/upload-url'],
-  ['post', '/api/v1/kyc/submissions'],
-  ['get', '/api/v1/kyc/submissions/me'],
-  ['get', '/api/v1/companies/compare?ids=a,b'],
-  ['get', `/api/v1/companies/${OTHER_USER_ID}/trends`],
-  ['post', '/api/v1/reviews'],
-  ['get', '/api/v1/reviews/me'],
-  ['get', `/api/v1/reviews/${OTHER_USER_ID}`],
-  ['patch', `/api/v1/reviews/${OTHER_USER_ID}/resolution`],
-];
+// Every route that needs a signed-in user, taken from the API spec (src/docs/routes.ts), which
+// test/api/docs.api.test.ts keeps identical to the routes the server actually serves. A new route
+// is therefore checked here automatically unless it is documented as public.
+const PROTECTED = routeDocs
+  .filter((doc) => doc.access !== 'public' && doc.access !== 'optional')
+  .map((doc) => [
+    doc.method,
+    `/api/v1${doc.path.replace(/:type(?![A-Za-z])/g, 'COMPANY').replace(/:[A-Za-z]+/g, OTHER_USER_ID)}`,
+  ] as const);
+
+// Sign-in, sign-up and reset must stay reachable without a token; nothing else is public by accident.
+const PUBLIC_WRITES = routeDocs
+  .filter((doc) => doc.access === 'public' && doc.method !== 'get')
+  .map((doc) => `${doc.method.toUpperCase()} ${doc.path}`);
+
+it('documents only the sign-in, sign-up and reset routes as public writes', () => {
+  expect(PUBLIC_WRITES.sort()).toEqual([
+    'POST /auth/login',
+    'POST /auth/otp/send',
+    'POST /auth/otp/verify',
+    'POST /auth/password/forgot',
+    'POST /auth/password/reset',
+    'POST /auth/refresh',
+    'POST /auth/register',
+    'POST /auth/register/check',
+  ]);
+  expect(PROTECTED.length).toBeGreaterThan(60);
+});
 
 describe('authentication on protected routes', () => {
   it.each(PROTECTED)('%s %s rejects requests without a bearer token', async (method, path) => {

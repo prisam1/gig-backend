@@ -34,9 +34,9 @@ const envSchema = z
 
     // How OTP codes reach users. "console" prints them to the server log and is refused in production.
     OTP_DELIVERY: z.enum(['console']).default('console'),
-    // Development and testing only: every OTP code is this value (e.g. 123456) instead of a random
+    // Development and testing only: every OTP code is this value (e.g. 1234) instead of a random
     // one, so sign-up, login and reset can be completed without SMS or email. Refused in production.
-    OTP_TEST_CODE: z.string().regex(/^\d{6}$/, 'Must be exactly 6 digits').optional(),
+    OTP_TEST_CODE: z.string().regex(/^\d{4}$/, 'Must be exactly 4 digits').optional(),
 
     // Swagger UI at /api/docs. Defaults to on everywhere except production.
     API_DOCS: z.enum(['true', 'false']).optional(),

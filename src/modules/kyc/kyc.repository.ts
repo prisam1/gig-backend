@@ -1,16 +1,6 @@
 import { callDb } from '../../lib/db';
 import type { ClientContext } from '../../middleware/requestContext';
-import type { KycDocumentType, KycSubmissionStatus, VerifiedTier } from '../../types/domain';
-
-export interface KycSubmission {
-  publicId: string;
-  tier: VerifiedTier;
-  status: KycSubmissionStatus;
-  reason: string | null;
-  submittedAt: Date;
-  reviewedAt: Date | null;
-  documents: { fileId: string; documentType: KycDocumentType }[];
-}
+import type { KycDocumentType, VerifiedTier } from '../../types/domain';
 
 export interface NewKycSubmission {
   userId: string;
@@ -32,14 +22,4 @@ export const kycRepository = {
     });
   },
 
-  async findLatest(userId: string): Promise<KycSubmission | null> {
-    const row = await callDb('app_kyc_latest', { p_user_id: userId });
-    return (
-      row && {
-        ...row,
-        submittedAt: new Date(row.submittedAt),
-        reviewedAt: row.reviewedAt ? new Date(row.reviewedAt) : null,
-      }
-    );
-  },
 };

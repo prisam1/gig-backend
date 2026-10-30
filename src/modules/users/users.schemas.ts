@@ -1,21 +1,13 @@
 import { z } from 'zod';
 import { nameSchema } from '../auth/auth.schemas';
-import {
-  experienceYearsSchema,
-  locationSchema,
-  optionCode,
-  otherJobSchema,
-  PREFERENCE_TYPES,
-  preferencesSchema,
-  tierChoiceSchema,
-} from './onboarding.schemas';
+import { experienceYearsSchema, jobProfileSchema, locationSchema, otherJobSchema } from './onboarding.schemas';
 
-// Sign-up step 2 (and later profile edits). Every field is optional, but at least one is required.
+// Profile edits. Every field is optional, but at least one is required.
 export const updateMeSchema = z
   .object({
     name: nameSchema.optional(),
     experienceYears: experienceYearsSchema.optional(),
-    jobProfile: optionCode.optional(),
+    jobProfile: jobProfileSchema.optional(),
     otherJob: otherJobSchema.optional(),
     location: locationSchema.optional(),
     // From POST /files/upload-url with purpose AVATAR.
@@ -24,18 +16,8 @@ export const updateMeSchema = z
   .strict()
   .refine((body) => Object.keys(body).length > 0, 'Nothing to update');
 
-export { PREFERENCE_TYPES, preferencesSchema };
-
-export const tierSchema = z.object({ tier: tierChoiceSchema }).strict();
-
-export const userIdParamSchema = z.object({ id: z.uuid('Invalid user ID') });
-
+// The sign-up choices are fixed in the app (src/constants/onboarding.ts), so they are not served here.
 export const LOOKUP_TYPES = {
-  'job-profiles': 'JOB_PROFILE',
-  'investment-focus': 'INVESTMENT_FOCUS',
-  'risk-levels': 'RISK_LEVEL',
-  'investment-styles': 'INVESTMENT_STYLE',
-  'investment-sectors': 'INVESTMENT_SECTOR',
   // Ratings: the rating wizard's factors and risks. Representations: the signing flow.
   'rating-factors': 'RATING_FACTOR',
   'risk-factors': 'RISK_FACTOR',

@@ -19,7 +19,7 @@ beforeEach(() => { fake.reset(); });
 
 describe('API conventions', () => {
   it('serves the health check', async () => {
-    const res = await request(app).get('/api/v1/health').expect(200);
+    const res = await request(app).get('/api/v1/health/live').expect(200);
     expect(res.body.status).toBe('ok');
   });
 
@@ -68,7 +68,7 @@ describe('API conventions', () => {
   });
 
   it('sets security headers', async () => {
-    const res = await request(app).get('/api/v1/health');
+    const res = await request(app).get('/api/v1/health/live');
     expect(res.headers['x-content-type-options']).toBe('nosniff');
     expect(res.headers['x-powered-by']).toBeUndefined();
   });

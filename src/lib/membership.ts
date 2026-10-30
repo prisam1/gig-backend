@@ -12,7 +12,7 @@ export type KycStatus = (typeof KYC_STATUSES)[number];
 
 export interface Member {
   userId: string;
-  /** The user id other modules store (reviews.user_id, file folders, /users/:id). */
+  /** The user id other modules store (reviews.user_id, file folders). */
   userPublicId: string;
   sessionId: string;
   sessionPublicId: string;

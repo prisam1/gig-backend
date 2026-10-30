@@ -9,13 +9,19 @@ import {
   otpSendSchema,
   otpVerifySchema,
   refreshSchema,
+  registerCheckSchema,
   registerSchema,
   resetPasswordSchema,
-  sessionIdSchema,
 } from './auth.schemas';
 import * as auth from './auth.service';
 
 export const authRouter = Router();
+
+// Sign-up step 1, before going on: 200 when the email and phone are free, else 409 ACCOUNT_EXISTS.
+authRouter.post('/register/check', async (req, res) => {
+  const data = await auth.checkSignupContact(parse(registerCheckSchema, req.body), clientContext(req));
+  res.json({ data });
+});
 
 // Step 1 of sign-up: name, email, phone, password, 18+ confirmation. Sends both OTPs.
 authRouter.post('/register', async (req, res) => {
@@ -23,13 +29,13 @@ authRouter.post('/register', async (req, res) => {
   res.status(202).json({ data });
 });
 
-// Resend a code ({ challengeId }) or start an OTP login / reset ({ purpose, identifier }).
+// Resend the code of a sign-up or password-reset challenge ({ challengeId }).
 authRouter.post('/otp/send', async (req, res) => {
   const data = await auth.sendOtpRequest(parse(otpSendSchema, req.body), clientContext(req));
   res.status(202).json({ data });
 });
 
-// Returns tokens (sign-up complete, OTP login), sign-up progress, or a password reset token.
+// Returns tokens (sign-up complete), sign-up progress, or a password reset token.
 authRouter.post('/otp/verify', async (req, res) => {
   const data = await auth.verifyOtp(parse(otpVerifySchema, req.body), clientContext(req));
   res.json({ data });
@@ -59,19 +65,4 @@ authRouter.post('/password/forgot', async (req, res) => {
 authRouter.post('/password/reset', async (req, res) => {
   const data = await auth.resetPassword(parse(resetPasswordSchema, req.body), clientContext(req));
   res.json({ data });
-});
-
-authRouter.get('/sessions', requireAuth, async (req, res) => {
-  res.json({ data: await auth.listSessions(getAuth(req)) });
-});
-
-// Sign out every other device.
-authRouter.delete('/sessions', requireAuth, async (req, res) => {
-  await auth.revokeOtherSessions(getAuth(req), clientContext(req));
-  res.status(204).end();
-});
-
-authRouter.delete('/sessions/:id', requireAuth, async (req, res) => {
-  await auth.revokeSession(getAuth(req), parse(sessionIdSchema, req.params['id']), clientContext(req));
-  res.status(204).end();
 });

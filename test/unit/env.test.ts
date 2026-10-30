@@ -21,7 +21,7 @@ afterEach(() => {
 
 describe('OTP_TEST_CODE', () => {
   it('is accepted outside production', async () => {
-    const result = await loadEnvWith({ NODE_ENV: 'development', OTP_TEST_CODE: '123456' });
+    const result = await loadEnvWith({ NODE_ENV: 'development', OTP_TEST_CODE: '1234' });
     expect(result).toMatchObject({ loaded: true, exited: false });
   });
 
@@ -29,15 +29,15 @@ describe('OTP_TEST_CODE', () => {
     const result = await loadEnvWith({
       NODE_ENV: 'production',
       CORS_ORIGIN: 'https://app.gig.example',
-      OTP_TEST_CODE: '123456',
+      OTP_TEST_CODE: '1234',
     });
     expect(result.exited).toBe(true);
     expect(result.logged).toContain('A fixed OTP code is not allowed in production');
   });
 
-  it('must be exactly 6 digits', async () => {
-    const result = await loadEnvWith({ NODE_ENV: 'development', OTP_TEST_CODE: '1234' });
+  it('must be exactly 4 digits', async () => {
+    const result = await loadEnvWith({ NODE_ENV: 'development', OTP_TEST_CODE: '123456' });
     expect(result.exited).toBe(true);
-    expect(result.logged).toContain('Must be exactly 6 digits');
+    expect(result.logged).toContain('Must be exactly 4 digits');
   });
 });

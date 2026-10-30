@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { csv, pagination } from '../../lib/http';
-import { RATING_FLAGS, RATING_STATUSES } from '../../types/domain';
+import { RATING_FLAGS } from '../../types/domain';
 
 export const issuerIdParams = z.strictObject({ id: z.uuid('Invalid issuer ID') });
 
@@ -62,13 +62,3 @@ export const submitRatingBody = z.strictObject({
     .refine(hasNoDuplicates, 'Select 3 different risk factors'),
 });
 export type SubmitRatingInput = z.infer<typeof submitRatingBody>;
-
-// ---------------------------------------------------------------------------------------------
-// GET /ratings/me
-// ---------------------------------------------------------------------------------------------
-
-export const listMyRatingsQuery = z.object({
-  ...pagination,
-  status: csv(z.enum(RATING_STATUSES)).optional(),
-});
-export type ListMyRatingsQuery = z.infer<typeof listMyRatingsQuery>;

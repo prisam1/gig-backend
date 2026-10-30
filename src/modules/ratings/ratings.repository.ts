@@ -3,7 +3,7 @@ import { callDb } from '../../lib/db';
 import { containsPattern } from '../../lib/http';
 import type { ClientContext } from '../../middleware/requestContext';
 import type { RatingFlag, RatingStatus } from '../../types/domain';
-import type { IssuerSort, ListIssuersQuery, ListMyRatingsQuery } from './ratings.schemas';
+import type { IssuerSort, ListIssuersQuery } from './ratings.schemas';
 
 // ---------------------------------------------------------------------------------------------
 // Domain shapes
@@ -81,8 +81,6 @@ export interface StoredRating {
   factors: FactorFlag[];
   riskCodes: string[];
 }
-
-export type MyRating = Omit<StoredRating, 'moderationNote' | 'factors' | 'riskCodes'>;
 
 export interface Page<T> {
   items: T[];
@@ -225,13 +223,4 @@ export const ratingsRepository = {
     return row;
   },
 
-  async findMine(userId: string, query: ListMyRatingsQuery): Promise<Page<MyRating>> {
-    const page = await callDb('app_ratings_mine', {
-      p_user_id: userId,
-      p_statuses: query.status ?? null,
-      p_limit: query.pageSize,
-      p_offset: (query.page - 1) * query.pageSize,
-    });
-    return page;
-  },
 };

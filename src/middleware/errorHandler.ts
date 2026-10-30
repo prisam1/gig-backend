@@ -1,6 +1,7 @@
 import type { ErrorRequestHandler, RequestHandler } from 'express';
 import { z } from 'zod';
 import { env } from '../config/env';
+import { noteError } from './requestLog';
 
 // Every error response has the shape { error: { code, message, fields? } } so the app can show
 // its existing field messages.
@@ -83,6 +84,7 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
   if (!known) {
     console.error(`[${req.requestId}]`, err);
     const detail = err instanceof Error ? err.message : String(err);
+    noteError(res, { code: 'INTERNAL', message: detail });
     res.status(500).json({
       error: {
         code: 'INTERNAL',
@@ -93,6 +95,7 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     return;
   }
 
+  noteError(res, { code: known.code, message: known.message, ...(known.fields && { fields: Object.keys(known.fields) }) });
   if (known.headers) res.set(known.headers);
   res.status(known.status).json({
     error: { code: known.code, message: known.message, ...(known.fields && { fields: known.fields }) },

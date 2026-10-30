@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import {
   issuerIdParams,
   listIssuersQuery,
-  listMyRatingsQuery,
   submitRatingBody,
 } from '../../src/modules/ratings/ratings.schemas';
 
@@ -118,11 +117,4 @@ describe('issuer queries', () => {
     expect(listIssuersQuery.safeParse({ filter: { listed: 'yes' } }).success).toBe(false);
   });
 
-  it('filters my ratings by status', () => {
-    expect(listMyRatingsQuery.parse({ status: 'PUBLISHED,PENDING_MODERATION' }).status).toEqual([
-      'PUBLISHED',
-      'PENDING_MODERATION',
-    ]);
-    expect(listMyRatingsQuery.safeParse({ status: 'DRAFT' }).success).toBe(false);
-  });
 });

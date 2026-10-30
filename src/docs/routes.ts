@@ -7,7 +7,6 @@ import { statementQuery } from '../modules/credits/credits.routes';
 import * as files from '../modules/files/files.schemas';
 import * as kyc from '../modules/kyc/kyc.schemas';
 import * as learn from '../modules/learn/learn.schemas';
-import * as notifications from '../modules/notifications/notifications.schemas';
 import * as ratings from '../modules/ratings/ratings.schemas';
 import * as representations from '../modules/representations/representations.schemas';
 import * as reviews from '../modules/reviews/reviews.schemas';
@@ -82,11 +81,16 @@ const device = { name: 'Swagger UI', platform: 'WEB' };
 /** Every route the API serves. `test/api/docs.api.test.ts` fails when this drifts from the routers. */
 export const routeDocs: RouteDoc[] = [
   // Health
-  r('get', '/health', 'Health', 'Process status and uptime', 'public'),
   r('get', '/health/live', 'Health', 'Liveness probe', 'public'),
   r('get', '/health/ready', 'Health', 'Readiness probe (database reachable)', 'public'),
 
   // Auth
+  r('post', '/auth/register/check', 'Auth', 'Check that the email and phone are free (sign-up step 1)', 'public', {
+    description:
+      'Send the email, the phone, or both (the app checks each field as soon as it is complete). 200 { available: true } when none belongs to an account. Otherwise 409 ACCOUNT_EXISTS with a separate message per taken field: fields.email "This email is already registered with another account.", fields.phone "This phone number is already registered with another account." POST /auth/register checks again.',
+    body: auth.registerCheckSchema,
+    example: { email: EMAIL, countryCode: '+91', phone: '9876543210' },
+  }),
   r(
     'post',
     '/auth/register',
@@ -95,7 +99,7 @@ export const routeDocs: RouteDoc[] = [
     'public',
     {
       description:
-        'Returns an EMAIL and a PHONE challenge. Verify both with POST /auth/otp/verify (with OTP_TEST_CODE=123456 in .env every code is 123456; otherwise codes are printed in the server log in dev); the second verify creates the account and returns the tokens. profile, preferences and tier are optional: the app sends them here because its OTP screen comes after the tier screen, and they are applied when the account is created. Option codes come from GET /lookups/{type}.',
+        'Returns an EMAIL and a PHONE challenge. Verify both with POST /auth/otp/verify (with OTP_TEST_CODE=1234 in .env every code is 1234; otherwise codes are printed in the server log in dev); the second verify creates the account and returns the tokens. An email or phone that already belongs to an account is refused with 409 ACCOUNT_EXISTS (fields.email / fields.phone). profile, preferences and tier are required: the app sends them from its tier screen (its OTP screen comes last), and they are applied when the account is created. Each choice must be a code from the fixed option lists (src/constants/onboarding.ts); anything else is refused.',
       body: auth.registerSchema,
       status: 202,
       example: {
@@ -116,16 +120,18 @@ export const routeDocs: RouteDoc[] = [
       },
     },
   ),
-  r('post', '/auth/otp/send', 'Auth', 'Send a one-time code', 'public', {
+  r('post', '/auth/otp/send', 'Auth', 'Resend a one-time code', 'public', {
+    description:
+      'Sends a new code for a sign-up or password-reset challenge: use the challengeId returned by /auth/register or /auth/password/forgot. Allowed once every 45 seconds, 5 times per challenge.',
     body: auth.otpSendSchema,
     status: 202,
-    example: { purpose: 'LOGIN', identifier: EMAIL },
+    example: { challengeId: '7f1c2a4e-1b2c-4d3e-8f90-123456789abc' },
   }),
   r('post', '/auth/otp/verify', 'Auth', 'Verify a one-time code', 'public', {
     description:
       'Sign-up: PENDING until both challenges are verified, then COMPLETED with user and tokens. Password reset: returns resetToken.',
     body: auth.otpVerifySchema,
-    example: { challengeId: '00000000-0000-4000-8000-000000000000', code: '123456', device },
+    example: { challengeId: '00000000-0000-4000-8000-000000000000', code: '1234', device },
   }),
   r('post', '/auth/login', 'Auth', 'Sign in; returns access and refresh tokens', 'public', {
     body: auth.loginSchema,
@@ -136,6 +142,8 @@ export const routeDocs: RouteDoc[] = [
   }),
   r('post', '/auth/logout', 'Auth', 'Sign out of this session', 'user', { status: 204 }),
   r('post', '/auth/password/forgot', 'Auth', 'Start a password reset', 'public', {
+    description:
+      'Sends a code when an active account has the email or phone, and returns its challenge. Otherwise 404 ACCOUNT_NOT_FOUND with fields.identifier: "No account found with this email. Please create your account." Verify the code with POST /auth/otp/verify.',
     body: auth.forgotPasswordSchema,
     status: 202,
     example: { identifier: EMAIL },
@@ -143,12 +151,6 @@ export const routeDocs: RouteDoc[] = [
   r('post', '/auth/password/reset', 'Auth', 'Reset the password with a code', 'public', {
     body: auth.resetPasswordSchema,
     example: { resetToken: '<resetToken from /auth/otp/verify>', newPassword: PASSWORD },
-  }),
-  r('get', '/auth/sessions', 'Auth', 'List my active sessions', 'user'),
-  r('delete', '/auth/sessions', 'Auth', 'Sign out of every other session', 'user', { status: 204 }),
-  r('delete', '/auth/sessions/:id', 'Auth', 'Revoke one session', 'user', {
-    params: z.object({ id: auth.sessionIdSchema }),
-    status: 204,
   }),
 
   // Me
@@ -165,48 +167,13 @@ export const routeDocs: RouteDoc[] = [
     query: statementQuery,
     page: true,
   }),
-  r('get', '/me/notifications', 'Me', 'Notification inbox (meta.unread = badge)', 'user', {
-    query: notifications.listNotificationsQuery,
-    page: true,
-  }),
-  r('post', '/me/notifications/read', 'Me', 'Mark notifications read', 'user', {
-    body: notifications.markReadBody,
-  }),
-  r('post', '/me/devices', 'Me', 'Register a push token', 'user', {
-    body: notifications.registerDeviceBody,
-    status: 201,
-  }),
   r('get', '/me', 'Me', 'My profile', 'user'),
   r('patch', '/me', 'Me', 'Update my profile', 'user', {
     body: users.updateMeSchema,
     example: { name: 'Asha Mehta', experienceYears: 5, location: 'Mumbai, India' },
   }),
-  r('put', '/me/preferences', 'Me', 'Replace my preferences', 'user', {
-    body: users.preferencesSchema,
-    example: {
-      focus: ['FINANCIAL_ASSETS'],
-      risk: ['MEDIUM_LEVEL'],
-      style: ['VALUE_INVESTING', 'DIVIDEND_INVESTING'],
-      sector: ['TECHNOLOGY', 'FINTECH', 'HEALTHCARE'],
-    },
-  }),
-  r('put', '/me/tier', 'Me', 'Choose my membership tier', 'user', {
-    body: users.tierSchema,
-    example: { tier: 'PRIVE' },
-  }),
 
-  // Users, files, KYC, lookups
-  r('get', '/users/:id', 'Users', 'Public profile of a user', 'user', {
-    params: users.userIdParamSchema,
-  }),
-  r('post', '/users/:id/follow', 'Users', 'Follow a user', 'user', {
-    params: users.userIdParamSchema,
-    status: 204,
-  }),
-  r('delete', '/users/:id/follow', 'Users', 'Unfollow a user', 'user', {
-    params: users.userIdParamSchema,
-    status: 204,
-  }),
+  // Files, KYC, lookups
   r('post', '/files/upload-url', 'Files', 'Signed upload URL', 'user', {
     body: files.createUploadUrlSchema,
     example: { purpose: 'AVATAR', mimeType: 'image/jpeg', sizeBytes: 204800 },
@@ -216,8 +183,7 @@ export const routeDocs: RouteDoc[] = [
     body: kyc.submitKycSchema,
     status: 201,
   }),
-  r('get', '/kyc/submissions/me', 'KYC', 'My latest KYC submission', 'user'),
-  r('get', '/lookups/:type', 'Lookups', 'Option list (countries, sectors, ...)', 'public', {
+  r('get', '/lookups/:type', 'Lookups', 'Options for the rating wizard and representations', 'public', {
     params: z.object({ type: lookupType }),
   }),
 
@@ -246,11 +212,6 @@ export const routeDocs: RouteDoc[] = [
     status: 201,
     idempotent: true,
   }),
-  r('get', '/reviews/me', 'Reviews', 'My reviews', 'user', {
-    query: reviews.listMyReviewsQuery,
-    page: true,
-  }),
-  r('get', '/reviews/:id', 'Reviews', 'Review receipt', 'user', { params: reviews.reviewIdParams }),
   r('patch', '/reviews/:id/resolution', 'Reviews', 'Update resolution status', 'prive', {
     params: reviews.reviewIdParams,
     body: reviews.updateResolutionBody,
@@ -272,10 +233,6 @@ export const routeDocs: RouteDoc[] = [
     body: ratings.submitRatingBody,
     status: 201,
     idempotent: true,
-  }),
-  r('get', '/ratings/me', 'Issuers', 'My ratings', 'user', {
-    query: ratings.listMyRatingsQuery,
-    page: true,
   }),
 
   // Representations
@@ -310,10 +267,6 @@ export const routeDocs: RouteDoc[] = [
     page: true,
   }),
   r('get', '/learn/:id', 'Learn', 'One learn item', 'optional', { params: learn.learnIdParams }),
-  r('post', '/learn/:id/rating', 'Learn', 'Rate a learn item 1-5', 'user', {
-    params: learn.learnIdParams,
-    body: learn.rateLearnBody,
-  }),
   r('get', '/webinars', 'Learn', 'Upcoming or past webinars', 'user', {
     query: webinars.listWebinarsQuery,
     page: true,
