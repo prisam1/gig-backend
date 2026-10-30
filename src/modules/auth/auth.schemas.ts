@@ -121,7 +121,7 @@ export const registerSchema = z
     return { ...body, phone };
   });
 
-const otpCodeSchema = z.string('Code is required').regex(/^\d{6}$/, 'Code must be 6 digits');
+const otpCodeSchema = z.string('Code is required').regex(/^\d{4}$/, 'Code must be 4 digits');
 
 export const otpVerifySchema = z
   .object({ challengeId: z.uuid('Invalid challenge'), code: otpCodeSchema, device: deviceSchema })

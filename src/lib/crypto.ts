@@ -47,7 +47,7 @@ export function randomToken(bytes = 32): string {
 }
 
 export function generateOtp(): string {
-  return randomInt(0, 1_000_000).toString().padStart(6, '0');
+  return randomInt(0, 10_000).toString().padStart(4, '0');
 }
 
 export function safeEqualHex(a: string, b: string): boolean {

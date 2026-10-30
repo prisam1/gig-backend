@@ -93,7 +93,7 @@ export const routeDocs: RouteDoc[] = [
     'public',
     {
       description:
-        'Returns an EMAIL and a PHONE challenge. Verify both with POST /auth/otp/verify (with OTP_TEST_CODE=123456 in .env every code is 123456; otherwise codes are printed in the server log in dev); the second verify creates the account and returns the tokens. profile, preferences and tier are required: the app sends them from its tier screen (its OTP screen comes last), and they are applied when the account is created. Option codes come from GET /lookups/{type}.',
+        'Returns an EMAIL and a PHONE challenge. Verify both with POST /auth/otp/verify (with OTP_TEST_CODE=1234 in .env every code is 1234; otherwise codes are printed in the server log in dev); the second verify creates the account and returns the tokens. profile, preferences and tier are required: the app sends them from its tier screen (its OTP screen comes last), and they are applied when the account is created. Option codes come from GET /lookups/{type}.',
       body: auth.registerSchema,
       status: 202,
       example: {
@@ -125,7 +125,7 @@ export const routeDocs: RouteDoc[] = [
     description:
       'Sign-up: PENDING until both challenges are verified, then COMPLETED with user and tokens. Password reset: returns resetToken.',
     body: auth.otpVerifySchema,
-    example: { challengeId: '00000000-0000-4000-8000-000000000000', code: '123456', device },
+    example: { challengeId: '00000000-0000-4000-8000-000000000000', code: '1234', device },
   }),
   r('post', '/auth/login', 'Auth', 'Sign in; returns access and refresh tokens', 'public', {
     body: auth.loginSchema,
@@ -175,7 +175,7 @@ export const routeDocs: RouteDoc[] = [
     body: kyc.submitKycSchema,
     status: 201,
   }),
-  r('get', '/lookups/:type', 'Lookups', 'Option list (countries, sectors, ...)', 'public', {
+  r('get', '/lookups/:type', 'Lookups', 'Options for a selection: country codes, job profiles, preferences, tiers, ...', 'public', {
     params: z.object({ type: lookupType }),
   }),
 

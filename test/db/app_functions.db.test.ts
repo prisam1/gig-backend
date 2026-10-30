@@ -8,6 +8,9 @@ import { randomUUID } from 'node:crypto';
 import { readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { TIERS } from '../../src/lib/membership';
+import { COUNTRY_CODES } from '../../src/modules/auth/auth.schemas';
+import { LOOKUP_TYPES } from '../../src/modules/users/users.schemas';
 
 const ROOT = join(__dirname, '..', '..');
 const CTX = { ip: '203.0.113.7', userAgent: 'vitest', appVersion: '1.0.0', requestId: 'req-1' };
@@ -407,6 +410,44 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
     const done = (await verify(phone)) as { userId: string };
     expect(await one(`select tier_selected_at is null as not_selected from app.users where id = $1`, [done.userId]))
       .toEqual({ not_selected: true });
+  });
+});
+
+describe('sign-up option lists (GET /lookups/{type})', () => {
+  const list = (type: string) => call<{ code: string; label: string }[]>('app_list_options', type);
+
+  it('serves every choice of the sign-up screens, with the app\'s options', async () => {
+    const sizes: Record<string, number> = {};
+    for (const type of ['COUNTRY_CODE', 'JOB_PROFILE', 'INVESTMENT_FOCUS', 'RISK_LEVEL', 'INVESTMENT_STYLE', 'INVESTMENT_SECTOR', 'TIER']) {
+      sizes[type] = (await list(type)).length;
+    }
+    expect(sizes).toEqual({
+      COUNTRY_CODE: 2, JOB_PROFILE: 50, INVESTMENT_FOCUS: 10, RISK_LEVEL: 3, INVESTMENT_STYLE: 40, INVESTMENT_SECTOR: 40, TIER: 3,
+    });
+    expect(await list('TIER')).toEqual([
+      { code: 'OBSERVER', label: 'Observer' },
+      { code: 'PRIVE', label: 'Prive' },
+      { code: 'INSTITUTIONAL', label: 'Institutional' },
+    ]);
+    expect(await list('COUNTRY_CODE')).toEqual([{ code: '+91', label: 'India' }, { code: '+971', label: 'UAE' }]);
+  });
+
+  it('offers exactly the tiers and country codes POST /auth/register accepts', async () => {
+    expect((await list('TIER')).map((o) => o.code)).toEqual([...TIERS]);
+    expect((await list('COUNTRY_CODE')).map((o) => o.code)).toEqual([...COUNTRY_CODES]);
+  });
+
+  it('has options for every list the API serves', async () => {
+    for (const type of Object.values(LOOKUP_TYPES)) {
+      expect((await list(type)).length, type).toBeGreaterThan(0);
+    }
+  });
+
+  it('accepts a dialling code only as a country code', async () => {
+    await expect(db.query(`insert into app.lookup_options (type, code, label) values ('JOB_PROFILE', '+44', 'x')`))
+      .rejects.toThrow(/lookup_options_code_check/);
+    await expect(db.query(`insert into app.lookup_options (type, code, label) values ('COUNTRY_CODE', '44', 'x')`))
+      .rejects.toThrow(/lookup_options_code_check/);
   });
 });
 

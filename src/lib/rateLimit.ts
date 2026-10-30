@@ -16,7 +16,7 @@ export const LIMITS = {
   otpSendPerDestination: { name: 'otp-send:dest', max: 5, windowSeconds: 3600 },
   otpVerifyPerIp: { name: 'otp-verify:ip', max: 30, windowSeconds: 900 },
   // Counted per guess on one email or phone, from any IP, so spreading guesses over many IPs
-  // does not help. A correct code resets the count. 6 digits => at most 20 guesses a day.
+  // does not help. A correct code resets the count. 4 digits => at most 20 guesses a day (0.2% of the codes).
   otpVerifyPerDestinationHour: { name: 'otp-verify:dest:h', max: 10, windowSeconds: 3600 },
   otpVerifyPerDestinationDay: { name: 'otp-verify:dest:d', max: 20, windowSeconds: 86400 },
   loginPerIp: { name: 'login:ip', max: 20, windowSeconds: 900 },

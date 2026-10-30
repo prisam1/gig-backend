@@ -116,13 +116,13 @@ describe('identifier', () => {
 });
 
 describe('login and OTP', () => {
-  it('requires a 6-digit code and a UUID challenge', () => {
+  it('requires a 4-digit code and a UUID challenge', () => {
     const challengeId = '7f1c2a4e-1b2c-4d3e-8f90-123456789abc';
-    assert.ok(otpVerifySchema.safeParse({ challengeId, code: '012345' }).success);
-    for (const code of ['1234', '12345a', '1234567', 123456]) {
+    assert.ok(otpVerifySchema.safeParse({ challengeId, code: '0123' }).success);
+    for (const code of ['123', '123a', '12345', '123456', 1234]) {
       assert.equal(otpVerifySchema.safeParse({ challengeId, code }).success, false, String(code));
     }
-    assert.equal(otpVerifySchema.safeParse({ challengeId: 'not-a-uuid', code: '123456' }).success, false);
+    assert.equal(otpVerifySchema.safeParse({ challengeId: 'not-a-uuid', code: '1234' }).success, false);
   });
 
   it('defaults the device platform and rejects unknown ones', () => {

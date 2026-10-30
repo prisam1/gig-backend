@@ -13,19 +13,19 @@ afterEach(() => {
 });
 
 describe('issueCode', () => {
-  it('issues a random 6-digit code by default', () => {
+  it('issues a random 4-digit code by default', () => {
     const codes = new Set(Array.from({ length: 20 }, () => issueCode().code));
-    for (const code of codes) expect(code).toMatch(/^\d{6}$/);
+    for (const code of codes) expect(code).toMatch(/^\d{4}$/);
     expect(codes.size).toBeGreaterThan(1);
   });
 
   it('issues OTP_TEST_CODE when it is set (development only)', () => {
-    (env as { OTP_TEST_CODE?: string }).OTP_TEST_CODE = '123456';
+    (env as { OTP_TEST_CODE?: string }).OTP_TEST_CODE = '1234';
     const issued = issueCode();
 
-    expect(issued.code).toBe('123456');
+    expect(issued.code).toBe('1234');
     // Stored as a keyed hash like any other code, so verification follows the normal path.
-    expect(issued.stored.codeHash).toBe(codeHash(issued.publicId, '123456'));
+    expect(issued.stored.codeHash).toBe(codeHash(issued.publicId, '1234'));
     // A decoy (unknown or taken address) still matches no code, not even the test code.
     expect(issued.stored.decoyHash).not.toBe(issued.stored.codeHash);
   });
