@@ -124,11 +124,11 @@ describe('sign-up', () => {
   it('creates the account only after both the email and the phone are verified', async () => {
     const email = challenge();
     const phone = challenge();
-    const started = await call<{ signupId: string; emailTaken: boolean; phoneTaken: boolean }>('app_signup_start', {
+    const started = await call<{ signupId: string }>('app_signup_start', {
       name: 'Asha Rao', emailEnc: 'enc-email-a', emailHash: 'email-a', countryCode: '+91',
       phoneEnc: 'enc-phone-a', phoneHash: 'phone-a', passwordHash: 'argon-a', ttlSeconds: 3600, otpTtlSeconds: 300,
     }, email, phone, CTX);
-    expect(started).toMatchObject({ emailTaken: false, phoneTaken: false });
+    expect(started).toEqual({ signupId: expect.any(String), expiresAt: expect.any(String) });
 
     expect(await verify(email, 'wrong')).toEqual({ error: 'OTP_INCORRECT', remaining: 4 });
     expect(await verify(email)).toEqual({
@@ -154,18 +154,28 @@ describe('sign-up', () => {
     expect(await verify(phone)).toEqual({ error: 'OTP_INVALID' });
   });
 
-  it('gives an already-registered email a decoy challenge that no code can verify', async () => {
+  it('refuses an email or phone that already belongs to an account, storing nothing', async () => {
     await signUp('taken');
-    const email = challenge();
-    const started = await call<{ emailTaken: boolean }>('app_signup_start', {
-      name: 'Someone Else', emailEnc: 'x', emailHash: 'email-taken', countryCode: '+91',
-      phoneEnc: 'y', phoneHash: 'phone-new', passwordHash: 'z', ttlSeconds: 3600, otpTtlSeconds: 300,
-    }, email, challenge(), CTX);
-    expect(started.emailTaken).toBe(true);
+    const start = (emailHash: string, phoneHash: string) => {
+      const email = challenge();
+      return call('app_signup_start', {
+        name: 'Someone Else', emailEnc: 'x', emailHash, countryCode: '+91',
+        phoneEnc: 'y', phoneHash, passwordHash: 'z', ttlSeconds: 3600, otpTtlSeconds: 300,
+      }, email, challenge(), CTX);
+    };
+    expect(await start('email-taken', 'phone-new')).toEqual({ taken: { email: true, phone: false } });
+    expect(await start('email-new', 'phone-taken')).toEqual({ taken: { email: false, phone: true } });
+    expect(await start('email-taken', 'phone-taken')).toEqual({ taken: { email: true, phone: true } });
+    expect(await one(`select count(*)::int as n from app.signup_requests where name = 'Someone Else'`)).toEqual({ n: 0 });
+    expect(await one(`select count(*)::int as n from app.otp_challenges where destination_hash in ('email-taken', 'phone-new', 'email-new')`))
+      .toEqual({ n: 0 });
+  });
 
-    // Even the hash the real code would have had does not match a decoy.
-    expect(await verify(email, email.codeHash)).toMatchObject({ error: 'OTP_INCORRECT' });
-    expect(await verify(email, email.decoyHash)).toMatchObject({ error: 'OTP_INCORRECT' });
+  it('tells sign-up step 1 which addresses are taken', async () => {
+    await signUp('check');
+    expect(await call('app_contact_taken', 'email-check', 'phone-free')).toEqual({ emailTaken: true, phoneTaken: false });
+    expect(await call('app_contact_taken', 'email-free', 'phone-check')).toEqual({ emailTaken: false, phoneTaken: true });
+    expect(await call('app_contact_taken', 'email-free', 'phone-free')).toEqual({ emailTaken: false, phoneTaken: false });
   });
 });
 
@@ -352,7 +362,7 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
   it('creates the account with profile, preferences and the requested tier in one step', async () => {
     const email = challenge();
     const phone = challenge();
-    expect(await start('app-order', onboarding('PRIVE'), email, phone)).toMatchObject({ emailTaken: false });
+    expect(await start('app-order', onboarding('PRIVE'), email, phone)).toMatchObject({ signupId: expect.any(String) });
     await verify(email);
     const done = await verify(phone);
     expect(done).toMatchObject({ status: 'COMPLETED' });

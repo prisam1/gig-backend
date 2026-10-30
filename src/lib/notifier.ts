@@ -2,7 +2,7 @@ import { env } from '../config/env';
 
 export type Channel = 'EMAIL' | 'PHONE';
 export type OtpPurpose = 'SIGNUP' | 'PASSWORD_RESET';
-export type Notice = 'ACCOUNT_EXISTS' | 'PASSWORD_CHANGED';
+export type Notice = 'PASSWORD_CHANGED';
 
 interface Delivery {
   sendOtp(channel: Channel, destination: string, code: string, purpose: OtpPurpose): Promise<void>;

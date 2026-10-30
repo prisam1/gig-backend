@@ -38,6 +38,7 @@ it('documents only the sign-in, sign-up and reset routes as public writes', () =
     'POST /auth/password/reset',
     'POST /auth/refresh',
     'POST /auth/register',
+    'POST /auth/register/check',
   ]);
   expect(PROTECTED.length).toBeGreaterThan(60);
 });

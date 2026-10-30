@@ -121,6 +121,23 @@ export const registerSchema = z
     return { ...body, phone };
   });
 
+// Sign-up step 1, before the user goes on: are the email and phone free?
+export const registerCheckSchema = z
+  .object({
+    email: emailSchema,
+    countryCode: z.enum(COUNTRY_CODES, 'Unsupported country code').default('+91'),
+    phone: z.string('Phone number is required').trim(),
+  })
+  .strict()
+  .transform((body, ctx) => {
+    const phone = normalizePhone(body.countryCode, body.phone);
+    if (!phone) {
+      ctx.addIssue({ code: 'custom', path: ['phone'], message: PHONE_RULES[body.countryCode].message });
+      return z.NEVER;
+    }
+    return { email: body.email, phone };
+  });
+
 const otpCodeSchema = z.string('Code is required').regex(/^\d{4}$/, 'Code must be 4 digits');
 
 export const otpVerifySchema = z

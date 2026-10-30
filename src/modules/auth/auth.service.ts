@@ -18,6 +18,7 @@ import {
   type otpSendSchema,
   type otpVerifySchema,
   type refreshSchema,
+  type registerCheckSchema,
   type registerSchema,
   type resetPasswordSchema,
 } from './auth.schemas';
@@ -77,11 +78,33 @@ function otpError(f: DbFailure): AppError {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Sign-up step 1. The account is created only after both the email and the phone are verified.
-// If the email or phone is already registered the response looks the same, but no code is sent
-// to that address; its owner gets an "account exists" notice instead. This stops anyone from
-// using sign-up to find out who has an account.
+// Sign-up. The account is created only after both the email and the phone are verified. An email
+// or phone that already belongs to an account is refused with 409 ACCOUNT_EXISTS and a message
+// under each taken field, on step 1 (checkSignupContact) and again here.
 // ---------------------------------------------------------------------------------------------
+
+function accountExists(taken: { email: boolean; phone: boolean }): AppError {
+  const fields: Record<string, string> = {};
+  if (taken.email) fields['email'] = 'This email is already registered with another account.';
+  if (taken.phone) fields['phone'] = 'This phone number is already registered with another account.';
+  const message =
+    taken.email && taken.phone
+      ? 'This email and phone number are already registered with another account.'
+      : (fields['email'] ?? fields['phone'] ?? '');
+  return new AppError(409, 'ACCOUNT_EXISTS', message, fields);
+}
+
+/** POST /auth/register/check: sign-up step 1 asks whether the email and phone are free. */
+export async function checkSignupContact(input: z.infer<typeof registerCheckSchema>, ctx: ClientContext) {
+  await consume(LIMITS.registerCheckPerIp, ctx.ip);
+  const taken = await callDb('app_contact_taken', {
+    p_email_hash: emailHash(input.email),
+    p_phone_hash: phoneHash(input.phone),
+  });
+  if (taken.emailTaken || taken.phoneTaken) throw accountExists({ email: taken.emailTaken, phone: taken.phoneTaken });
+  return { available: true as const };
+}
+
 export async function register(input: z.infer<typeof registerSchema>, ctx: ClientContext) {
   const eHash = emailHash(input.email);
   const pHash = phoneHash(input.phone);
@@ -113,13 +136,12 @@ export async function register(input: z.infer<typeof registerSchema>, ctx: Clien
     },
   );
 
-  // An unknown or inactive option code: nothing was stored and no code was sent.
+  // Nothing was stored and no code was sent in either case.
   if ('fields' in started) throw new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', started.fields);
+  if ('taken' in started) throw accountExists(started.taken);
 
-  if (started.emailTaken) sendNotice('EMAIL', input.email, 'ACCOUNT_EXISTS');
-  else sendOtp('EMAIL', input.email, email.code, 'SIGNUP');
-  if (started.phoneTaken) sendNotice('PHONE', input.phone, 'ACCOUNT_EXISTS');
-  else sendOtp('PHONE', input.phone, phone.code, 'SIGNUP');
+  sendOtp('EMAIL', input.email, email.code, 'SIGNUP');
+  sendOtp('PHONE', input.phone, phone.code, 'SIGNUP');
 
   return {
     signupId: started.signupId,

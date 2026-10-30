@@ -85,6 +85,12 @@ export const routeDocs: RouteDoc[] = [
   r('get', '/health/ready', 'Health', 'Readiness probe (database reachable)', 'public'),
 
   // Auth
+  r('post', '/auth/register/check', 'Auth', 'Check that the email and phone are free (sign-up step 1)', 'public', {
+    description:
+      '200 { available: true } when neither belongs to an account. Otherwise 409 ACCOUNT_EXISTS with fields.email and/or fields.phone: "This email is already registered with another account." POST /auth/register checks again.',
+    body: auth.registerCheckSchema,
+    example: { email: EMAIL, countryCode: '+91', phone: '9876543210' },
+  }),
   r(
     'post',
     '/auth/register',
@@ -93,7 +99,7 @@ export const routeDocs: RouteDoc[] = [
     'public',
     {
       description:
-        'Returns an EMAIL and a PHONE challenge. Verify both with POST /auth/otp/verify (with OTP_TEST_CODE=1234 in .env every code is 1234; otherwise codes are printed in the server log in dev); the second verify creates the account and returns the tokens. profile, preferences and tier are required: the app sends them from its tier screen (its OTP screen comes last), and they are applied when the account is created. Each choice must be a code from the fixed option lists (src/constants/onboarding.ts); anything else is refused.',
+        'Returns an EMAIL and a PHONE challenge. Verify both with POST /auth/otp/verify (with OTP_TEST_CODE=1234 in .env every code is 1234; otherwise codes are printed in the server log in dev); the second verify creates the account and returns the tokens. An email or phone that already belongs to an account is refused with 409 ACCOUNT_EXISTS (fields.email / fields.phone). profile, preferences and tier are required: the app sends them from its tier screen (its OTP screen comes last), and they are applied when the account is created. Each choice must be a code from the fixed option lists (src/constants/onboarding.ts); anything else is refused.',
       body: auth.registerSchema,
       status: 202,
       example: {

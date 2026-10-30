@@ -473,9 +473,16 @@ export const DB_FUNCTIONS = {
       p_ctx: ctx,
     }),
     z.union([
-      z.object({ signupId: uuid, expiresAt: timestamp, emailTaken: z.boolean(), phoneTaken: z.boolean() }),
+      z.object({ signupId: uuid, expiresAt: timestamp }),
       z.object({ fields: z.record(z.string(), z.string()) }),
+      // The email and/or phone already belong to an account: nothing was stored.
+      z.object({ taken: z.object({ email: z.boolean(), phone: z.boolean() }) }),
     ]),
+  ),
+  // Sign-up step 1: which of the two addresses already belong to an account.
+  app_contact_taken: fn(
+    args({ p_email_hash: z.string(), p_phone_hash: z.string() }),
+    z.object({ emailTaken: z.boolean(), phoneTaken: z.boolean() }),
   ),
   app_otp_start: fn(
     args({
@@ -1178,6 +1185,7 @@ export type DbFunction = keyof typeof DB_FUNCTIONS;
  * retried. test/db/db_contract.db.test.ts keeps this list in step with the SQL.
  */
 export const READ_ONLY_DB_FUNCTIONS: ReadonlySet<DbFunction> = new Set<DbFunction>([
+  'app_contact_taken',
   'app_admin_audit_logs',
   'app_admin_find_representations',
   'app_admin_find_users',

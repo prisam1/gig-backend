@@ -9,12 +9,19 @@ import {
   otpSendSchema,
   otpVerifySchema,
   refreshSchema,
+  registerCheckSchema,
   registerSchema,
   resetPasswordSchema,
 } from './auth.schemas';
 import * as auth from './auth.service';
 
 export const authRouter = Router();
+
+// Sign-up step 1, before going on: 200 when the email and phone are free, else 409 ACCOUNT_EXISTS.
+authRouter.post('/register/check', async (req, res) => {
+  const data = await auth.checkSignupContact(parse(registerCheckSchema, req.body), clientContext(req));
+  res.json({ data });
+});
 
 // Step 1 of sign-up: name, email, phone, password, 18+ confirmation. Sends both OTPs.
 authRouter.post('/register', async (req, res) => {
