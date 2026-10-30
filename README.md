@@ -189,6 +189,8 @@ The account only exists once both email and phone are verified. A pending sign-u
 
 **Testing without SMS/email:** with `OTP_TEST_CODE=1234` in `.env`, every code is `1234`. Request bodies for the whole flow are prefilled in Swagger (`/api/docs`).
 
+**Logs:** every request writes one line to the server terminal: `[http] <request id> POST /api/v1/auth/login 401 34ms INVALID_CREDENTIALS "Incorrect email/phone or password"`. The request id is the `X-Request-Id` header the app receives. Bodies, query strings and tokens are never logged; for field errors only the field names are. OTP codes appear as `[otp] … code=1234` lines (development delivery only). The app has its own `[GIG]` log: `npm run logs` in the app folder.
+
 ### Security rules
 
 - **Passwords:** Argon2id. 8-128 characters with upper, lower, digit and special character. Must not contain the email name or phone number.

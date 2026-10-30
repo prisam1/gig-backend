@@ -5,6 +5,7 @@ import { env } from './config/env';
 import { docsRouter } from './docs/openapi';
 import { errorHandler, notFound } from './middleware/errorHandler';
 import { requestId } from './middleware/requestContext';
+import { requestLog } from './middleware/requestLog';
 import { router } from './routes';
 
 export function createApp() {
@@ -14,6 +15,7 @@ export function createApp() {
   // Nested query params, e.g. ?filter[sentiment]=Positive,Neutral
   app.set('query parser', 'extended');
   app.use(requestId);
+  app.use(requestLog);
   app.use(helmet());
   app.use(cors({ origin: env.CORS_ORIGIN === '*' ? true : env.CORS_ORIGIN.split(',') }));
   // No route takes a large JSON body; files go to storage through pre-signed URLs.
