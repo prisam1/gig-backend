@@ -102,6 +102,8 @@ export const registerSchema = z
     profile: signupProfileSchema,
     preferences: preferencesSchema,
     tier: tierChoiceSchema,
+    // For the session started at once by an Institutional sign-up (it needs no code).
+    device: deviceSchema,
   })
   .strict()
   .transform((body, ctx) => {

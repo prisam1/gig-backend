@@ -23,10 +23,11 @@ authRouter.post('/register/check', async (req, res) => {
   res.json({ data });
 });
 
-// Step 1 of sign-up: name, email, phone, password, 18+ confirmation. Sends both OTPs.
+// Every sign-up screen's data. Sends the tier's codes (202), or for Institutional, which needs no
+// code, creates the account and returns the session (201).
 authRouter.post('/register', async (req, res) => {
   const data = await auth.register(parse(registerSchema, req.body), clientContext(req));
-  res.status(202).json({ data });
+  res.status(data.status === 'COMPLETED' ? 201 : 202).json({ data });
 });
 
 // Resend the code of a sign-up or password-reset challenge ({ challengeId }).
