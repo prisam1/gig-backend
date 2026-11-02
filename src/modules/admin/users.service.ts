@@ -1,4 +1,3 @@
-import { decrypt, keyedHash } from '../../lib/crypto';
 import { callDb } from '../../lib/db';
 import type { DbResult } from '../../lib/dbFunctions';
 import { containsPattern } from '../../lib/http';
@@ -11,22 +10,22 @@ import { permissionsOf } from './admin.access';
 import type { ListUsersQuery, UpdateUserInput } from './admin.schemas';
 import { limitOffset, notFound, pageMeta, selfAction, unexpected } from './admin.shared';
 
-// Email and phone are stored encrypted with keyed hashes for lookup, so a member is found by an
-// exact email or phone (hashed here the way sign-up hashes them) or by part of their name.
+// A member is found by an exact email or phone (normalised here the way sign-up stores them) or
+// by part of their name.
 function searchArgs(q: string | undefined) {
-  const none = { p_q_pattern: null, p_email_hash: null, p_phone_hash: null };
+  const none = { p_q_pattern: null, p_email: null, p_phone: null };
   if (!q) return none;
 
   const identifier = identifierSchema.safeParse(q);
   if (identifier.success) {
     return identifier.data.channel === 'EMAIL'
-      ? { ...none, p_email_hash: keyedHash('email', identifier.data.value) }
-      : { ...none, p_phone_hash: keyedHash('phone', identifier.data.value) };
+      ? { ...none, p_email: identifier.data.value }
+      : { ...none, p_phone: identifier.data.value };
   }
   // A national number without its country code: try each launch market.
   for (const code of COUNTRY_CODES) {
     const phone = normalizePhone(code, q);
-    if (phone) return { ...none, p_phone_hash: keyedHash('phone', phone) };
+    if (phone) return { ...none, p_phone: phone };
   }
   return { ...none, p_q_pattern: containsPattern(q) };
 }
@@ -52,13 +51,7 @@ export async function getUser(actor: Member, userId: string, ctx: ClientContext)
   });
   if (!row) throw notFound('User');
 
-  const { emailEnc, phoneEnc, ...user } = row;
-  return {
-    ...user,
-    email: decrypt(emailEnc, 'email'),
-    phone: decrypt(phoneEnc, 'phone'),
-    permissions: permissionsOf(user.roles),
-  };
+  return { ...row, permissions: permissionsOf(row.roles) };
 }
 
 type WriteFailure = Extract<

@@ -45,9 +45,9 @@ async function expectDbError(promise: Promise<unknown>, message: RegExp) {
 async function newUser(credits = 0): Promise<string> {
   const id = randomUUID();
   await db.query(
-    `insert into app.users (public_id, email_enc, email_hash, phone_country_code, phone_enc,
-                            phone_hash, password_hash, email_verified_at, phone_verified_at)
-     values ($1, 'x', $2, '+91', 'x', $2, 'x', now(), now())`,
+    `insert into app.users (public_id, email, phone_country_code, phone, password_hash,
+                            email_verified_at, phone_verified_at)
+     values ($1, $2, '+91', $2, 'x', now(), now())`,
     [id, id],
   );
   if (credits > 0) await grant(id, credits);

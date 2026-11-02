@@ -91,9 +91,9 @@ export async function callFunction(
 /** Creates an auth-module user (app.users) and returns its internal id. */
 export async function createUser(db: PGlite, publicId: string): Promise<string> {
   const { rows } = await db.query<{ id: string }>(
-    `insert into app.users (public_id, email_enc, email_hash, phone_country_code, phone_enc,
-                            phone_hash, password_hash, email_verified_at, phone_verified_at)
-     values ($1::uuid, 'x', $1::text, '+91', 'x', $1::text, 'x', now(), now())
+    `insert into app.users (public_id, email, phone_country_code, phone, password_hash,
+                            email_verified_at, phone_verified_at)
+     values ($1::uuid, $1::text, '+91', $1::text, 'x', now(), now())
      returning id::text`,
     [publicId],
   );

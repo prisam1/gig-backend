@@ -16,7 +16,6 @@ export default defineConfig({
       SUPABASE_URL: 'https://test-project.supabase.co',
       SUPABASE_SERVICE_ROLE_KEY: 'test-service-role-key',
       JWT_ACCESS_SECRET: testKey(),
-      DATA_ENCRYPTION_KEY: testKey(),
       BLIND_INDEX_KEY: testKey(),
     },
     // PGlite boots a full Postgres in WASM; give the database suite time to start.

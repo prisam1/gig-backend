@@ -6,7 +6,6 @@
 import type { PGlite } from '@electric-sql/pglite';
 import { randomUUID } from 'node:crypto';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { encrypt, keyedHash } from '../../src/lib/crypto';
 import { callDb, DatabaseError, dbTransport } from '../../src/lib/db';
 import type { Member } from '../../src/lib/membership';
 import type { ClientContext } from '../../src/middleware/requestContext';
@@ -58,23 +57,17 @@ interface TestAccount {
   member: Member;
 }
 
-/** An account with a profile name and, optionally, real encrypted contact details. */
+/** An account with a profile name and, optionally, real contact details. */
 async function account(
   name: string,
   contact?: { email: string; phone: string },
 ): Promise<TestAccount> {
   const publicId = randomUUID();
   const { id } = await one<{ id: string }>(
-    `insert into app.users (public_id, email_enc, email_hash, phone_country_code, phone_enc, phone_hash,
-                            password_hash, email_verified_at, phone_verified_at)
-     values ($1, $2, $3, '+91', $4, $5, 'x', now(), now()) returning id::text`,
-    [
-      publicId,
-      contact ? encrypt(contact.email, 'email') : 'x',
-      contact ? keyedHash('email', contact.email) : `e:${publicId}`,
-      contact ? encrypt(contact.phone, 'phone') : 'x',
-      contact ? keyedHash('phone', contact.phone) : `p:${publicId}`,
-    ],
+    `insert into app.users (public_id, email, phone_country_code, phone, password_hash,
+                            email_verified_at, phone_verified_at)
+     values ($1, $2, '+91', $3, 'x', now(), now()) returning id::text`,
+    [publicId, contact?.email ?? `e:${publicId}`, contact?.phone ?? `p:${publicId}`],
   );
   await db.query(`insert into app.user_profiles (user_id, name) values ($1, $2)`, [id, name]);
   return {
@@ -218,7 +211,7 @@ describe('users', () => {
     expect(staff.items.map((u) => u.id)).not.toContain(asha.publicId);
   });
 
-  it('shows one account with decrypted contact details and records the view', async () => {
+  it('shows one account with its contact details and records the view', async () => {
     const user = await getUser(admin.member, asha.publicId, CTX);
     expect(user).toMatchObject({
       id: asha.publicId,
@@ -228,7 +221,6 @@ describe('users', () => {
       roles: [],
       activity: { reviews: 0, ratings: 0, signatures: 0 },
     });
-    expect(user).not.toHaveProperty('emailEnc');
     expect((await auditEntries('admin.user.viewed')).at(-1)).toMatchObject({
       actor_user_id: admin.id,
       metadata: { user: asha.publicId },

@@ -1,7 +1,6 @@
 import request from 'supertest';
 import { beforeEach, describe, expect, it, vi, type MockInstance } from 'vitest';
 import { createApp } from '../../src/app';
-import { encrypt, keyedHash } from '../../src/lib/crypto';
 import { dbTransport } from '../../src/lib/db';
 import { filesStorage } from '../../src/modules/files/files.storage';
 import { chainArgs, fake, TEST_USERS, tokenFor } from '../helpers/fakeSupabase';
@@ -113,7 +112,7 @@ describe('staff access', () => {
 });
 
 describe('users', () => {
-  it('looks members up by the blind index of an exact email', async () => {
+  it('looks members up by an exact email, normalised', async () => {
     rpc['app_admin_find_users'] = () => ({ items: [], total: 0 });
     const res = await request(app)
       .get('/api/v1/admin/users?q=Asha@Example.com&filter[tier]=PRIVE')
@@ -122,7 +121,7 @@ describe('users', () => {
     expect(res.status).toBe(200);
     expect(res.body.meta).toEqual({ page: 1, pageSize: 20, total: 0 });
     expect(rpcArgs('app_admin_find_users')[0]).toMatchObject({
-      p_email_hash: keyedHash('email', 'asha@example.com'),
+      p_email: 'asha@example.com',
       p_q_pattern: null,
       p_tiers: ['PRIVE'],
       p_staff_only: false,
@@ -131,11 +130,11 @@ describe('users', () => {
     });
   });
 
-  it('shows contact details decrypted, never the ciphertext', async () => {
+  it('shows the contact details with the permissions of the roles', async () => {
     rpc['app_admin_get_user'] = () => ({
       id: MEMBER_ID,
-      emailEnc: encrypt('asha@example.com', 'email'),
-      phoneEnc: encrypt('+919876543210', 'phone'),
+      email: 'asha@example.com',
+      phone: '+919876543210',
       name: 'Asha Rao',
       experienceYears: 5,
       jobProfileCode: 'FOUNDER',
@@ -171,7 +170,6 @@ describe('users', () => {
       phone: '+919876543210',
       permissions: [],
     });
-    expect(res.body.data).not.toHaveProperty('emailEnc');
   });
 
   it('needs a reason and a change, and maps refusals', async () => {

@@ -40,8 +40,8 @@ async function signUp(tag: string) {
   const email = challenge();
   const phone = challenge();
   await call('app_signup_start', {
-    name: `User ${tag}`, emailEnc: `enc-email-${tag}`, emailHash: `email-${tag}`, countryCode: '+91',
-    phoneEnc: `enc-phone-${tag}`, phoneHash: `phone-${tag}`, passwordHash: `argon-${tag}`,
+    name: `User ${tag}`, email: `email-${tag}`, countryCode: '+91',
+    phone: `phone-${tag}`, passwordHash: `argon-${tag}`,
     ttlSeconds: 3600, otpTtlSeconds: 300,
   }, email, phone, CTX);
   await verify(email);
@@ -125,8 +125,8 @@ describe('sign-up', () => {
     const email = challenge();
     const phone = challenge();
     const started = await call<{ signupId: string }>('app_signup_start', {
-      name: 'Asha Rao', emailEnc: 'enc-email-a', emailHash: 'email-a', countryCode: '+91',
-      phoneEnc: 'enc-phone-a', phoneHash: 'phone-a', passwordHash: 'argon-a', ttlSeconds: 3600, otpTtlSeconds: 300,
+      name: 'Asha Rao', email: 'email-a', countryCode: '+91',
+      phone: 'phone-a', passwordHash: 'argon-a', ttlSeconds: 3600, otpTtlSeconds: 300,
     }, email, phone, CTX);
     expect(started).toEqual({ signupId: expect.any(String), expiresAt: expect.any(String) });
 
@@ -134,40 +134,40 @@ describe('sign-up', () => {
     expect(await verify(email)).toEqual({
       status: 'PENDING', signupId: started.signupId, verified: ['EMAIL'], pending: ['PHONE'],
     });
-    expect(await one(`select count(*)::int as n from app.users where email_hash = 'email-a'`)).toEqual({ n: 0 });
+    expect(await one(`select count(*)::int as n from app.users where email = 'email-a'`)).toEqual({ n: 0 });
 
     const s = session();
     const done = await verify(phone, phone.codeHash, [], s);
     expect(done).toMatchObject({ status: 'COMPLETED', userId: expect.any(String), userPublicId: expect.any(String) });
 
     const user = await one(`
-      select u.email_enc, u.password_hash, p.name, c.type as consent, s.refresh_token_hash, s.platform
+      select u.email, u.password_hash, p.name, c.type as consent, s.refresh_token_hash, s.platform
       from app.users u join app.user_profiles p on p.user_id = u.id
       join app.consents c on c.user_id = u.id join app.user_sessions s on s.user_id = u.id
-      where u.email_hash = 'email-a'`);
+      where u.email = 'email-a'`);
     expect(user).toEqual({
-      email_enc: 'enc-email-a', password_hash: 'argon-a', name: 'Asha Rao', consent: 'AGE_18_PLUS',
+      email: 'email-a', password_hash: 'argon-a', name: 'Asha Rao', consent: 'AGE_18_PLUS',
       refresh_token_hash: s.refreshHash, platform: 'IOS',
     });
-    expect(await one(`select count(*)::int as n from app.signup_requests where email_hash = 'email-a'`)).toEqual({ n: 0 });
+    expect(await one(`select count(*)::int as n from app.signup_requests where email = 'email-a'`)).toEqual({ n: 0 });
     // A used code cannot be used again.
     expect(await verify(phone)).toEqual({ error: 'OTP_INVALID' });
   });
 
   it('refuses an email or phone that already belongs to an account, storing nothing', async () => {
     await signUp('taken');
-    const start = (emailHash: string, phoneHash: string) => {
+    const start = (emailAddress: string, phoneNumber: string) => {
       const email = challenge();
       return call('app_signup_start', {
-        name: 'Someone Else', emailEnc: 'x', emailHash, countryCode: '+91',
-        phoneEnc: 'y', phoneHash, passwordHash: 'z', ttlSeconds: 3600, otpTtlSeconds: 300,
+        name: 'Someone Else', email: emailAddress, countryCode: '+91',
+        phone: phoneNumber, passwordHash: 'z', ttlSeconds: 3600, otpTtlSeconds: 300,
       }, email, challenge(), CTX);
     };
     expect(await start('email-taken', 'phone-new')).toEqual({ taken: { email: true, phone: false } });
     expect(await start('email-new', 'phone-taken')).toEqual({ taken: { email: false, phone: true } });
     expect(await start('email-taken', 'phone-taken')).toEqual({ taken: { email: true, phone: true } });
     expect(await one(`select count(*)::int as n from app.signup_requests where name = 'Someone Else'`)).toEqual({ n: 0 });
-    expect(await one(`select count(*)::int as n from app.otp_challenges where destination_hash in ('email-taken', 'phone-new', 'email-new')`))
+    expect(await one(`select count(*)::int as n from app.otp_challenges where destination in ('email-taken', 'phone-new', 'email-new')`))
       .toEqual({ n: 0 });
   });
 
@@ -219,7 +219,7 @@ describe('OTP guessing', () => {
   it('starts no reset for an address without an account, and audits the attempt', async () => {
     const c = challenge();
     expect(await call('app_otp_start', 'PASSWORD_RESET', 'EMAIL', 'email-nobody', c, 300, CTX)).toEqual({ userExists: false });
-    expect(await one(`select count(*)::int as n from app.otp_challenges where destination_hash = 'email-nobody'`)).toEqual({ n: 0 });
+    expect(await one(`select count(*)::int as n from app.otp_challenges where destination = 'email-nobody'`)).toEqual({ n: 0 });
     expect(await verify(c)).toMatchObject({ error: 'OTP_INVALID' });
     expect(await one(`select count(*)::int as n from app.audit_logs where action = 'auth.password.reset_unknown_account'`))
       .toEqual({ n: 1 });
@@ -229,7 +229,7 @@ describe('OTP guessing', () => {
     await signUp('no-otp-login');
     await expect(call('app_otp_start', 'LOGIN', 'EMAIL', 'email-no-otp-login', challenge(), 300, CTX)).rejects.toThrow(/invalid purpose/);
     await expect(db.query(
-      `insert into app.otp_challenges (public_id, purpose, channel, destination_hash, is_decoy, code_hash, expires_at)
+      `insert into app.otp_challenges (public_id, purpose, channel, destination, is_decoy, code_hash, expires_at)
        values ($1, 'LOGIN', 'EMAIL', 'x', true, 'y', now() + interval '5 minutes')`,
       [randomUUID()],
     )).rejects.toThrow(/otp_challenges_purpose_check/);
@@ -357,8 +357,8 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
 
   const start = (tag: string, data: unknown, email: object | null = challenge(), phone: object | null = challenge()) =>
     call('app_signup_start', {
-      name: `User ${tag}`, emailEnc: `enc-email-${tag}`, emailHash: `email-${tag}`, countryCode: '+91',
-      phoneEnc: `enc-phone-${tag}`, phoneHash: `phone-${tag}`, passwordHash: `argon-${tag}`,
+      name: `User ${tag}`, email: `email-${tag}`, countryCode: '+91',
+      phone: `phone-${tag}`, passwordHash: `argon-${tag}`,
       ttlSeconds: 3600, otpTtlSeconds: 300, onboarding: data,
     }, email, phone, CTX);
 
@@ -411,7 +411,7 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
     const data = onboarding('OBSERVER');
     expect(await start('bad-other', { ...data, profile: { ...data.profile, otherJob: 'Pilot' } }))
       .toEqual({ fields: { 'profile.otherJob': 'Only allowed when the job profile is Others' } });
-    expect(await one(`select count(*)::int as n from app.signup_requests where email_hash like 'email-bad-%'`)).toEqual({ n: 0 });
+    expect(await one(`select count(*)::int as n from app.signup_requests where email like 'email-bad-%'`)).toEqual({ n: 0 });
   });
 
   it('creates a Prive account with the phone code alone when no email code was issued', async () => {
@@ -436,15 +436,15 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
   it('creates an Institutional account and its session at once, with no code', async () => {
     const s = session();
     const done = await call<{ status: string; userId: string; userPublicId: string }>('app_signup_create', {
-      name: 'User inst', emailEnc: 'enc-email-inst', emailHash: 'email-inst', countryCode: '+91',
-      phoneEnc: 'enc-phone-inst', phoneHash: 'phone-inst', passwordHash: 'argon-inst',
+      name: 'User inst', email: 'email-inst', countryCode: '+91',
+      phone: 'phone-inst', passwordHash: 'argon-inst',
       ttlSeconds: 3600, otpTtlSeconds: 300, onboarding: onboarding('INSTITUTIONAL'),
     }, s, '2026-10-27', CTX);
     expect(done).toMatchObject({ status: 'COMPLETED', sessionExpiresAt: expect.any(String) });
     expect(await one(
       `select requested_tier, email_verified_at is null and phone_verified_at is null as unverified,
-              (select count(*)::int from app.otp_challenges where destination_hash in ('email-inst', 'phone-inst')) as codes,
-              (select count(*)::int from app.signup_requests where email_hash = 'email-inst') as pending
+              (select count(*)::int from app.otp_challenges where destination in ('email-inst', 'phone-inst')) as codes,
+              (select count(*)::int from app.signup_requests where email = 'email-inst') as pending
        from app.users where id = $1`,
       [done.userId],
     )).toEqual({ requested_tier: 'INSTITUTIONAL', unverified: true, codes: 0, pending: 0 });
@@ -452,8 +452,8 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
 
     // A second sign-up with the same email is refused like any other.
     expect(await call('app_signup_create', {
-      name: 'User inst', emailEnc: 'enc-email-inst', emailHash: 'email-inst', countryCode: '+91',
-      phoneEnc: 'enc-phone-inst2', phoneHash: 'phone-inst2', passwordHash: 'argon-inst',
+      name: 'User inst', email: 'email-inst', countryCode: '+91',
+      phone: 'phone-inst2', passwordHash: 'argon-inst',
       ttlSeconds: 3600, otpTtlSeconds: 300, onboarding: onboarding('INSTITUTIONAL'),
     }, session(), '2026-10-27', CTX)).toEqual({ taken: { email: true, phone: false } });
   });

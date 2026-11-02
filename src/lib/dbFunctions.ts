@@ -99,11 +99,10 @@ const storedCode = z.strictObject({ publicId: uuid, codeHash: z.string(), decoyH
 
 const signupInput = z.strictObject({
   name: z.string(),
-  emailEnc: z.string(),
-  emailHash: z.string(),
+  email: z.string(),
   countryCode: z.enum(COUNTRY_CODES),
-  phoneEnc: z.string(),
-  phoneHash: z.string(),
+  // E.164, e.g. +919876543210.
+  phone: z.string(),
   passwordHash: z.string(),
   ttlSeconds: z.number().int(),
   otpTtlSeconds: z.number().int(),
@@ -505,21 +504,21 @@ export const DB_FUNCTIONS = {
   // Sign-up step 1: which of the two addresses already belong to an account.
   app_contact_taken: fn(
     // null: that address is not being checked.
-    args({ p_email_hash: z.string().nullable(), p_phone_hash: z.string().nullable() }),
+    args({ p_email: z.string().nullable(), p_phone: z.string().nullable() }),
     z.object({ emailTaken: z.boolean(), phoneTaken: z.boolean() }),
   ),
   app_otp_start: fn(
     args({
       p_purpose: z.literal('PASSWORD_RESET'),
       p_channel: channel,
-      p_destination_hash: z.string(),
+      p_destination: z.string(),
       p_challenge: storedCode,
       p_ttl_seconds: z.number().int(),
       p_ctx: ctx,
     }),
     z.object({ userExists: z.boolean() }),
   ),
-  app_otp_peek: fn(args({ p_public_id: uuid }), z.object({ destinationHash: z.string() }).nullable()),
+  app_otp_peek: fn(args({ p_public_id: uuid }), z.object({ destination: z.string() }).nullable()),
   app_otp_resend: fn(
     args({
       p_public_id: uuid,
@@ -534,7 +533,7 @@ export const DB_FUNCTIONS = {
         channel,
         purpose: z.enum(['SIGNUP', 'PASSWORD_RESET']),
         isDecoy: z.boolean(),
-        destinationEnc: z.string().nullable(),
+        destination: z.string().nullable(),
       }),
       failure,
     ]),
@@ -568,7 +567,7 @@ export const DB_FUNCTIONS = {
     ]),
   ),
   app_login_lookup: fn(
-    args({ p_channel: channel, p_id_hash: z.string() }),
+    args({ p_channel: channel, p_identifier: z.string() }),
     z
       .object({
         userId: internalId,
@@ -595,7 +594,7 @@ export const DB_FUNCTIONS = {
   app_reset_lookup: fn(
     args({ p_token_hash: z.string() }),
     z
-      .object({ userId: internalId, passwordHash: z.string(), emailEnc: z.string(), phoneEnc: z.string() })
+      .object({ userId: internalId, passwordHash: z.string(), email: z.string(), phone: z.string() })
       .nullable(),
   ),
   app_reset_complete: fn(
@@ -610,8 +609,8 @@ export const DB_FUNCTIONS = {
     z
       .object({
         publicId: uuid,
-        emailEnc: z.string(),
-        phoneEnc: z.string(),
+        email: z.string(),
+        phone: z.string(),
         tier,
         requestedTier: verifiedTier.nullable(),
         kycStatus,
@@ -831,8 +830,8 @@ export const DB_FUNCTIONS = {
   app_admin_find_users: fn(
     args({
       p_q_pattern: z.string().nullable(),
-      p_email_hash: z.string().nullable(),
-      p_phone_hash: z.string().nullable(),
+      p_email: z.string().nullable(),
+      p_phone: z.string().nullable(),
       p_tiers: z.array(tier).nullable(),
       p_kyc_statuses: z.array(kycStatus).nullable(),
       p_statuses: z.array(accountStatus).nullable(),
@@ -860,8 +859,8 @@ export const DB_FUNCTIONS = {
     z
       .object({
         id: uuid,
-        emailEnc: z.string(),
-        phoneEnc: z.string(),
+        email: z.string(),
+        phone: z.string(),
         name: z.string(),
         experienceYears: z.number().int().nullable(),
         jobProfileCode: z.string().nullable(),

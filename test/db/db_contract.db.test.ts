@@ -86,8 +86,8 @@ describe('real results pass the declared result shapes', () => {
     const phone = code();
     const started = await callDb('app_signup_start', {
       p_signup: {
-        name: 'Contract User', emailEnc: 'enc-e', emailHash: 'contract-email', countryCode: '+91',
-        phoneEnc: 'enc-p', phoneHash: 'contract-phone', passwordHash: 'argon', ttlSeconds: 3600, otpTtlSeconds: 300,
+        name: 'Contract User', email: 'contract-email', countryCode: '+91',
+        phone: 'contract-phone', passwordHash: 'argon', ttlSeconds: 3600, otpTtlSeconds: 300,
         onboarding,
       },
       p_email_challenge: email,
@@ -96,7 +96,7 @@ describe('real results pass the declared result shapes', () => {
     });
     if ('fields' in started) throw new Error(`unexpected field errors: ${JSON.stringify(started.fields)}`);
     expect(started.expiresAt).toBeInstanceOf(Date);
-    expect(await callDb('app_otp_peek', { p_public_id: email.publicId })).toEqual({ destinationHash: 'contract-email' });
+    expect(await callDb('app_otp_peek', { p_public_id: email.publicId })).toEqual({ destination: 'contract-email' });
 
     const verify = (c: ReturnType<typeof code>, s = session()) =>
       callDb('app_otp_verify', {
@@ -114,7 +114,7 @@ describe('real results pass the declared result shapes', () => {
     expect(member).toMatchObject({ userId, tier: 'OBSERVER', requestedTier: 'PRIVE', fullName: 'Contract User' });
 
     // Login, refresh, OTP and reset.
-    expect(await callDb('app_login_lookup', { p_channel: 'EMAIL', p_id_hash: 'contract-email' })).toMatchObject({ userId, status: 'ACTIVE' });
+    expect(await callDb('app_login_lookup', { p_channel: 'EMAIL', p_identifier: 'contract-email' })).toMatchObject({ userId, status: 'ACTIVE' });
     expect(await callDb('app_login_complete', { p_user_id: userId, p_session: session(), p_ctx: CTX })).toEqual({
       sessionExpiresAt: expect.any(Date),
     });
@@ -126,7 +126,7 @@ describe('real results pass the declared result shapes', () => {
     const resetCode = code();
     expect(
       await callDb('app_otp_start', {
-        p_purpose: 'PASSWORD_RESET', p_channel: 'EMAIL', p_destination_hash: 'contract-email', p_challenge: resetCode,
+        p_purpose: 'PASSWORD_RESET', p_channel: 'EMAIL', p_destination: 'contract-email', p_challenge: resetCode,
         p_ttl_seconds: 300, p_ctx: CTX,
       }),
     ).toEqual({ userExists: true });

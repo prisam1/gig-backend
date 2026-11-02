@@ -1,10 +1,10 @@
 import type { z } from 'zod';
 import { env } from '../../config/env';
 import { audit } from '../../lib/audit';
-import { decrypt, encrypt, keyedHash, randomToken, sha256 } from '../../lib/crypto';
+import { keyedHash, randomToken, sha256 } from '../../lib/crypto';
 import { callDb } from '../../lib/db';
 import type { DbResult } from '../../lib/dbFunctions';
-import { maskDestination, sendNotice, sendOtp, type Channel } from '../../lib/notifier';
+import { maskDestination, sendNotice, sendOtp } from '../../lib/notifier';
 import { burnPasswordCheck, hashPassword, verifyPassword } from '../../lib/password';
 import { LIMITS, consume, limitArg, reset, tooMany } from '../../lib/rateLimit';
 import type { AuthContext } from '../../middleware/auth';
@@ -37,10 +37,8 @@ const SIGNUP_TTL_SECONDS = 3600;
 const RESET_TOKEN_TTL_SECONDS = 600;
 const AGE_CONSENT_VERSION = '2026-10-27';
 
-const emailHash = (email: string) => keyedHash('email', email);
-const phoneHash = (phone: string) => keyedHash('phone', phone);
-const identifierHash = (id: Identifier) => (id.channel === 'EMAIL' ? emailHash(id.value) : phoneHash(id.value));
-const decryptContact = (channel: Channel, value: string) => decrypt(value, channel === 'EMAIL' ? 'email' : 'phone');
+// The rate-limit key for an email or phone: the limits table keeps a hash, not the address.
+const contactKey = (value: string) => keyedHash('contact', value);
 
 const fieldError = (field: string, message: string) =>
   new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', { [field]: message });
@@ -105,28 +103,24 @@ function accountExists(taken: { email: boolean; phone: boolean }): AppError {
 export async function checkSignupContact(input: z.infer<typeof registerCheckSchema>, ctx: ClientContext) {
   await consume(LIMITS.registerCheckPerIp, ctx.ip);
   const taken = await callDb('app_contact_taken', {
-    p_email_hash: input.email === undefined ? null : emailHash(input.email),
-    p_phone_hash: input.phone === undefined ? null : phoneHash(input.phone),
+    p_email: input.email ?? null,
+    p_phone: input.phone ?? null,
   });
   if (taken.emailTaken || taken.phoneTaken) throw accountExists({ email: taken.emailTaken, phone: taken.phoneTaken });
   return { available: true as const };
 }
 
 export async function register(input: z.infer<typeof registerSchema>, ctx: ClientContext) {
-  const eHash = emailHash(input.email);
-  const pHash = phoneHash(input.phone);
   const codes = SIGNUP_CODES[input.tier];
   await consume(LIMITS.registerPerIp, ctx.ip);
-  if (codes.email) await consume(LIMITS.otpSendPerDestination, eHash);
-  if (codes.phone) await consume(LIMITS.otpSendPerDestination, pHash);
+  if (codes.email) await consume(LIMITS.otpSendPerDestination, contactKey(input.email));
+  if (codes.phone) await consume(LIMITS.otpSendPerDestination, contactKey(input.phone));
 
   const signup = {
     name: input.name,
-    emailEnc: encrypt(input.email, 'email'),
-    emailHash: eHash,
+    email: input.email,
     countryCode: input.countryCode,
-    phoneEnc: encrypt(input.phone, 'phone'),
-    phoneHash: pHash,
+    phone: input.phone,
     passwordHash: await hashPassword(input.password),
     ttlSeconds: SIGNUP_TTL_SECONDS,
     otpTtlSeconds: OTP_TTL_SECONDS,
@@ -194,14 +188,13 @@ export async function sendOtpRequest(input: z.infer<typeof otpSendSchema>, ctx: 
 // the newest code per address works.
 export async function forgotPassword(identifier: Identifier, ctx: ClientContext) {
   await consume(LIMITS.otpSendPerIp, ctx.ip);
-  const destinationHash = identifierHash(identifier);
-  await consume(LIMITS.otpSendPerDestination, destinationHash);
+  await consume(LIMITS.otpSendPerDestination, contactKey(identifier.value));
 
   const challenge = issueCode();
   const { userExists } = await callDb('app_otp_start', {
     p_purpose: 'PASSWORD_RESET',
     p_channel: identifier.channel,
-    p_destination_hash: destinationHash,
+    p_destination: identifier.value,
     p_challenge: challenge.stored,
     p_ttl_seconds: OTP_TTL_SECONDS,
     p_ctx: ctx,
@@ -215,16 +208,16 @@ export async function forgotPassword(identifier: Identifier, ctx: ClientContext)
   return challengeView(challenge.publicId, identifier.channel, maskDestination(identifier.channel, identifier.value));
 }
 
-// The keyed hash of the address a challenge belongs to, for per-address limits.
-async function challengeDestination(publicId: string): Promise<string | null> {
+// The rate-limit key of the address a challenge belongs to, for per-address limits.
+async function challengeDestinationKey(publicId: string): Promise<string | null> {
   const peek = await callDb('app_otp_peek', { p_public_id: publicId });
-  return peek?.destinationHash ?? null;
+  return peek ? contactKey(peek.destination) : null;
 }
 
 async function resendChallenge(publicId: string) {
   const invalid = new AppError(400, 'OTP_CHALLENGE_INVALID', 'This verification has ended. Start again.');
-  const destinationHash = await challengeDestination(publicId);
-  if (!destinationHash) throw invalid;
+  const destinationKey = await challengeDestinationKey(publicId);
+  if (!destinationKey) throw invalid;
 
   const code = issueCode(publicId);
   const sent = await callDb('app_otp_resend', {
@@ -233,7 +226,7 @@ async function resendChallenge(publicId: string) {
     p_cooldown_seconds: OTP_RESEND_COOLDOWN_SECONDS,
     p_max_sends: OTP_MAX_SENDS,
     p_ttl_seconds: OTP_TTL_SECONDS,
-    p_limit: limitArg(LIMITS.otpSendPerDestination, destinationHash),
+    p_limit: limitArg(LIMITS.otpSendPerDestination, destinationKey),
   });
 
   if (failed(sent)) {
@@ -255,8 +248,8 @@ async function resendChallenge(publicId: string) {
     }
   }
 
-  if (!sent.isDecoy && sent.destinationEnc) {
-    sendOtp(sent.channel, decryptContact(sent.channel, sent.destinationEnc), code.code, sent.purpose);
+  if (!sent.isDecoy && sent.destination) {
+    sendOtp(sent.channel, sent.destination, code.code, sent.purpose);
   }
   // No destination in the response: a decoy has none, and leaving it out keeps both identical.
   return challengeView(publicId, sent.channel);
@@ -267,8 +260,8 @@ async function resendChallenge(publicId: string) {
 // ---------------------------------------------------------------------------------------------
 export async function verifyOtp(input: z.infer<typeof otpVerifySchema>, ctx: ClientContext) {
   await consume(LIMITS.otpVerifyPerIp, ctx.ip);
-  const destinationHash = await challengeDestination(input.challengeId);
-  if (!destinationHash) throw invalidCode();
+  const destinationKey = await challengeDestinationKey(input.challengeId);
+  if (!destinationKey) throw invalidCode();
 
   // Prepared up front; the database keeps only hashes and uses whichever the challenge needs.
   const session = newSession(input.device);
@@ -279,8 +272,8 @@ export async function verifyOtp(input: z.infer<typeof otpVerifySchema>, ctx: Cli
     p_max_attempts: OTP_MAX_ATTEMPTS,
     // Per address, across every challenge and IP, so spreading guesses over many IPs does not help.
     p_limits: [
-      limitArg(LIMITS.otpVerifyPerDestinationHour, destinationHash),
-      limitArg(LIMITS.otpVerifyPerDestinationDay, destinationHash),
+      limitArg(LIMITS.otpVerifyPerDestinationHour, destinationKey),
+      limitArg(LIMITS.otpVerifyPerDestinationDay, destinationKey),
     ],
     p_session: session.stored,
     p_reset: { tokenHash: sha256(resetToken), ttlSeconds: RESET_TOKEN_TTL_SECONDS },
@@ -309,13 +302,13 @@ export async function verifyOtp(input: z.infer<typeof otpVerifySchema>, ctx: Cli
 // ---------------------------------------------------------------------------------------------
 export async function login(input: z.infer<typeof loginSchema>, ctx: ClientContext) {
   await consume(LIMITS.loginPerIp, ctx.ip);
-  const idHash = identifierHash(input.identifier);
+  const accountKey = contactKey(input.identifier.value);
   // Counted before the password check, so parallel guesses cannot all pass; reset on success.
-  await consume(LIMITS.loginFailuresPerAccount, idHash);
+  await consume(LIMITS.loginFailuresPerAccount, accountKey);
 
   const user = await callDb(
     'app_login_lookup',
-    { p_channel: input.identifier.channel, p_id_hash: idHash },
+    { p_channel: input.identifier.channel, p_identifier: input.identifier.value },
   );
 
   let valid = false;
@@ -332,7 +325,7 @@ export async function login(input: z.infer<typeof loginSchema>, ctx: ClientConte
     throw new AppError(403, 'ACCOUNT_SUSPENDED', 'This account is suspended. Please contact support.');
   }
 
-  await reset(LIMITS.loginFailuresPerAccount, idHash);
+  await reset(LIMITS.loginFailuresPerAccount, accountKey);
   const session = newSession(input.device);
   const done = await callDb('app_login_complete', {
     p_user_id: user.userId,
@@ -391,9 +384,7 @@ export async function resetPassword(input: z.infer<typeof resetPasswordSchema>, 
   );
   if (!ticket) throw invalid;
 
-  const email = decrypt(ticket.emailEnc, 'email');
-  const phone = decrypt(ticket.phoneEnc, 'phone');
-  if (passwordContainsIdentity(input.newPassword, email, phone)) {
+  if (passwordContainsIdentity(input.newPassword, ticket.email, ticket.phone)) {
     throw fieldError('newPassword', 'Password must not contain your email name or phone number');
   }
   if (await verifyPassword(ticket.passwordHash, input.newPassword)) {
@@ -409,8 +400,8 @@ export async function resetPassword(input: z.infer<typeof resetPasswordSchema>, 
   if (!done.ok) throw invalid;
 
   // A fresh password clears any login lock on this account.
-  await reset(LIMITS.loginFailuresPerAccount, emailHash(email));
-  await reset(LIMITS.loginFailuresPerAccount, phoneHash(phone));
-  sendNotice('EMAIL', email, 'PASSWORD_CHANGED');
+  await reset(LIMITS.loginFailuresPerAccount, contactKey(ticket.email));
+  await reset(LIMITS.loginFailuresPerAccount, contactKey(ticket.phone));
+  sendNotice('EMAIL', ticket.email, 'PASSWORD_CHANGED');
   return { passwordReset: true };
 }
