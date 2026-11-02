@@ -97,6 +97,40 @@ const limit = z.strictObject({ key: z.string(), max: z.number().int(), window: z
 
 const storedCode = z.strictObject({ publicId: uuid, codeHash: z.string(), decoyHash: z.string() });
 
+const signupInput = z.strictObject({
+  name: z.string(),
+  emailEnc: z.string(),
+  emailHash: z.string(),
+  countryCode: z.enum(COUNTRY_CODES),
+  phoneEnc: z.string(),
+  phoneHash: z.string(),
+  passwordHash: z.string(),
+  ttlSeconds: z.number().int(),
+  otpTtlSeconds: z.number().int(),
+  // Sign-up steps 2-3 and the tier, validated by the database before anything is stored.
+  onboarding: z
+    .strictObject({
+      profile: z
+        .strictObject({
+          experienceYears: z.number().int(),
+          jobProfile: z.string(),
+          otherJob: z.string().optional(),
+          location: z.string(),
+        })
+        .optional(),
+      preferences: z
+        .strictObject({
+          focus: z.array(z.string()),
+          risk: z.array(z.string()),
+          style: z.array(z.string()),
+          sector: z.array(z.string()),
+        })
+        .optional(),
+      tier: tier.optional(),
+    })
+    .optional(),
+});
+
 const newSession = z.strictObject({
   publicId: uuid,
   refreshHash: z.string(),
@@ -435,41 +469,10 @@ export const DB_FUNCTIONS = {
   // Sign-up, OTP and login
   app_signup_start: fn(
     args({
-      p_signup: z.strictObject({
-        name: z.string(),
-        emailEnc: z.string(),
-        emailHash: z.string(),
-        countryCode: z.enum(COUNTRY_CODES),
-        phoneEnc: z.string(),
-        phoneHash: z.string(),
-        passwordHash: z.string(),
-        ttlSeconds: z.number().int(),
-        otpTtlSeconds: z.number().int(),
-        // Sign-up steps 2-3 and the tier, validated by the database before anything is stored.
-        onboarding: z
-          .strictObject({
-            profile: z
-              .strictObject({
-                experienceYears: z.number().int(),
-                jobProfile: z.string(),
-                otherJob: z.string().optional(),
-                location: z.string(),
-              })
-              .optional(),
-            preferences: z
-              .strictObject({
-                focus: z.array(z.string()),
-                risk: z.array(z.string()),
-                style: z.array(z.string()),
-                sector: z.array(z.string()),
-              })
-              .optional(),
-            tier: tier.optional(),
-          })
-          .optional(),
-      }),
-      p_email_challenge: storedCode,
-      p_phone_challenge: storedCode,
+      p_signup: signupInput,
+      // null: that address gets no code (Prive has no email code).
+      p_email_challenge: storedCode.nullable(),
+      p_phone_challenge: storedCode.nullable(),
       p_ctx: ctx,
     }),
     z.union([
@@ -477,6 +480,26 @@ export const DB_FUNCTIONS = {
       z.object({ fields: z.record(z.string(), z.string()) }),
       // The email and/or phone already belong to an account: nothing was stored.
       z.object({ taken: z.object({ email: z.boolean(), phone: z.boolean() }) }),
+    ]),
+  ),
+  // Institutional: a sign-up that needs no code; the account and first session are created at once.
+  app_signup_create: fn(
+    args({
+      p_signup: signupInput,
+      p_session: newSession,
+      p_age_consent_version: z.string(),
+      p_ctx: ctx,
+    }),
+    z.union([
+      z.object({
+        status: z.literal('COMPLETED'),
+        userId: internalId,
+        userPublicId: uuid,
+        sessionExpiresAt: timestamp,
+      }),
+      z.object({ fields: z.record(z.string(), z.string()) }),
+      z.object({ taken: z.object({ email: z.boolean(), phone: z.boolean() }) }),
+      failure,
     ]),
   ),
   // Sign-up step 1: which of the two addresses already belong to an account.

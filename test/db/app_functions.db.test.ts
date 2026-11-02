@@ -355,7 +355,7 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
     };
   }
 
-  const start = (tag: string, data: unknown, email = challenge(), phone = challenge()) =>
+  const start = (tag: string, data: unknown, email: object | null = challenge(), phone: object | null = challenge()) =>
     call('app_signup_start', {
       name: `User ${tag}`, emailEnc: `enc-email-${tag}`, emailHash: `email-${tag}`, countryCode: '+91',
       phoneEnc: `enc-phone-${tag}`, phoneHash: `phone-${tag}`, passwordHash: `argon-${tag}`,
@@ -412,6 +412,50 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
     expect(await start('bad-other', { ...data, profile: { ...data.profile, otherJob: 'Pilot' } }))
       .toEqual({ fields: { 'profile.otherJob': 'Only allowed when the job profile is Others' } });
     expect(await one(`select count(*)::int as n from app.signup_requests where email_hash like 'email-bad-%'`)).toEqual({ n: 0 });
+  });
+
+  it('creates a Prive account with the phone code alone when no email code was issued', async () => {
+    const phone = challenge();
+    await start('prive-phone', onboarding('PRIVE'), null, phone);
+    const done = (await verify(phone)) as { status: string; userId: string };
+    expect(done).toMatchObject({ status: 'COMPLETED' });
+    expect(await one(
+      `select requested_tier, email_verified_at is null as email_unverified, phone_verified_at is not null as phone_verified
+       from app.users where id = $1`,
+      [done.userId],
+    )).toEqual({ requested_tier: 'PRIVE', email_unverified: true, phone_verified: true });
+  });
+
+  it('still needs both codes when both were issued', async () => {
+    const email = challenge();
+    const phone = challenge();
+    await start('both-needed', onboarding('OBSERVER'), email, phone);
+    expect(await verify(phone)).toMatchObject({ status: 'PENDING', verified: ['PHONE'], pending: ['EMAIL'] });
+  });
+
+  it('creates an Institutional account and its session at once, with no code', async () => {
+    const s = session();
+    const done = await call<{ status: string; userId: string; userPublicId: string }>('app_signup_create', {
+      name: 'User inst', emailEnc: 'enc-email-inst', emailHash: 'email-inst', countryCode: '+91',
+      phoneEnc: 'enc-phone-inst', phoneHash: 'phone-inst', passwordHash: 'argon-inst',
+      ttlSeconds: 3600, otpTtlSeconds: 300, onboarding: onboarding('INSTITUTIONAL'),
+    }, s, '2026-10-27', CTX);
+    expect(done).toMatchObject({ status: 'COMPLETED', sessionExpiresAt: expect.any(String) });
+    expect(await one(
+      `select requested_tier, email_verified_at is null and phone_verified_at is null as unverified,
+              (select count(*)::int from app.otp_challenges where destination_hash in ('email-inst', 'phone-inst')) as codes,
+              (select count(*)::int from app.signup_requests where email_hash = 'email-inst') as pending
+       from app.users where id = $1`,
+      [done.userId],
+    )).toEqual({ requested_tier: 'INSTITUTIONAL', unverified: true, codes: 0, pending: 0 });
+    expect(await call('app_member', done.userPublicId, s.publicId)).not.toBeNull();
+
+    // A second sign-up with the same email is refused like any other.
+    expect(await call('app_signup_create', {
+      name: 'User inst', emailEnc: 'enc-email-inst', emailHash: 'email-inst', countryCode: '+91',
+      phoneEnc: 'enc-phone-inst2', phoneHash: 'phone-inst2', passwordHash: 'argon-inst',
+      ttlSeconds: 3600, otpTtlSeconds: 300, onboarding: onboarding('INSTITUTIONAL'),
+    }, session(), '2026-10-27', CTX)).toEqual({ taken: { email: true, phone: false } });
   });
 
   it('stores no onboarding when none is sent (the API always sends it)', async () => {

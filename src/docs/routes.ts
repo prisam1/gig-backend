@@ -95,11 +95,11 @@ export const routeDocs: RouteDoc[] = [
     'post',
     '/auth/register',
     'Auth',
-    'Start sign-up (account is created after both OTPs verify)',
+    'Start sign-up (codes by tier; Institutional is created at once)',
     'public',
     {
       description:
-        'Returns an EMAIL and a PHONE challenge. Verify both with POST /auth/otp/verify (with OTP_TEST_CODE=1234 in .env every code is 1234; otherwise codes are printed in the server log in dev); the second verify creates the account and returns the tokens. An email or phone that already belongs to an account is refused with 409 ACCOUNT_EXISTS (fields.email / fields.phone). profile, preferences and tier are required: the app sends them from its tier screen (its OTP screen comes last), and they are applied when the account is created. Each choice must be a code from the fixed option lists (src/constants/onboarding.ts); anything else is refused.',
+        'The codes follow the tier. OBSERVER: 202 { status: PENDING, challenges } with an EMAIL and a PHONE challenge. PRIVE: 202 with a PHONE challenge only. Verify each with POST /auth/otp/verify (with OTP_TEST_CODE=1234 in .env every code is 1234; otherwise codes are printed in the server log in dev); the last one creates the account and returns the tokens. INSTITUTIONAL: no code; 201 { status: COMPLETED, user, tokens } with the account created and signed in (send device for the session). An email or phone that already belongs to an account is refused with 409 ACCOUNT_EXISTS (fields.email / fields.phone). profile, preferences and tier are required: the app sends them from its tier screen (its OTP screen comes last), and they are applied when the account is created. Each choice must be a code from the fixed option lists (src/constants/onboarding.ts); anything else is refused.',
       body: auth.registerSchema,
       status: 202,
       example: {

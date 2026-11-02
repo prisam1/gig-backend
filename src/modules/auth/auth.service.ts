@@ -78,10 +78,17 @@ function otpError(f: DbFailure): AppError {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Sign-up. The account is created only after both the email and the phone are verified. An email
-// or phone that already belongs to an account is refused with 409 ACCOUNT_EXISTS and a message
-// under each taken field, on step 1 (checkSignupContact) and again here.
+// Sign-up. The codes follow the app's screens for the tier: Observer verifies the email and the
+// phone, Prive the phone only, Institutional nothing (its account is created by register itself).
+// An email or phone that already belongs to an account is refused with 409 ACCOUNT_EXISTS and a
+// message under each taken field, on step 1 (checkSignupContact) and again here.
 // ---------------------------------------------------------------------------------------------
+
+const SIGNUP_CODES: Record<z.infer<typeof registerSchema>['tier'], { email: boolean; phone: boolean }> = {
+  OBSERVER: { email: true, phone: true },
+  PRIVE: { email: false, phone: true },
+  INSTITUTIONAL: { email: false, phone: false },
+};
 
 // Each taken address has its own message under its own field; they are never combined.
 const EMAIL_TAKEN = 'This email is already registered with another account.';
@@ -108,47 +115,67 @@ export async function checkSignupContact(input: z.infer<typeof registerCheckSche
 export async function register(input: z.infer<typeof registerSchema>, ctx: ClientContext) {
   const eHash = emailHash(input.email);
   const pHash = phoneHash(input.phone);
+  const codes = SIGNUP_CODES[input.tier];
   await consume(LIMITS.registerPerIp, ctx.ip);
-  await consume(LIMITS.otpSendPerDestination, eHash);
-  await consume(LIMITS.otpSendPerDestination, pHash);
+  if (codes.email) await consume(LIMITS.otpSendPerDestination, eHash);
+  if (codes.phone) await consume(LIMITS.otpSendPerDestination, pHash);
 
-  const email = issueCode();
-  const phone = issueCode();
-  const started = await callDb(
-    'app_signup_start',
-    {
-      p_signup: {
-        name: input.name,
-        emailEnc: encrypt(input.email, 'email'),
-        emailHash: eHash,
-        countryCode: input.countryCode,
-        phoneEnc: encrypt(input.phone, 'phone'),
-        phoneHash: pHash,
-        passwordHash: await hashPassword(input.password),
-        ttlSeconds: SIGNUP_TTL_SECONDS,
-        otpTtlSeconds: OTP_TTL_SECONDS,
-        // Steps 2-3 and the tier (the app's OTP screen comes after its tier screen).
-        onboarding: { profile: input.profile, preferences: input.preferences, tier: input.tier },
-      },
-      p_email_challenge: email.stored,
-      p_phone_challenge: phone.stored,
+  const signup = {
+    name: input.name,
+    emailEnc: encrypt(input.email, 'email'),
+    emailHash: eHash,
+    countryCode: input.countryCode,
+    phoneEnc: encrypt(input.phone, 'phone'),
+    phoneHash: pHash,
+    passwordHash: await hashPassword(input.password),
+    ttlSeconds: SIGNUP_TTL_SECONDS,
+    otpTtlSeconds: OTP_TTL_SECONDS,
+    // Steps 2-3 and the tier (the app's OTP screen comes after its tier screen).
+    onboarding: { profile: input.profile, preferences: input.preferences, tier: input.tier },
+  };
+
+  // Institutional: no code, so the account and its first session are created now.
+  if (!codes.email && !codes.phone) {
+    const session = newSession(input.device);
+    const created = await callDb('app_signup_create', {
+      p_signup: signup,
+      p_session: session.stored,
+      p_age_consent_version: AGE_CONSENT_VERSION,
       p_ctx: ctx,
-    },
-  );
+    });
+    if ('fields' in created) throw new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', created.fields);
+    if ('taken' in created) throw accountExists(created.taken);
+    if (failed(created)) throw otpError(created);
+    return {
+      status: created.status,
+      user: await loadUser(created.userId),
+      tokens: tokenPair(created.userPublicId, session.publicId, session.secret, created.sessionExpiresAt),
+    };
+  }
+
+  const email = codes.email ? issueCode() : null;
+  const phone = codes.phone ? issueCode() : null;
+  const started = await callDb('app_signup_start', {
+    p_signup: signup,
+    p_email_challenge: email?.stored ?? null,
+    p_phone_challenge: phone?.stored ?? null,
+    p_ctx: ctx,
+  });
 
   // Nothing was stored and no code was sent in either case.
   if ('fields' in started) throw new AppError(400, 'VALIDATION_FAILED', 'Some fields are invalid', started.fields);
   if ('taken' in started) throw accountExists(started.taken);
 
-  sendOtp('EMAIL', input.email, email.code, 'SIGNUP');
-  sendOtp('PHONE', input.phone, phone.code, 'SIGNUP');
+  if (email) sendOtp('EMAIL', input.email, email.code, 'SIGNUP');
+  if (phone) sendOtp('PHONE', input.phone, phone.code, 'SIGNUP');
 
   return {
+    status: 'PENDING' as const,
     signupId: started.signupId,
     expiresAt: started.expiresAt,
     challenges: [
-      challengeView(email.publicId, 'EMAIL', maskDestination('EMAIL', input.email)),
-      challengeView(phone.publicId, 'PHONE', maskDestination('PHONE', input.phone)),
+      ...(email ? [challengeView(email.publicId, 'EMAIL', maskDestination('EMAIL', input.email))] : []),
+      ...(phone ? [challengeView(phone.publicId, 'PHONE', maskDestination('PHONE', input.phone))] : []),
     ],
   };
 }
