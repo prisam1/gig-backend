@@ -58,7 +58,7 @@ src/
     membership.ts         # the signed-in member: session, tier, KYC status and name
     http.ts               # response envelope, zod parsing, pagination helpers
     enums.ts              # zod schemas for the database enums
-    ...                   # crypto (PII encryption), passwords, JWT, rate limits, audit, OTP delivery
+    ...                   # crypto (hashes, tokens), passwords, JWT, rate limits, audit, OTP delivery
   constants/              # fixed value lists, one file per API area (onboarding.ts: sign-up choices)
   types/                  # TypeScript types, one file per API area (onboarding.ts), plus database.ts:
                           # typed Supabase schema (tables, views, functions, enums)
@@ -96,7 +96,7 @@ The CLI records applied migrations in `supabase_migrations.schema_migrations`. T
 
 The API has one way into the database: supabase-js with the service-role key (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; no database password or connection string). The data is split into two schemas:
 
-- **`app`** (auth, onboarding, profile, KYC, ratings and representations): users, sessions, OTP challenges, profiles, preferences, follows, files, KYC submissions and documents, consents, audit log, rate limits, the 4 Ratings tables and the 4 Representations tables. It is not exposed by the Supabase API at all. The server reaches it only through the `public.app_*` database functions (`supabase/migrations/20261027160000_app_functions.sql` and `20261027190000_ratings_representations_functions.sql`, called via `callDb` in `src/lib/db.ts`). Each function is one transaction, runs as its owner, and can be called by the service role only; the publishable key gets "permission denied". Hashing, encryption and token generation stay in the API, so the database only ever stores hashes and ciphertext.
+- **`app`** (auth, onboarding, profile, KYC, ratings and representations): users, sessions, OTP challenges, profiles, preferences, follows, files, KYC submissions and documents, consents, audit log, rate limits, the 4 Ratings tables and the 4 Representations tables. It is not exposed by the Supabase API at all. The server reaches it only through the `public.app_*` database functions (`supabase/migrations/20261027160000_app_functions.sql` and `20261027190000_ratings_representations_functions.sql`, called via `callDb` in `src/lib/db.ts`). Each function is one transaction, runs as its owner, and can be called by the service role only; the publishable key gets "permission denied". Password hashing, OTP code hashing and token generation stay in the API; the database never sees a password, a code or a token in clear.
 - **`public`** (catalog and reviews): `companies`, `company_tags`, `issuers`, `issuer_tags`, `reviews`, `review_tags`, `review_attachments`, `review_versions`, `company_stats`, `company_trend_points`, plus the read-only views `company_cards` and `review_feed`, and the private Storage bucket `review-evidence`. The API reads and writes them with the service role (`src/lib/supabase.ts`). Every table has Row Level Security enabled with no policies, so the app cannot query the database directly. The `issuers` tables are read by the Ratings module's APIs.
 
 `src/types/database.ts` mirrors the `public` schema. After a schema change, regenerate it:
@@ -202,7 +202,7 @@ The account only exists once both email and phone are verified. A pending sign-u
   - 5 codes per email or phone per hour
   - 5 failed logins per email or phone per 15 minutes, applied whether or not the account exists
 - **Tokens:** 15-minute access JWT (HS256, issuer and audience checked). The 30-day refresh token is rotated on every use, and every session ends after 90 days at most. Reusing an old refresh token revokes that session. Every authenticated request also checks the session in the database, so logout, password reset and suspension apply immediately.
-- **PII:** email and phone are encrypted with AES-256-GCM. Lookups use HMAC-SHA256 hashes.
+- **Contact details:** email and phone are stored as entered (plain text) and are unique per account. Rate-limit keys derived from them are HMAC-SHA256 hashes.
 - **Audit log:** registrations, logins (including failures), OTP failures, token reuse, logouts, password resets and onboarding changes. The table rejects updates and deletes.
 - **Requests:** unknown body fields are rejected, bodies are capped at 100 KB, and auth responses are sent with `Cache-Control: no-store`.
 
@@ -436,7 +436,7 @@ select id, 'ADMIN' from app.users where public_id = '<user id>';
 | ------------- | ----------------------------------------------------------- | -------------------------- | --------------------------------------------------------------------------------------------- |
 | GET           | `/admin/me`                                                 | any staff                  | Roles and permissions, for the console's navigation                                           |
 | GET           | `/admin/users`                                              | `users.read`               | `q` = exact email, phone (`+91…` or national number) or part of a name; `filter[tier]`, `[kycStatus]`, `[status]`, `[staff]` |
-| GET           | `/admin/users/:id`                                          | `users.read`               | Account, decrypted email and phone, KYC, activity, tier history. Each view is audited         |
+| GET           | `/admin/users/:id`                                          | `users.read`               | Account, email and phone, KYC, activity, tier history. Each view is audited                   |
 | PATCH         | `/admin/users/:id`                                          | `users.manage`             | `{ tier?, status?: ACTIVE \| SUSPENDED, reason }`. Suspending ends every session              |
 | PUT           | `/admin/users/:id/roles`                                    | `roles.manage`             | `{ roles: [...] }` replaces the staff roles; `[]` removes staff access                        |
 | GET           | `/admin/kyc`                                                | `kyc.review`               | Queue: `filter[status]` (default `PENDING`), `filter[tier]`, `sort=oldest\|newest`            |

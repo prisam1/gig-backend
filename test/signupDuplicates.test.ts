@@ -46,8 +46,8 @@ describe('duplicate email or phone at sign-up', () => {
     });
 
     it.each([
-      [{ email: 'asha.mehta@example.com' }, { p_email_hash: expect.any(String), p_phone_hash: null }, 'email'],
-      [{ phone: '9876543210' }, { p_email_hash: null, p_phone_hash: expect.any(String) }, 'phone'],
+      [{ email: 'asha.mehta@example.com' }, { p_email: 'asha.mehta@example.com', p_phone: null }, 'email'],
+      [{ phone: '9876543210' }, { p_email: null, p_phone: '+919876543210' }, 'phone'],
     ])('checks one field on its own (%o)', async (body, args, field) => {
       const rpc = vi.spyOn(dbTransport, 'rpc').mockResolvedValue({ emailTaken: field === 'email', phoneTaken: field === 'phone' });
       const res = await request(app).post('/api/v1/auth/register/check').send(body);

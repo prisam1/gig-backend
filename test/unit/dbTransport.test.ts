@@ -14,9 +14,9 @@ beforeEach(() => {
 
 describe('dbTransport.rpc', () => {
   it('retries a read-only function after a network failure', async () => {
-    rpc.mockResolvedValueOnce(networkFailure).mockResolvedValueOnce(ok({ destinationHash: 'h' }));
+    rpc.mockResolvedValueOnce(networkFailure).mockResolvedValueOnce(ok({ destination: 'h' }));
 
-    await expect(dbTransport.rpc('app_otp_peek', { p_public_id: 'x' })).resolves.toEqual({ destinationHash: 'h' });
+    await expect(dbTransport.rpc('app_otp_peek', { p_public_id: 'x' })).resolves.toEqual({ destination: 'h' });
     expect(rpc).toHaveBeenCalledTimes(2);
   });
 

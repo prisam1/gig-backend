@@ -1,5 +1,4 @@
 import type { z } from 'zod';
-import { decrypt } from '../../lib/crypto';
 import { callDb } from '../../lib/db';
 import type { DbResult } from '../../lib/dbFunctions';
 import { AppError } from '../../middleware/errorHandler';
@@ -70,8 +69,8 @@ export async function loadUser(userId: string) {
   return {
     id: row.publicId,
     name: row.name,
-    email: decrypt(row.emailEnc, 'email'),
-    phone: decrypt(row.phoneEnc, 'phone'),
+    email: row.email,
+    phone: row.phone,
     avatarUrl: avatarUrl(row.avatarBucket, row.avatarObjectKey),
     followers: row.followers,
     following: row.following,

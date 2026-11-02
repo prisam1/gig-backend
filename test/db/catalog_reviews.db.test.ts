@@ -158,10 +158,10 @@ beforeAll(async () => {
   await db.exec(readFileSync(join(ROOT, 'supabase', 'seed.sql'), 'utf8'));
   // Reviewers are auth-module users, identified by app.users.public_id.
   await db.exec(`
-    insert into app.users (public_id, email_enc, email_hash, phone_country_code, phone_enc, phone_hash,
-                           password_hash, email_verified_at, phone_verified_at)
-    values ('${ALICE}', 'x', 'alice', '+91', 'x', 'alice', 'x', now(), now()),
-           ('${BOB}', 'x', 'bob', '+91', 'x', 'bob', 'x', now(), now())`);
+    insert into app.users (public_id, email, phone_country_code, phone, password_hash,
+                           email_verified_at, phone_verified_at)
+    values ('${ALICE}', 'alice', '+91', 'alice', 'x', now(), now()),
+           ('${BOB}', 'bob', '+91', 'bob', 'x', now(), now())`);
 });
 
 afterAll(async () => {

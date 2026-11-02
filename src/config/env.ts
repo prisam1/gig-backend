@@ -28,8 +28,7 @@ const envSchema = z
     REFRESH_TOKEN_IDLE_DAYS: z.coerce.number().int().min(1).max(90).default(30),
     SESSION_MAX_DAYS: z.coerce.number().int().min(1).max(365).default(90),
 
-    // Column-level encryption of PII (AES-256-GCM) and keyed hashes for lookups.
-    DATA_ENCRYPTION_KEY: key32,
+    // Keyed hashes for stored OTP codes and rate-limit keys.
     BLIND_INDEX_KEY: key32,
 
     // How OTP codes reach users. "console" prints them to the server log and is refused in production.
@@ -42,8 +41,7 @@ const envSchema = z
     API_DOCS: z.enum(['true', 'false']).optional(),
   })
   .superRefine((e, ctx) => {
-    const keys = [e.JWT_ACCESS_SECRET, e.DATA_ENCRYPTION_KEY, e.BLIND_INDEX_KEY];
-    if (new Set(keys).size !== keys.length) {
+    if (e.JWT_ACCESS_SECRET === e.BLIND_INDEX_KEY) {
       ctx.addIssue({ code: 'custom', path: ['BLIND_INDEX_KEY'], message: 'Each secret key must be different' });
     }
     if (e.NODE_ENV === 'production') {
