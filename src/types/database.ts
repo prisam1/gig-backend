@@ -708,7 +708,7 @@ export type Database = {
         Row: {
           roadshow_id: string;
           user_id: string;
-          capital_interest: number;
+          capital_interest: number | null;
           ledger_entry_id: number;
           idempotency_key: string;
           request_hash: string;
@@ -1012,7 +1012,7 @@ export type Database = {
         Row: {
           id: string;
           slug: string;
-          issuer_id: string;
+          issuer_id: string | null;
           title: string;
           summary: string | null;
           type_of_issue: string;
@@ -1033,11 +1033,27 @@ export type Database = {
           published_at: string | null;
           created_at: string;
           updated_at: string;
+          display_order: number;
+          company_name: string | null;
+          logo_text: string;
+          verified_label: string | null;
+          industry: string | null;
+          avg_gig_review: number | null;
+          gig_rating: number | null;
+          avg_score: number | null;
+          listed: boolean;
+          close_label: string | null;
+          country_label: string | null;
+          display_year: number | null;
+          tags: string[];
+          callable_label: string | null;
+          coupon_rate_label: string | null;
+          search_text: string | null;
         };
         Insert: {
           id?: string;
           slug: string;
-          issuer_id: string;
+          issuer_id?: string | null;
           title: string;
           summary?: string | null;
           type_of_issue: string;
@@ -1238,6 +1254,8 @@ export type Database = {
           reviews_30d: number | null;
           score_change_12m: number | null;
           last_review_at: string | null;
+          display_order: number | null;
+          asset_type_label: string | null;
         };
         Relationships: [];
       };
@@ -1271,6 +1289,7 @@ export type Database = {
           contact_statuses: string[] | null;
           created_at: string | null;
           published_at: string | null;
+          display: Json | null;
         };
         Relationships: [
           {
@@ -1307,6 +1326,7 @@ export type Database = {
           p_investment_statuses?: Database['public']['Enums']['investment_status'][];
           p_years?: number[];
           p_years_before?: number;
+          p_asset_labels?: string[];
         };
         Returns: Database['public']['Views']['company_cards']['Row'][];
         SetofOptions: {
@@ -1393,7 +1413,7 @@ export type Database = {
         Args: {
           p_user_id: string;
           p_roadshow_id: string;
-          p_capital_interest: number;
+          p_capital_interest: number | null;
           p_expectations: Database['public']['Enums']['pool_expectation'][];
           p_idempotency_key: string;
           p_request_hash: string;
@@ -1459,14 +1479,14 @@ export type Database = {
         | 'REPRESENTATION';
       offer_status: 'PENDING_REVIEW' | 'PUBLISHED' | 'WITHDRAWN' | 'REJECTED';
       pool_expectation:
-        | 'BETTER_ROI_IRR'
-        | 'SHORTER_LOCK_IN'
-        | 'LOWER_ENTRY_LOAD'
-        | 'LOWER_EXIT_LOAD'
-        | 'PRIORITY_ALLOTMENT'
+        | 'HIGHER_ROI_IRR'
+        | 'LOWER_LOCK_IN'
+        | 'REDUCED_ENTRY_EXIT_LOAD'
+        | 'TENURE_PREFERENCE'
+        | 'BETTER_ALLOTMENT'
         | 'FLEXIBLE_PAYMENT_TERMS'
-        | 'DISCOUNTED_OFFER_PRICE'
-        | 'REGULAR_DISCLOSURES';
+        | 'LOWER_MINIMUM_TICKET'
+        | 'CASHBACK_ON_REINVESTMENT';
       question_category: 'GENERAL' | 'EQUITY' | 'DEBT' | 'INSURANCE' | 'CRYPTO' | 'MUTUAL_FUNDS';
       question_status: 'PENDING_MODERATION' | 'PUBLISHED' | 'REJECTED';
       saved_entity_type: 'COMPANY' | 'ISSUER' | 'ROADSHOW' | 'LEARN_ITEM';
@@ -1529,14 +1549,14 @@ export const Constants = {
       ],
       offer_status: ['PENDING_REVIEW', 'PUBLISHED', 'WITHDRAWN', 'REJECTED'],
       pool_expectation: [
-        'BETTER_ROI_IRR',
-        'SHORTER_LOCK_IN',
-        'LOWER_ENTRY_LOAD',
-        'LOWER_EXIT_LOAD',
-        'PRIORITY_ALLOTMENT',
+        'HIGHER_ROI_IRR',
+        'LOWER_LOCK_IN',
+        'REDUCED_ENTRY_EXIT_LOAD',
+        'TENURE_PREFERENCE',
+        'BETTER_ALLOTMENT',
         'FLEXIBLE_PAYMENT_TERMS',
-        'DISCOUNTED_OFFER_PRICE',
-        'REGULAR_DISCLOSURES',
+        'LOWER_MINIMUM_TICKET',
+        'CASHBACK_ON_REINVESTMENT',
       ],
       question_category: ['GENERAL', 'EQUITY', 'DEBT', 'INSURANCE', 'CRYPTO', 'MUTUAL_FUNDS'],
       question_status: ['PENDING_MODERATION', 'PUBLISHED', 'REJECTED'],

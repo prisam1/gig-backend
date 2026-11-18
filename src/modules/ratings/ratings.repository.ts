@@ -38,6 +38,22 @@ export interface Issuer {
   ratingCount: number;
   averageScore: number;
   createdAt: Date;
+  /** What the app shows, stored as shown (20261118160000_rating_section_content.sql). */
+  display: IssuerDisplay;
+}
+
+export interface IssuerDisplay {
+  order: number;
+  logoText: string;
+  sentiment: 'positive' | 'neutral' | 'negative' | null;
+  minLot: string | null;
+  offerPrice: string | null;
+  offerSize: string | null;
+  lockIn: string | null;
+  openDate: string | null;
+  closeDate: string | null;
+  rating: number | null;
+  hasDocument: boolean;
 }
 
 export type ScoreDistribution = Record<'1' | '2' | '3' | '4' | '5', number>;
@@ -113,6 +129,7 @@ interface IssuerRow extends IssuerOffer {
   ratingCount: number;
   averageScore: number;
   createdAt: Date;
+  display: IssuerDisplay;
 }
 
 function toIssuer(row: IssuerRow): Issuer {
@@ -141,6 +158,7 @@ function toIssuer(row: IssuerRow): Issuer {
     ratingCount: row.ratingCount,
     averageScore: row.averageScore,
     createdAt: row.createdAt,
+    display: row.display,
   };
 }
 
@@ -171,11 +189,17 @@ export const ratingsRepository = {
       p_q_pattern: query.q ? containsPattern(query.q) : null,
       p_asset_types: query.filter?.assetType ?? null,
       p_listed: query.filter?.listed ?? null,
+      p_sentiments: query.filter?.sentiment ?? null,
       p_sort: query.sort satisfies IssuerSort,
       p_limit: query.pageSize,
       p_offset: (query.page - 1) * query.pageSize,
     });
     return { items: page.items.map(toIssuer), total: page.total };
+  },
+
+  /** Where the PDF that the details screen's Download saves is stored, or null. */
+  async findDocumentPath(id: string): Promise<string | null> {
+    return (await callDb('app_issuer_document', { p_id: id }))?.path ?? null;
   },
 
   async findIssuer(id: string): Promise<Issuer | null> {

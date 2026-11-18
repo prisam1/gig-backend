@@ -57,6 +57,19 @@ const issuer: Issuer = {
     lockIn: '30-60 days',
     prePostRatio: '100%/75%',
   },
+  display: {
+    order: 1,
+    logoText: 'SA',
+    sentiment: 'positive',
+    minLot: '45 shares',
+    offerPrice: '₹310- ₹325',
+    offerSize: '₹1450cr',
+    lockIn: '30-60days',
+    openDate: '25-03-24',
+    closeDate: '29-03-24',
+    rating: 4.8,
+    hasDocument: true,
+  },
   tags: [],
   ratingCount: 2,
   averageScore: 3.5,
@@ -264,18 +277,13 @@ describe('POST /issuers/:id/ratings: access', () => {
   });
 
   it.each([
-    ['Observer', makeUser(), 'FORBIDDEN'],
-    ['Institutional', makeUser({ tier: 'INSTITUTIONAL', kycStatus: 'APPROVED' }), 'FORBIDDEN'],
-    [
-      'Prive without approved KYC',
-      makeUser({ tier: 'PRIVE', kycStatus: 'PENDING' }),
-      'KYC_REQUIRED',
-    ],
-  ] as [string, Member, string][])('is not open to %s', async (_label, user, code) => {
+    ['Observer', makeUser()],
+    ['Institutional', makeUser({ tier: 'INSTITUTIONAL', kycStatus: 'APPROVED' })],
+    ['Prive without approved KYC', makeUser({ tier: 'PRIVE', kycStatus: 'PENDING' })],
+  ] as [string, Member][])('is open to %s', async (_label, user) => {
     signInAs(user);
-    const res = await submit();
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe(code);
+    stubSubmission();
+    expect((await submit()).status).toBe(201);
   });
 });
 

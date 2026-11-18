@@ -4,7 +4,6 @@ import { parse, sendData, sendPage } from '../../lib/http';
 import {
   authUser,
   optionalAuth,
-  requireFullAccess,
   requireInstitutional,
   requireAuth,
   requireVerifiedPrive,
@@ -51,12 +50,11 @@ roadshowsRouter.get('/:id/financials', requireAuth, async (req, res) => {
   sendData(res, await getFinancials(id, currency));
 });
 
-// GET /roadshows/:id/documents/:docId — verified Prive and Institutional: 5-minute download URL.
+// GET /roadshows/:id/documents/:docId — User: 5-minute download URL (the Download DD rows).
 roadshowsRouter.get(
   '/:id/documents/:docId',
   noStore,
   requireAuth,
-  requireFullAccess,
   async (req, res) => {
     const { id, docId } = parse(documentParams, req.params);
     sendData(res, await getDocumentDownload(id, docId));
@@ -77,9 +75,9 @@ roadshowsRouter.post('/:id/questions', requireAuth, requireVerifiedPrive, async 
   sendData(res, await askQuestion(authUser(req), id, body), 201);
 });
 
-// POST /roadshows/:id/pool — Prive: join the Power Pool, spending 1 credit.
+// POST /roadshows/:id/pool — User: join the Power Pool, spending 1 credit.
 // Needs an Idempotency-Key header; a retry with the same key and body returns the same membership.
-roadshowsRouter.post('/:id/pool', requireAuth, requireVerifiedPrive, async (req, res) => {
+roadshowsRouter.post('/:id/pool', requireAuth, async (req, res) => {
   const key = readIdempotencyKey(req);
   const { id } = parse(roadshowIdParams, req.params);
   const body = parse(joinPoolBody, req.body);

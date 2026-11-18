@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { FILTER_SECTIONS, filterCountsSchema } from '../modules/filters/filters.schemas';
 import { COUNTRY_CODES, DEVICE_PLATFORMS } from '../modules/auth/auth.schemas';
 import { PREFERENCE_TYPES } from '../constants/onboarding';
 import {
@@ -196,6 +197,19 @@ const issuer = z.object({
   ratingCount: z.number().int(),
   averageScore: z.number(),
   createdAt: timestamp,
+  display: z.object({
+    order: z.number().int(),
+    logoText: z.string(),
+    sentiment: z.enum(['positive', 'neutral', 'negative']).nullable(),
+    minLot: z.string().nullable(),
+    offerPrice: z.string().nullable(),
+    offerSize: z.string().nullable(),
+    lockIn: z.string().nullable(),
+    openDate: z.string().nullable(),
+    closeDate: z.string().nullable(),
+    rating: z.number().nullable(),
+    hasDocument: z.boolean(),
+  }),
 });
 
 const issuerRef = z.object({ id: uuid, name: z.string() });
@@ -222,6 +236,15 @@ const representation = z.object({
   trackStatus: z.enum(REPRESENTATION_TRACK_STATUSES),
   isOpenForSigning: z.boolean(),
   createdAt: timestamp,
+  displayOrder: z.number().int(),
+  statusLabel: z.string(),
+  closeInLabel: z.string(),
+  progressDone: z.number(),
+  progressTotal: z.number().int(),
+  signTitle: z.string(),
+  receiptTitle: z.string(),
+  signersMore: z.number().int(),
+  disclaimer: z.string(),
 });
 
 const representationDocument = z.object({
@@ -683,6 +706,7 @@ export const DB_FUNCTIONS = {
       p_q_pattern: z.string().nullable(),
       p_asset_types: z.array(z.string()).nullable(),
       p_listed: z.boolean().nullable(),
+      p_sentiments: z.array(z.string()).nullable(),
       p_sort: z.string(),
       p_limit: z.number().int(),
       p_offset: z.number().int(),
@@ -690,6 +714,7 @@ export const DB_FUNCTIONS = {
     page(issuer),
   ),
   app_find_issuer: fn(args({ p_id: uuid }), issuer.nullable()),
+  app_issuer_document: fn(args({ p_id: uuid }), z.object({ path: z.string() }).nullable()),
   app_issuer_stats: fn(
     args({ p_issuer_id: uuid }),
     z
@@ -757,6 +782,19 @@ export const DB_FUNCTIONS = {
     page(representation),
   ),
   app_find_representation: fn(args({ p_id: uuid }), representation.nullable()),
+  /** A roadshow's financial summary, Q&A and Power Pool figures (stored as the app shows them). */
+  app_roadshow_display: fn(args({ p_roadshow_id: uuid }), z.unknown()),
+  /** Live counts for a tab's filter sheet, by option id. */
+  app_filter_counts: fn(
+    args({ p_section: z.enum(FILTER_SECTIONS) }),
+    filterCountsSchema,
+  ),
+  /** A stored block of screen content (public.app_content), or null. */
+  app_get_content: fn(args({ p_key: z.string() }), z.unknown()),
+  app_representation_featured_signers: fn(
+    args({ p_representation_id: internalId }),
+    z.array(z.object({ displayName: z.string(), statusLabel: z.string(), avatarLetter: z.string() })),
+  ),
   app_representation_stats: fn(
     args({}),
     z.object({ activePetitions: z.number().int(), totalSignatures: z.number().int() }),
@@ -1214,6 +1252,10 @@ export type DbFunction = keyof typeof DB_FUNCTIONS;
  * retried. test/db/db_contract.db.test.ts keeps this list in step with the SQL.
  */
 export const READ_ONLY_DB_FUNCTIONS: ReadonlySet<DbFunction> = new Set<DbFunction>([
+  'app_filter_counts',
+  'app_roadshow_display',
+  'app_issuer_document',
+  'app_get_content',
   'app_contact_taken',
   'app_admin_audit_logs',
   'app_admin_find_representations',
@@ -1241,6 +1283,7 @@ export const READ_ONLY_DB_FUNCTIONS: ReadonlySet<DbFunction> = new Set<DbFunctio
   'app_representation_evidence',
   'app_representation_history',
   'app_representation_signature',
+  'app_representation_featured_signers',
   'app_representation_signers',
   'app_representation_stats',
   'app_representation_submission_pack',

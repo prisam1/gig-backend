@@ -49,6 +49,10 @@ export interface CompanyCard {
   sentimentSplit: SentimentSplit;
   resolution: Enums<'resolution_bucket'> | null;
   createdAt: string;
+  /** Place in the app's list. */
+  displayOrder: number;
+  /** The asset type as the app shows it. */
+  assetTypeLabel: string | null;
 }
 
 /** Signed-in members only; null otherwise. */
@@ -135,6 +139,8 @@ function toCard(row: CompanyCardRow): CompanyCard {
     },
     resolution: row.dominant_resolution,
     createdAt: required(row.created_at, 'created_at'),
+    displayOrder: row.display_order ?? 0,
+    assetTypeLabel: row.asset_type_label ?? null,
   };
 }
 
@@ -193,6 +199,9 @@ const sortOrders: Record<CompanySort, [SortColumn, 'asc' | 'desc'][]> = {
     ['score_change_12m', 'desc'],
     ['score', 'desc'],
   ],
+  display: [],
+  rating: [['score', 'desc']],
+  reviews: [['review_count', 'desc']],
 };
 
 type SearchArgs = Database['public']['Functions']['search_companies']['Args'];
@@ -213,6 +222,7 @@ function searchArgs(query: ListCompaniesQuery): SearchArgs {
     ...(query.q ? { p_q: escapeLike(query.q) } : {}),
     ...(f.sentiment?.length ? { p_sentiments: f.sentiment } : {}),
     ...(f.assetClass?.length ? { p_asset_classes: f.assetClass } : {}),
+    ...(f.assetLabel?.length ? { p_asset_labels: f.assetLabel } : {}),
     ...(f.resolution?.length ? { p_resolutions: f.resolution } : {}),
     ...(f.score?.length ? { p_scores: f.score } : {}),
     ...(f.country?.length ? { p_countries: f.country } : {}),
@@ -232,7 +242,8 @@ export async function listCompanies(
   for (const [column, direction] of sortOrders[query.sort]) {
     request = request.order(column, { ascending: direction === 'asc' });
   }
-  const { data, count, error } = await request.order('id').range(from, to);
+  // Ties keep the app's list order.
+  const { data, count, error } = await request.order('display_order').order('id').range(from, to);
 
   // PostgREST answers 416 (PGRST103) when the page starts past the last row.
   if (error?.code === 'PGRST103') {

@@ -7,6 +7,7 @@ import type { AuthUser } from '../../middleware/auth';
 import { HttpError, validationError, type FieldErrors } from '../../middleware/errorHandler';
 import type { ClientContext } from '../../middleware/requestContext';
 import type { RatingFlag, RatingStatus, Tier } from '../../types/domain';
+import { createSignedDownload, type SignedDownload } from '../../lib/storage';
 import { listOptions, type Option } from '../users/users.service';
 import {
   EMPTY_DISTRIBUTION,
@@ -23,6 +24,9 @@ import type { ListIssuersQuery, SubmitRatingInput } from './ratings.schemas';
 // ---------------------------------------------------------------------------------------------
 
 export type AccessLevel = 'SUMMARY' | 'FULL';
+
+/** Private bucket of the issuers' PDFs. */
+export const ISSUER_DOCUMENTS_BUCKET = 'issuer-documents';
 
 export interface IssuerSummary extends Omit<Issuer, 'ratingCount' | 'averageScore'> {
   rating: {
@@ -197,6 +201,15 @@ export const ratingsService = {
 
   async getIssuer(issuerId: string): Promise<IssuerSummary> {
     return toIssuerSummary(await requireIssuer(issuerId));
+  },
+
+  /** A 5-minute link to the PDF the details screen's Download saves. */
+  async getDocument(issuerId: string): Promise<SignedDownload & { fileName: string }> {
+    await requireIssuer(issuerId);
+    const path = await ratingsRepository.findDocumentPath(issuerId);
+    if (!path) throw new HttpError(404, 'This issuer has no document');
+    const fileName = path.split('/').pop() ?? 'download.pdf';
+    return { fileName, ...(await createSignedDownload(ISSUER_DOCUMENTS_BUCKET, path, fileName)) };
   },
 
   /** Public aggregate score; verified Prive and Institutional members also get the breakdown. */

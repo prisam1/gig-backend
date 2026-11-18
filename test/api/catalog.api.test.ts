@@ -56,6 +56,8 @@ describe('GET /api/v1/companies', () => {
         sentimentSplit: { positive: 66.67, neutral: 16.67, negative: 16.66 },
         resolution: 'RESOLVED',
         createdAt: '2026-01-10T00:00:00Z',
+        displayOrder: 0,
+        assetTypeLabel: null,
       },
     ]);
   });
@@ -152,6 +154,9 @@ describe('GET /api/v1/companies', () => {
         ['score', false],
       ],
     ],
+    ['display', []],
+    ['rating', [['score', false]]],
+    ['reviews', [['review_count', false]]],
   ] as const)('sort=%s orders by the matching columns', async (sort, expected) => {
     fake.on('rpc:search_companies', { data: [], count: 0 });
     await request(app).get('/api/v1/companies').query({ sort }).expect(200);
@@ -159,6 +164,7 @@ describe('GET /api/v1/companies', () => {
     const orders = allChainArgs(fake.callsTo('rpc:search_companies')[0], 'order');
     expect(orders).toEqual([
       ...expected.map(([column, ascending]) => [column, { ascending }]),
+      ['display_order'], // ties keep the app's list order
       ['id'], // stable tie-break
     ]);
   });
@@ -477,6 +483,7 @@ describe('GET /api/v1/companies/:id/reviews', () => {
         excerpt: expect.stringMatching(/…$/),
         resolutionStatus: 'RESOLVED',
         createdAt: '2026-10-01T00:00:00Z',
+        display: null,
       });
       expect(first.excerpt.length).toBeLessThanOrEqual(161);
       expect(first).not.toHaveProperty('metrics');

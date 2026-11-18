@@ -18,7 +18,9 @@
     "db:link": "supabase link --project-ref enkokznzruhyldqdpbwg",
     "db:migrate": "supabase db push --linked",
     "db:seed": "supabase db push --linked --include-seed",
-    "seed:representation-evidence": "tsx --env-file-if-exists=.env scripts/seed-representation-evidence.ts"
+    "seed:representation-evidence": "tsx --env-file-if-exists=.env scripts/seed-representation-evidence.ts",
+    "seed:issuer-documents": "tsx --env-file-if-exists=.env scripts/seed-issuer-documents.ts",
+    "seed:roadshow-documents": "tsx --env-file-if-exists=.env scripts/seed-roadshow-documents.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",

@@ -8,7 +8,18 @@ export const issuerIdParams = z.strictObject({ id: z.uuid('Invalid issuer ID') }
 // GET /issuers
 // ---------------------------------------------------------------------------------------------
 
-export const ISSUER_SORTS = ['recent', 'closing_soon', 'top_rated', 'most_rated'] as const;
+export const ISSUER_SORTS = [
+  'recent',
+  'closing_soon',
+  'top_rated',
+  'most_rated',
+  /** The app's list order. */
+  'display',
+  'opened_asc',
+  'opened_desc',
+  /** Minimum lot, largest first (the app's "Most Reviewed"). */
+  'lot_desc',
+] as const;
 export type IssuerSort = (typeof ISSUER_SORTS)[number];
 
 export const listIssuersQuery = z.object({
@@ -23,6 +34,7 @@ export const listIssuersQuery = z.object({
         .enum(['true', 'false'])
         .transform((value) => value === 'true')
         .optional(),
+      sentiment: csv(z.enum(['positive', 'neutral', 'negative'])).optional(),
     })
     .optional(),
 });

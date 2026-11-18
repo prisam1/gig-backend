@@ -3,6 +3,7 @@ import { hashRequest } from '../../lib/idempotency';
 import { PG_UNIQUE_VIOLATION, supabaseAdmin, unwrap } from '../../lib/supabase';
 import { HttpError } from '../../middleware/errorHandler';
 import { Constants, type Enums } from '../../types/database';
+import { callDb } from '../../lib/db';
 import { getCreditBalance } from '../credits/credits.service';
 import type { AuthUser } from '../../middleware/auth';
 import type { JoinPoolInput } from './roadshows.schemas';
@@ -22,7 +23,7 @@ export const POOL_JOIN_COST = 1;
 
 export interface PoolMembership {
   roadshowId: string;
-  capitalInterest: number;
+  capitalInterest: number | null;
   currency: Currency;
   expectations: Expectation[];
   joinedAt: string;
@@ -50,6 +51,60 @@ export interface PoolPower {
   heatMap: {
     bands: { band: number; minCapital: number; maxCapital: number; members: number }[];
     cells: { band: number; expectation: Expectation; members: number; percent: number }[];
+  };
+  /**
+   * What the Power Pool screens show: the stored figures ("152", "₹14Cr", "89%"), with the
+   * members who joined in the app added in. null where the app shows nothing.
+   */
+  display: {
+    participants: number | null;
+    capitalInterest: string | null;
+    expectations: Partial<Record<Expectation, string | null>>;
+  };
+}
+
+/** The stored pool figures, by the expectation each heat-map row stands for. */
+const STORED_EXPECTATIONS: Partial<Record<Expectation, string>> = {
+  HIGHER_ROI_IRR: 'higherRoiIrr',
+  LOWER_LOCK_IN: 'lowerLockInPeriod',
+  REDUCED_ENTRY_EXIT_LOAD: 'reducedEntryExitLoad',
+  BETTER_ALLOTMENT: 'betterAllotmentPreference',
+  FLEXIBLE_PAYMENT_TERMS: 'flexiblePaymentTerms',
+};
+
+/** The stored figures plus the members who joined in the app. */
+async function poolDisplay(roadshowId: string): Promise<PoolPower['display']> {
+  const [content, members, votes] = await Promise.all([
+    callDb('app_roadshow_display', { p_roadshow_id: roadshowId }) as Promise<{
+      pool: (Record<string, string | number | null> & { participants: number | null; capitalInterest: string | null }) | null;
+    } | null>,
+    supabaseAdmin.from('pool_members').select('*', { count: 'exact', head: true }).eq('roadshow_id', roadshowId),
+    supabaseAdmin.from('roadshow_improvement_votes').select('expectation').eq('roadshow_id', roadshowId),
+  ]);
+  unwrap(members);
+  const joined = members.count ?? 0;
+  const stored = content?.pool ?? null;
+  const baseParticipants = stored?.participants ?? null;
+  const voteRows = unwrap(votes);
+
+  const expectations: PoolPower['display']['expectations'] = {};
+  for (const [expectation, field] of Object.entries(STORED_EXPECTATIONS) as [Expectation, string][]) {
+    const storedValue = stored ? (stored[field] as string | null) : null;
+    if (joined === 0) {
+      expectations[expectation] = storedValue;
+      continue;
+    }
+    const base = baseParticipants ?? 0;
+    const basePercent = storedValue ? Number.parseFloat(storedValue) : 0;
+    const realVotes = voteRows.filter((v) => v.expectation === expectation).length;
+    const percent = ((basePercent / 100) * base + realVotes) / (base + joined) * 100;
+    expectations[expectation] = `${Math.round(percent)}%`;
+  }
+
+  return {
+    participants: baseParticipants === null && joined === 0 ? null : (baseParticipants ?? 0) + joined,
+    capitalInterest: stored?.capitalInterest ?? null,
+    expectations,
   };
 }
 
@@ -131,7 +186,7 @@ function joinError(error: PostgrestError): Error {
 }
 
 /**
- * Prive: joins the Power Pool and spends 1 credit, in one transaction. A retry with the same
+ * Joins the Power Pool and spends 1 credit, in one transaction. A retry with the same
  * Idempotency-Key and body returns the same membership without spending again.
  */
 export async function joinPool(
@@ -149,7 +204,7 @@ export async function joinPool(
     .rpc('join_roadshow_pool', {
       p_user_id: user.id,
       p_roadshow_id: roadshowId,
-      p_capital_interest: input.capitalInterest,
+      p_capital_interest: input.capitalInterest ?? null,
       p_expectations: input.expectations,
       p_idempotency_key: idempotencyKey,
       p_request_hash: hash,
@@ -168,7 +223,7 @@ export async function joinPool(
   return {
     membership: {
       roadshowId,
-      capitalInterest: input.capitalInterest,
+      capitalInterest: input.capitalInterest ?? null,
       currency: roadshow.currency,
       expectations: inDisplayOrder(input.expectations),
       joinedAt: data.joined_at,
@@ -231,5 +286,6 @@ export async function getPoolPower(roadshowId: string): Promise<PoolPower> {
         percent: percentOf(r.votes, r.band_members),
       })),
     },
+    display: await poolDisplay(roadshowId),
   };
 }

@@ -14,7 +14,17 @@ export const documentParams = z.object({ id: uuidSchema, docId: uuidSchema });
 // Roadshow list and financials
 // ---------------------------------------------------------------------------------------------
 
-export const ROADSHOW_SORTS = ['closing_soon', 'recent'] as const;
+export const ROADSHOW_SORTS = [
+  'closing_soon',
+  'recent',
+  /** The app's list order. */
+  'display',
+  /** GIG Ratings, highest or lowest first. */
+  'rating_desc',
+  'rating_asc',
+  /** Average score, highest first. */
+  'avg_score_desc',
+] as const;
 export type RoadshowSort = (typeof ROADSHOW_SORTS)[number];
 
 /** OPEN: still taking interest (closes in the future). */
@@ -32,6 +42,8 @@ export const listRoadshowsQuery = z.object({
     .object({
       poolEnabled: booleanFlag.optional(),
       currency: csv(currencySchema).optional(),
+      /** The country as the card's data says it: India, UAE or Other. */
+      country: csv(z.string().trim().min(1).max(40)).optional(),
     })
     .strict()
     .optional(),
@@ -102,8 +114,8 @@ const terms = (max: number) =>
 export const MIN_POOL_EXPECTATIONS = 3;
 
 export const joinPoolBody = z.object({
-  /** In the roadshow's currency. */
-  capitalInterest: amount('Capital interest'),
+  /** In the roadshow's currency. Optional: the app's join asks for expectations only. */
+  capitalInterest: amount('Capital interest').optional(),
   expectations: z
     .array(poolExpectationSchema)
     .min(MIN_POOL_EXPECTATIONS, { message: 'Pick at least 3 expectations' })
