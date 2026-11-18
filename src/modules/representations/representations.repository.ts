@@ -138,16 +138,26 @@ function toSigner(row: SignerRow): Signer {
 
 export const representationsRepository = {
   async findAll(query: ListRepresentationsQuery): Promise<Page<Representation>> {
+    const years = query.filter?.year ?? [];
+    const exactYears = years.filter((y) => !y.startsWith('before_')).map(Number);
+    const beforeYears = years.filter((y) => y.startsWith('before_')).map((y) => Number(y.slice(7)));
     const page = await callDb('app_find_representations', {
       p_q_pattern: query.q ? containsPattern(query.q) : null,
       p_statuses: query.filter?.status ?? null,
       p_countries: query.filter?.country ?? null,
       p_open: query.filter?.openForSigning ?? null,
+      p_years: exactYears.length > 0 ? exactYears : null,
+      p_years_before: beforeYears.length > 0 ? Math.max(...beforeYears) : null,
       p_sort: query.sort satisfies RepresentationSort,
       p_limit: query.pageSize,
       p_offset: (query.page - 1) * query.pageSize,
     });
     return page;
+  },
+
+  /** Petitions open for signing, and the signature count over all petitions. */
+  stats(): Promise<{ activePetitions: number; totalSignatures: number }> {
+    return callDb('app_representation_stats', {});
   },
 
   findById(id: string): Promise<Representation | null> {

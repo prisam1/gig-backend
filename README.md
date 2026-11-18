@@ -92,7 +92,7 @@ npm run db:migrate     # afterwards: applies only new migrations
 
 The CLI records applied migrations in `supabase_migrations.schema_migrations`. To change the schema, add a new file (for example `20261101090000_kyc.sql`); never edit a file that has been pushed.
 
-`supabase/seed.sql` loads the companies and issuers from the app's mock data (`npm run db:seed`). It is safe to run again: existing rows are skipped. The sign-up option lists (job profiles, focus, risk, styles, sectors) are inserted by the auth migration itself, and the rating factors, risk factors and investor types by `20261027161000_ratings_representations_support.sql`. The seed also loads the app's mock petitions.
+`supabase/seed.sql` loads the companies and issuers from the app's mock data (`npm run db:seed`). It is safe to run again: existing rows are skipped. The sign-up option lists (job profiles, focus, risk, styles, sectors) are inserted by the auth migration itself, and the rating factors, risk factors and investor types by `20261027161000_ratings_representations_support.sql`. The app's petitions are content, added by a migration (see Representations).
 
 The API has one way into the database: supabase-js with the service-role key (`SUPABASE_URL` and `SUPABASE_SERVICE_ROLE_KEY`; no database password or connection string). The data is split into two schemas:
 
@@ -327,25 +327,30 @@ Tables (private `app` schema): `issuer_ratings`, `issuer_rating_factors`, `issue
 | Method | Path                              | Access       | Purpose                                                                                          |
 | ------ | --------------------------------- | ------------ | ------------------------------------------------------------------------------------------------ |
 | GET    | `/representations`                | Public       | Petitions with goal, signatures, progress, days left and track status                            |
+| GET    | `/representations/stats`          | Public       | `{ activePetitions, totalSignatures }`: petitions open for signing and the sum of their counts   |
 | GET    | `/representations/:id`            | Public       | Overview, evidence download links, recent signers; your own signature and receipt when signed in |
 | GET    | `/representations/:id/timeline`   | Public       | The 9-step track with when each step was reached, and the status history                         |
-| POST   | `/representations/:id/signatures` | Prive        | Sign. Needs `Idempotency-Key`. Returns the signature ID (`GIG-XXXXXXXXX`) and a receipt PDF link |
+| POST   | `/representations/:id/signatures` | User         | Sign. Needs `Idempotency-Key`. Returns the signature ID (`GIG-XXXXXXXXX`) and a receipt PDF link |
 | GET    | `/representations/:id/submission` | Prive, Inst. | Download link for the submitted petition pack; `404 SUBMISSION_NOT_AVAILABLE` until there is one |
 
-- `GET /representations` takes `q`, `sort` (`closing_soon`, `recent`, `most_signed` or `progress`), and the filters `filter[status]`, `filter[country]` and `filter[openForSigning]`.
+- `GET /representations` takes `q`, `sort` (`closing_soon`, `recent`, `most_signed` or `progress`), and the filters `filter[status]`, `filter[country]`, `filter[openForSigning]` and `filter[year]` (the year it opened: `2024` or `before_2021`).
 - Track statuses: `OPEN`, `CLOSING_SOON`, `CLOSED`, `UNDER_REVIEW`, `SUBMITTED_TO_REGULATOR`, `MEETING_REQUESTED`, `MEETING_SCHEDULED`, `REGULATOR_RESPONDED`, `RESOLVED`.
-  - The first three follow the signing window: "Closing Soon" in the last 7 days, "Closed" after `closesAt`.
+  - The first three follow the signing window: "Closing Soon" in the last 7 days (or earlier, when GIG marks it so), "Closed" after `closesAt`.
   - The rest are set by GIG staff, and every change is recorded in the history.
+- A petition can be signed until `closesAt`, whatever its track step (`isOpenForSigning`), as the app shows "Open for signature" next to tracks such as "Under Review by GIG".
 - Each response also carries the app's label (`trackLabel`), for example "Submitted to Reg.".
 - A signature is `{ displayMode, investorType?, signatureFileId, consents: { supportSubmission: true, digitalEndorsement: true } }`.
   - `displayMode` is `FULL_NAME`, `INITIALS` or `ANONYMOUS`. Anonymous signers are counted but never named.
   - `investorType` is a code from `GET /lookups/investor-types`.
   - `signatureFileId` comes from `POST /files/upload-url` with `purpose: "SIGNATURE"` (PDF, JPG or PNG).
   - Both consents are stored in `app.consents` with their version, IP, user agent and app version, in the same transaction as the signature and its audit entry (`representation.signed`).
-- Only Prive signatures count as votes (`voteCount`). One signature per investor and petition; a second one gets `409 ALREADY_SIGNED`.
+- Every signed-in member can sign. Only Prive signatures count as votes (`voteCount`). One signature per investor and petition; a second one gets `409 ALREADY_SIGNED`.
+- `signatureCount` is the petition's baseline (`baseline_signature_count`, the count it was launched with in the app) plus its valid signatures, so 124 plus one new signature shows 125.
 - Signatures have a `status` (`VALID` or `REMOVED`) and a soft delete. Removed or deleted signatures stop counting and are no longer listed, and the investor can sign again.
 - Signature files and petition documents flagged `INFECTED` by the virus scan are never accepted or offered for download.
 - The receipt PDF is stored privately and served through 5-minute download links.
+
+The app's six petitions (overview, track step, goal, counts, closing dates and evidence documents) are added by `20261118120000_representation_section_content.sql`; the evidence files are uploaded by `npm run seed:representation-evidence` (placeholders sized as the app shows them, until GIG uploads the real documents).
 
 Tables (private `app` schema): `representations`, `representation_signatures`, `representation_status_history`, `representation_documents` (the plan's Representations domain). Storage buckets: `signatures`, `signature-receipts` and `representation-documents`, all private. Petition packs themselves are generated in Phase 2 ("Petition PDF packs"); the download endpoint serves them once GIG attaches one.
 

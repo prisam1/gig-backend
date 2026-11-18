@@ -206,7 +206,10 @@ function timelineSteps(
     let reachedAt: Date | null = null;
     if (index <= currentIndex) {
       if (status === 'OPEN') reachedAt = representation.opensAt;
-      else if (status === 'CLOSING_SOON') reachedAt = now >= closingSoonAt ? closingSoonAt : null;
+      // GIG can mark a petition Closing Soon before its last 7 days: then it is when it did.
+      else if (status === 'CLOSING_SOON') {
+        reachedAt = now >= closingSoonAt ? closingSoonAt : (firstReached.get(status) ?? null);
+      }
       else if (status === 'CLOSED') reachedAt = now >= closesAt ? closesAt : null;
       else reachedAt = firstReached.get(status) ?? null;
     }
@@ -350,6 +353,11 @@ export const representationsService = {
       items: items.map(toSummary),
       meta: { page: query.page, pageSize: query.pageSize, total },
     };
+  },
+
+  /** The Representation tab's "Active Petitions" and "Total Signatures". */
+  stats(): Promise<{ activePetitions: number; totalSignatures: number }> {
+    return representationsRepository.stats();
   },
 
   async get(id: string, viewer: Member | undefined): Promise<RepresentationDetail> {

@@ -118,6 +118,7 @@ function stubSigning() {
       vi.spyOn(representationsRepository, 'findSignature').mockResolvedValue({
         ...mySignature,
         signatureCode: signature.signatureCode,
+        signerTier: signature.signerTier,
       });
       return Promise.resolve();
     });
@@ -178,11 +179,42 @@ describe('GET /representations', () => {
     });
   });
 
+  it('filters by the year a petition opened', async () => {
+    const find = vi
+      .spyOn(representationsRepository, 'findAll')
+      .mockResolvedValue({ items: [], total: 0 });
+
+    const res = await request(app)
+      .get('/api/v1/representations')
+      .query({ 'filter[year]': '2024,before_2021' });
+
+    expect(res.status).toBe(200);
+    expect(find).toHaveBeenCalledWith(
+      expect.objectContaining({ filter: { year: ['2024', 'before_2021'] } }),
+    );
+    expect(
+      (await request(app).get('/api/v1/representations').query({ 'filter[year]': '24' })).status,
+    ).toBe(400);
+  });
+
   it("rejects the app's labels instead of status codes", async () => {
     const res = await request(app)
       .get('/api/v1/representations')
       .query({ 'filter[status]': 'Under Review by GIG' });
     expect(res.status).toBe(400);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+describe('GET /representations/stats', () => {
+  it('returns the open petitions and the total signature count to visitors', async () => {
+    vi.spyOn(representationsRepository, 'stats').mockResolvedValue({
+      activePetitions: 6,
+      totalSignatures: 2174,
+    });
+    const res = await request(app).get('/api/v1/representations/stats');
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual({ activePetitions: 6, totalSignatures: 2174 });
   });
 });
 
@@ -481,18 +513,20 @@ describe('POST /representations/:id/signatures: access and validation', () => {
   });
 
   it.each([
-    ['Observer', makeUser(), 'FORBIDDEN'],
-    ['Institutional', makeUser({ tier: 'INSTITUTIONAL', kycStatus: 'APPROVED' }), 'FORBIDDEN'],
-    [
-      'Prive without approved KYC',
-      makeUser({ tier: 'PRIVE', kycStatus: 'PENDING' }),
-      'KYC_REQUIRED',
-    ],
-  ] as [string, Member, string][])('is not open to %s', async (_label, user, code) => {
+    ['Observer', makeUser(), false],
+    ['Institutional', makeUser({ tier: 'INSTITUTIONAL', kycStatus: 'APPROVED' }), false],
+    ['Prive without approved KYC', makeUser({ tier: 'PRIVE', kycStatus: 'PENDING' }), true],
+    ['verified Prive', verifiedPrive(), true],
+  ] as [string, Member, boolean][])('is open to %s', async (_label, user, countsAsVote) => {
     signInAs(user);
+    const { sign } = stubSigning();
     const res = await signPetition();
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe(code);
+    expect(res.status).toBe(201);
+    expect(sign).toHaveBeenCalledWith(
+      expect.objectContaining({ signerTier: user.tier }),
+      expect.anything(),
+    );
+    expect(res.body.data.signer.countsAsVote).toBe(countsAsVote);
   });
 
   it('requires an Idempotency-Key, a display choice, a signature file and both consents', async () => {

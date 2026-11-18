@@ -797,7 +797,8 @@ describe('representations', () => {
       ],
     });
     const detail = await representations.getRepresentation(petition.id);
-    expect(detail.isOpenForSigning).toBe(false);
+    // Signing follows the window, not the track: it stays open until the closing date.
+    expect(detail.isOpenForSigning).toBe(true);
     expect(detail.history.at(-1)).toMatchObject({
       fromStatus: 'OPEN',
       toStatus: 'SUBMITTED_TO_REGULATOR',

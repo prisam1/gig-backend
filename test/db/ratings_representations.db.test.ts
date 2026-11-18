@@ -452,6 +452,8 @@ async function counts(slug: string) {
 }
 
 const OPEN = 'mandatory-t1-settlement-disclosure';
+/** The app's count for OPEN, before any signature made in the app. */
+const OPEN_BASELINE = 124;
 const clearSignatures = () =>
   db.exec(`delete from app.representation_signatures;
            delete from app.consents where type like 'PETITION_%';`);
@@ -487,17 +489,18 @@ describe('representations: schema and seed', () => {
       }),
     ]);
 
-    const resolved = await petition('platform-fee-breakdown-standard');
+    const scheduled = await petition('hidden-fee-transparency-2');
     await db.query(`update app.representations set track_status = 'UNDER_REVIEW' where id = $1`, [
-      resolved.internalId,
+      scheduled.internalId,
     ]);
-    await db.query(`update app.representations set track_status = 'RESOLVED' where id = $1`, [
-      resolved.internalId,
-    ]);
-    const history = await representationsRepository.findStatusHistory(resolved);
+    await db.query(
+      `update app.representations set track_status = 'MEETING_SCHEDULED' where id = $1`,
+      [scheduled.internalId],
+    );
+    const history = await representationsRepository.findStatusHistory(scheduled);
     expect(history.slice(1).map((h) => [h.fromStatus, h.toStatus])).toEqual([
-      ['RESOLVED', 'UNDER_REVIEW'],
-      ['UNDER_REVIEW', 'RESOLVED'],
+      ['MEETING_SCHEDULED', 'UNDER_REVIEW'],
+      ['UNDER_REVIEW', 'MEETING_SCHEDULED'],
     ]);
     expect(history[0]?.occurredAt).toBeInstanceOf(Date);
   });
@@ -507,27 +510,65 @@ describe('representation cards (effective status)', () => {
   it('derives Open, Closing Soon and Closed from the signing window', async () => {
     const slug = 'financial-disclosures-first-time-investors';
     const { internalId } = await petition(slug);
-    const setWindow = (opens: string, closes: string) =>
+    const setWindow = (track: string, opens: string, closes: string) =>
       db.query(
-        `update app.representations set opens_at = now() + $2::interval, closes_at = now() + $3::interval where id = $1`,
-        [internalId, opens, closes],
+        `update app.representations
+         set track_status = $2, opens_at = now() + $3::interval, closes_at = now() + $4::interval
+         where id = $1`,
+        [internalId, track, opens, closes],
       );
     const status = async () => {
       const { trackStatus, isOpenForSigning, daysLeft } = await petition(slug);
       return { trackStatus, isOpenForSigning, daysLeft };
     };
 
-    await setWindow('-21 days', '20 days');
+    await setWindow('OPEN', '-21 days', '20 days');
     expect(await status()).toEqual({ trackStatus: 'OPEN', isOpenForSigning: true, daysLeft: 20 });
-    await setWindow('-21 days', '3 days');
+    await setWindow('OPEN', '-21 days', '3 days');
     expect(await status()).toEqual({
       trackStatus: 'CLOSING_SOON',
       isOpenForSigning: true,
       daysLeft: 3,
     });
-    await setWindow('-30 days', '-1 day');
+    await setWindow('OPEN', '-30 days', '-1 day');
     expect(await status()).toEqual({ trackStatus: 'CLOSED', isOpenForSigning: false, daysLeft: 0 });
-    await setWindow('-21 days', '9 days');
+
+    // Marked Closing Soon by GIG before its last 7 days: it stays so until it closes.
+    await setWindow('CLOSING_SOON', '-21 days', '9 days');
+    expect(await status()).toEqual({
+      trackStatus: 'CLOSING_SOON',
+      isOpenForSigning: true,
+      daysLeft: 9,
+    });
+    await setWindow('CLOSING_SOON', '-30 days', '-1 day');
+    expect((await status()).trackStatus).toBe('CLOSED');
+    await db.query(
+      `update app.representations
+       set opens_at = '2024-05-02T00:00:00Z', closes_at = now() + interval '9 days' where id = $1`,
+      [internalId],
+    );
+  });
+
+  it('keeps signing open until the closing date, whatever the track step', async () => {
+    const card = await petition('retail-platform-security-standards');
+    expect(card).toMatchObject({
+      trackStatus: 'SUBMITTED_TO_REGULATOR',
+      isOpenForSigning: true,
+      daysLeft: 5,
+    });
+
+    await db.query(
+      `update app.representations set closes_at = now() - interval '1 day' where id = $1`,
+      [card.internalId],
+    );
+    expect(await petition('retail-platform-security-standards')).toMatchObject({
+      trackStatus: 'SUBMITTED_TO_REGULATOR',
+      isOpenForSigning: false,
+    });
+    await db.query(
+      `update app.representations set closes_at = now() + interval '5 days' where id = $1`,
+      [card.internalId],
+    );
   });
 
   it('shows statuses set by GIG as stored, and hides petitions that have not opened yet', async () => {
@@ -535,16 +576,75 @@ describe('representation cards (effective status)', () => {
       'SUBMITTED_TO_REGULATOR',
     );
 
-    const { internalId, id } = await petition('mandatory-breach-notifications');
+    const { internalId, id } = await petition('hidden-fee-transparency-2');
     await db.query(
       `update app.representations set opens_at = now() + interval '1 day', closes_at = now() + interval '10 days' where id = $1`,
       [internalId],
     );
     expect(await representationsRepository.findById(id)).toBeNull();
     await db.query(
-      `update app.representations set opens_at = now() - interval '90 days', closes_at = now() - interval '30 days' where id = $1`,
+      `update app.representations set opens_at = '2024-05-02T00:00:00Z', closes_at = now() + interval '5 days' where id = $1`,
       [internalId],
     );
+  });
+
+  it("holds the app's six petitions, as the app shows them", async () => {
+    const { items } = await representationsRepository.findAll({
+      page: 1,
+      pageSize: 20,
+      sort: 'recent',
+    });
+    // By slug: petitions 2 and 6 opened the same day, so the list order between them is a tie.
+    expect(
+      items
+        .map(({ slug, title, goal, signatureCount, daysLeft, trackStatus, tags }) => [
+          slug,
+          title,
+          goal,
+          signatureCount,
+          daysLeft,
+          trackStatus,
+          tags,
+        ])
+        .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
+    ).toEqual([
+      ['financial-disclosures-first-time-investors', 'Improve Financial Disclosures for First-Time Investors', 1500, 218, 9, 'CLOSING_SOON', ['India']],
+      ['hidden-fee-transparency', 'Standardize Hidden Fee Transparency Across', 2000, 341, 12, 'MEETING_REQUESTED', ['India']],
+      ['hidden-fee-transparency-2', 'Standardize Hidden Fee Transparency Across', 2500, 497, 5, 'MEETING_SCHEDULED', ['India']],
+      ['mandatory-t1-settlement-disclosure', 'Mandatory T+1 Settlement Disclosure', 1000, 124, 6, 'UNDER_REVIEW', ['India']],
+      ['mandatory-t1-settlement-disclosure-2', 'Mandatory T+1 Settlement Disclosure', 2500, 497, 5, 'MEETING_REQUESTED', ['India']],
+      ['retail-platform-security-standards', 'Strengthen Standards for Retail', 2500, 497, 5, 'SUBMITTED_TO_REGULATOR', ['India']],
+    ]);
+    expect(items.every((r) => r.isOpenForSigning)).toBe(true);
+    expect(items.find((r) => r.slug === OPEN)).toMatchObject({
+      asks: [
+        'Mandatory pre-trade settlement cost disclosure',
+        'Standardised format across all broker platforms',
+        'Quarterly FCA audit of compliance',
+      ],
+      whyItMatters:
+        'Since the 2023 T+1 shift, retail investors have faced inconsistent disclosure practices leading to unplanned cash drag of up to 1.8% annually.',
+    });
+  });
+
+  it('adds valid signatures to the baseline count, and follows a changed baseline', async () => {
+    await clearSignatures();
+    const { id, internalId } = await petition(OPEN);
+    const setBaseline = (n: number) =>
+      db.query(`update app.representations set baseline_signature_count = $2 where id = $1`, [
+        internalId,
+        n,
+      ]);
+    expect((await counts(OPEN)).signatureCount).toBe(OPEN_BASELINE);
+
+    await sign({ representationId: id });
+    expect(await counts(OPEN)).toEqual({ signatureCount: OPEN_BASELINE + 1, voteCount: 1 });
+
+    await setBaseline(200);
+    expect((await counts(OPEN)).signatureCount).toBe(201);
+    await setBaseline(OPEN_BASELINE);
+    await clearSignatures();
+    expect((await counts(OPEN)).signatureCount).toBe(OPEN_BASELINE);
   });
 
   it('maps the card: numbers, dates and progress', async () => {
@@ -553,10 +653,10 @@ describe('representation cards (effective status)', () => {
       slug: 'hidden-fee-transparency',
       country: 'IN',
       goal: 2000,
-      signatureCount: 0,
-      progressPercent: 0,
+      signatureCount: 341,
+      progressPercent: 17.1,
       regulators: ['SEBI'],
-      tags: ['India', 'Fees'],
+      tags: ['India'],
     });
     expect(card.description).toMatch(/brokerage charges/);
     expect(card.closesAt).toBeInstanceOf(Date);
@@ -564,35 +664,66 @@ describe('representation cards (effective status)', () => {
   });
 
   it('searches, filters and sorts petitions', async () => {
-    const open = await representationsRepository.findAll({
-      page: 1,
-      pageSize: 20,
-      sort: 'closing_soon',
-      filter: { openForSigning: true },
-    });
-    expect(open.items.map((r) => r.slug)).toEqual([
+    const find = (query: Partial<Parameters<typeof representationsRepository.findAll>[0]>) =>
+      representationsRepository
+        .findAll({ page: 1, pageSize: 20, sort: 'recent', ...query })
+        .then((page) => page.items.map((r) => r.slug));
+
+    // Soonest deadline first; the three closing in 5 days tie.
+    const closingSoon = await find({ sort: 'closing_soon', filter: { openForSigning: true } });
+    expect([...closingSoon.slice(0, 3)].sort()).toEqual([
+      'hidden-fee-transparency-2',
+      'mandatory-t1-settlement-disclosure-2',
+      'retail-platform-security-standards',
+    ]);
+    expect(closingSoon.slice(3)).toEqual([
       OPEN,
       'financial-disclosures-first-time-investors',
-    ]);
-
-    const uae = await representationsRepository.findAll({
-      page: 1,
-      pageSize: 20,
-      sort: 'recent',
-      filter: { country: ['AE'], status: ['MEETING_SCHEDULED'] },
-    });
-    expect(uae.items.map((r) => r.slug)).toEqual(['mandatory-breach-notifications']);
-
-    const fees = await representationsRepository.findAll({
-      page: 1,
-      pageSize: 20,
-      sort: 'recent',
-      q: 'FEE',
-    });
-    expect(fees.items.map((r) => r.slug)).toEqual([
       'hidden-fee-transparency',
-      'platform-fee-breakdown-standard',
     ]);
+    expect(await find({ filter: { country: ['IN'], status: ['MEETING_REQUESTED'] } })).toEqual([
+      'mandatory-t1-settlement-disclosure-2',
+      'hidden-fee-transparency',
+    ]);
+    expect(await find({ filter: { country: ['AE'] } })).toEqual([]);
+    expect(await find({ q: 'FEE' })).toEqual(['hidden-fee-transparency-2', 'hidden-fee-transparency']);
+    expect(
+      await find({ sort: 'most_signed', filter: { status: ['UNDER_REVIEW', 'CLOSING_SOON'] } }),
+    ).toEqual(['financial-disclosures-first-time-investors', OPEN]);
+  });
+
+  it("counts the open petitions and every petition's signatures", async () => {
+    await clearSignatures();
+    expect(await representationsRepository.stats()).toEqual({
+      activePetitions: 6,
+      totalSignatures: 124 + 218 + 341 + 497 * 3,
+    });
+    const { internalId } = await petition('hidden-fee-transparency');
+    await db.query(
+      `update app.representations set closes_at = now() - interval '1 day' where id = $1`,
+      [internalId],
+    );
+    expect((await representationsRepository.stats()).activePetitions).toBe(5);
+    await db.query(
+      `update app.representations set closes_at = now() + interval '12 days' where id = $1`,
+      [internalId],
+    );
+  });
+
+  it('filters by the year a petition opened', async () => {
+    const total = async (year: string[]) =>
+      (
+        await representationsRepository.findAll({
+          page: 1,
+          pageSize: 20,
+          sort: 'recent',
+          filter: { year },
+        })
+      ).total;
+    expect(await total(['2024'])).toBe(6);
+    expect(await total(['2025'])).toBe(0);
+    expect(await total(['before_2024'])).toBe(0);
+    expect(await total(['2023', 'before_2025'])).toBe(6);
   });
 });
 
@@ -606,7 +737,7 @@ describe('representationsRepository.sign', () => {
     });
 
     expect(code).toBe('GIG-ET7ZWDTZK');
-    expect(await counts(OPEN)).toEqual({ signatureCount: 1, voteCount: 1 });
+    expect(await counts(OPEN)).toEqual({ signatureCount: OPEN_BASELINE + 1, voteCount: 1 });
     expect(
       await rows(
         `select type, version, host(ip) as ip, user_agent, app_version from app.consents
@@ -643,7 +774,7 @@ describe('representationsRepository.sign', () => {
     const { id } = await petition(OPEN);
     await sign({ representationId: id });
     await sign({ representationId: id, userId: bob, signerTier: 'INSTITUTIONAL' });
-    expect(await counts(OPEN)).toEqual({ signatureCount: 2, voteCount: 1 });
+    expect(await counts(OPEN)).toEqual({ signatureCount: OPEN_BASELINE + 2, voteCount: 1 });
   });
 
   it('allows one signature per investor and petition', async () => {
@@ -685,10 +816,23 @@ describe('representationsRepository.sign', () => {
     expect(unknown).toBeInstanceOf(HttpError);
     expect(unknown).toMatchObject({ status: 404 });
 
-    const closed = await dbError(
-      sign({ representationId: (await petition('hidden-fee-transparency')).id }),
+    const { id, internalId } = await petition('hidden-fee-transparency');
+    await db.query(
+      `update app.representations set closes_at = now() - interval '1 day' where id = $1`,
+      [internalId],
     );
+    const closed = await dbError(sign({ representationId: id }));
     expect(closed).toMatchObject({ status: 409, code: 'REPRESENTATION_CLOSED' });
+    await db.query(
+      `update app.representations set closes_at = now() + interval '12 days' where id = $1`,
+      [internalId],
+    );
+  });
+
+  it('accepts signatures on a petition whose track has moved on, while its window is open', async () => {
+    const slug = 'retail-platform-security-standards';
+    await sign({ representationId: (await petition(slug)).id, signerTier: 'OBSERVER' });
+    expect(await counts(slug)).toEqual({ signatureCount: 498, voteCount: 0 });
   });
 
   it("rejects a file that is not the signer's own clean SIGNATURE upload, and saves nothing", async () => {
@@ -717,23 +861,23 @@ describe('representationsRepository.sign', () => {
     const { id } = await petition(OPEN);
     const first = await sign({ representationId: id });
     await sign({ representationId: id, userId: bob });
-    expect(await counts(OPEN)).toEqual({ signatureCount: 2, voteCount: 2 });
+    expect(await counts(OPEN)).toEqual({ signatureCount: OPEN_BASELINE + 2, voteCount: 2 });
 
     await db.query(
       `update app.representation_signatures set status = 'REMOVED' where signature_code = $1`,
       [first],
     );
-    expect(await counts(OPEN)).toEqual({ signatureCount: 1, voteCount: 1 });
+    expect(await counts(OPEN)).toEqual({ signatureCount: OPEN_BASELINE + 1, voteCount: 1 });
     expect(await representationsRepository.findSigners(await petition(OPEN), 20)).toHaveLength(1);
 
     await sign({ representationId: id });
-    expect(await counts(OPEN)).toEqual({ signatureCount: 2, voteCount: 2 });
+    expect(await counts(OPEN)).toEqual({ signatureCount: OPEN_BASELINE + 2, voteCount: 2 });
 
     await db.query(
       `update app.representation_signatures set deleted_at = now() where user_id = $1 and status = 'VALID'`,
       [bob],
     );
-    expect(await counts(OPEN)).toEqual({ signatureCount: 1, voteCount: 1 });
+    expect(await counts(OPEN)).toEqual({ signatureCount: OPEN_BASELINE + 1, voteCount: 1 });
   });
 });
 
@@ -804,21 +948,58 @@ describe('representation documents', () => {
     );
   });
 
+  it("lists the app's three evidence documents on every petition", async () => {
+    const evidence = await representationsRepository.findEvidence(await petition(OPEN));
+    expect(
+      evidence.map(({ title, file }) => [title, file.objectKey, file.mimeType, file.sizeBytes]),
+    ).toEqual([
+      [
+        'Primary Research Brief.Pdf',
+        `evidence/${OPEN}/primary-research-brief.pdf`,
+        'application/pdf',
+        1258291,
+      ],
+      [
+        'Regulatory Comparison Table.Xlsx',
+        `evidence/${OPEN}/regulatory-comparison-table.xlsx`,
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        348160,
+      ],
+      [
+        'Investor Survey Data.Pdf',
+        `evidence/${OPEN}/investor-survey-data.pdf`,
+        'application/pdf',
+        2936013,
+      ],
+    ]);
+    expect(
+      await count(
+        `select 1 from app.representation_documents
+         where document_type = 'EVIDENCE' and object_key like 'evidence/%'`,
+      ),
+    ).toBe(18);
+  });
+
   it('never offers documents the virus scan flagged', async () => {
     const card = await petition('retail-platform-security-standards');
-    expect(await representationsRepository.findEvidence(card)).toEqual([
-      {
-        id: expect.any(String),
-        title: 'Clean evidence',
-        documentType: 'EVIDENCE',
-        file: {
-          bucket: 'representation-documents',
-          objectKey: 'rep/clean.pdf',
-          mimeType: 'application/pdf',
-          sizeBytes: 100,
-        },
-      },
+    const evidence = await representationsRepository.findEvidence(card);
+    expect(evidence.map((d) => d.title)).toEqual([
+      'Clean evidence',
+      'Primary Research Brief.Pdf',
+      'Regulatory Comparison Table.Xlsx',
+      'Investor Survey Data.Pdf',
     ]);
+    expect(evidence[0]).toEqual({
+      id: expect.any(String),
+      title: 'Clean evidence',
+      documentType: 'EVIDENCE',
+      file: {
+        bucket: 'representation-documents',
+        objectKey: 'rep/clean.pdf',
+        mimeType: 'application/pdf',
+        sizeBytes: 100,
+      },
+    });
     expect((await representationsRepository.findLatestSubmissionPack(card))?.title).toBe(
       'Older pack',
     );
