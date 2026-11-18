@@ -41,6 +41,23 @@ export interface Representation {
   trackStatus: RepresentationTrackStatus;
   isOpenForSigning: boolean;
   createdAt: Date;
+  /** What the app shows, stored as shown (see 20261118140000_representation_display_content.sql). */
+  displayOrder: number;
+  statusLabel: string;
+  closeInLabel: string;
+  progressDone: number;
+  progressTotal: number;
+  signTitle: string;
+  receiptTitle: string;
+  signersMore: number;
+  disclaimer: string;
+}
+
+/** A signer the app lists before any real one ("Investor." verified). */
+export interface FeaturedSigner {
+  displayName: string;
+  statusLabel: string;
+  avatarLetter: string;
 }
 
 export interface Signer {
@@ -171,6 +188,12 @@ export const representationsRepository = {
       p_limit: limit,
     });
     return rows.map(toSigner);
+  },
+
+  findFeaturedSigners(representation: Representation): Promise<FeaturedSigner[]> {
+    return callDb('app_representation_featured_signers', {
+      p_representation_id: representation.internalId,
+    });
   },
 
   /** Evidence documents shown on the petition's Evidence tab. Infected files are never listed. */

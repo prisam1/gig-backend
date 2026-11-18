@@ -8,7 +8,16 @@ export const representationIdParams = z.strictObject({ id: z.uuid('Invalid repre
 // GET /representations
 // ---------------------------------------------------------------------------------------------
 
-export const REPRESENTATION_SORTS = ['closing_soon', 'recent', 'most_signed', 'progress'] as const;
+export const REPRESENTATION_SORTS = [
+  'closing_soon',
+  'recent',
+  'most_signed',
+  'progress',
+  /** The app's list order. */
+  'display',
+  'opened_asc',
+  'opened_desc',
+] as const;
 export type RepresentationSort = (typeof REPRESENTATION_SORTS)[number];
 
 /** The year a petition opened: `2024`, or `before_2021` for any year before 2021. */

@@ -82,6 +82,9 @@ export async function loadUser(userId: string) {
       jobProfile: row.jobProfileCode,
       otherJob: row.otherJob,
       location: row.location,
+      /** "About me", and the "Positive experience" score (out of 5). */
+      aboutMe: row.aboutMe,
+      positiveExperience: row.positiveExperience,
     },
     preferences,
     onboarding: {

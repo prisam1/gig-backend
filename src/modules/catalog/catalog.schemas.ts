@@ -16,6 +16,12 @@ export const COMPANY_SORTS = [
   'top_rated',
   'most_reviewed',
   'improving',
+  /** The app's list order. */
+  'display',
+  /** Rating, highest first (the app's "Most Relevant" and "Improving Trend"). */
+  'rating',
+  /** Review count, highest first (the app's "Trending" and "Most Reviewed"). */
+  'reviews',
 ] as const;
 export type CompanySort = (typeof COMPANY_SORTS)[number];
 
@@ -35,6 +41,8 @@ export const listCompaniesQuery = z.object({
     .object({
       sentiment: csv(sentimentSchema).optional(),
       assetClass: csv(assetClassSchema).optional(),
+      /** The asset type as the card shows it, e.g. "Mutual Fund / SIP". */
+      assetLabel: csv(z.string().trim().min(1).max(60)).optional(),
       resolution: csv(resolutionBucketSchema).optional(),
       score: csv(scoreCode).optional(),
       country: csv(countrySchema).optional(),

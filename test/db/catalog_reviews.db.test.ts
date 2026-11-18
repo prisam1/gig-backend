@@ -18,6 +18,10 @@ let seededContent: {
   seriesCount: number;
   feed: Record<string, unknown>[];
   feedCount: number;
+  cards: Record<string, unknown>[];
+  displays: Record<string, unknown>[];
+  compare: Record<string, unknown>;
+  topRated: Record<string, unknown>;
 };
 
 async function rows<T = Record<string, unknown>>(sql: string, params: unknown[] = []) {
@@ -165,6 +169,18 @@ beforeAll(async () => {
   await db.exec(readFileSync(join(ROOT, 'supabase', 'seed.sql'), 'utf8'));
   // The Review section's content as the migrations left it, before the tests clear the reviews.
   seededContent = {
+    cards: await rows(
+      `select slug, display_order, asset_type_label, tags from public.company_cards order by display_order`,
+    ),
+    displays: await rows(
+      `select distinct f.sentiment, f.display from public.review_feed f order by f.sentiment`,
+    ),
+    compare: (await one<{ value: Record<string, unknown> }>(
+      `select public.app_get_content('review.compare') as value`,
+    )).value,
+    topRated: (await one<{ value: Record<string, unknown> }>(
+      `select public.app_get_content('toprated.card') as value`,
+    )).value,
     stats: await rows(
       `select c.slug, s.review_count, s.score, s.positive_pct, s.neutral_pct, s.negative_pct,
               s.avg_transparency, s.resolved_pct, s.dominant_sentiment, s.score_change_12m
@@ -308,6 +324,69 @@ describe('schema and seed', () => {
     ]);
   });
 
+  it("lists the companies in the app's order, with the asset type and tags it shows", () => {
+    expect(seededContent.cards).toEqual([
+      { slug: 'astra-mutuals', display_order: 1, asset_type_label: 'Mutual Fund / SIP', tags: ['Large CAP Stocks', 'ETF', 'IPO'] },
+      { slug: 'zenith-capital', display_order: 2, asset_type_label: 'Equity / IPO', tags: ['ETF', 'IPO', 'IPO'] },
+      { slug: 'zenith-capital-2', display_order: 3, asset_type_label: 'Equity / IPO', tags: ['ETF', 'IPO', 'IPO'] },
+      { slug: 'nexa-funds', display_order: 4, asset_type_label: 'Mutual Fund / SIP', tags: ['ETF', 'Large CAP Stocks', 'IPO'] },
+      { slug: 'summit-banking', display_order: 5, asset_type_label: 'Broker / Platform', tags: ['Safe', 'Liquid', 'IPO'] },
+      { slug: 'prime-fincorp', display_order: 6, asset_type_label: 'Bonds / Sukuk', tags: ['Corporate Bonds', 'High Yield', 'IPO'] },
+      { slug: 'astra-mutuals-2', display_order: 7, asset_type_label: 'Mutual Fund', tags: ['Large CAP Stocks', 'ETF', 'IPO'] },
+    ]);
+  });
+
+  it('shows the Top Reviews cards and the Compare screen as the app did', () => {
+    expect(seededContent.displays).toEqual([
+      {
+        sentiment: 'Positive',
+        display: {
+          fields: ['PRODUCT NAME: Insurance', 'COMPANY: Nexa', 'ASSET CLASS:', 'ASSET CLASS:2026'],
+          tags: ['Transparent Communication', 'Digital Experience', 'Ease of boarding', 'Ethical conduct'],
+          ratingLabel: '4.0',
+          locationLabel: 'INDIA',
+        },
+      },
+      {
+        sentiment: 'Neutral',
+        display: {
+          fields: ['PRODUCT NAME: Insurance', 'COMPANY: Mutual', 'ASSET CLASS:', 'YEAR OF INVESTMENT:2026'],
+          tags: [],
+          ratingLabel: '4.0',
+          locationLabel: 'INDIA',
+        },
+      },
+      {
+        sentiment: 'Negative',
+        display: {
+          fields: ['PRODUCT NAME: Insurance', 'COMPANY: Astra', 'ASSET CLASS:', 'YEAR OF INVESTMENT:2026'],
+          tags: ['Contacted but no response', 'Delay in response'],
+          ratingLabel: '4.0',
+          locationLabel: 'INDIA',
+        },
+      },
+    ]);
+    expect(seededContent.compare).toMatchObject({
+      left: { name: 'NEXA', product: 'INSURANCE' },
+      right: { name: 'ZENITH', product: 'INSURANCE' },
+      sentimentSplit: { firstProduct: { positive: '100%', negative: '65%', neutral: '35%' } },
+    });
+  });
+
+  it('stores the Top Rated person line and View Details card as the app shows them', () => {
+    expect(seededContent.topRated).toMatchObject({
+      personName: 'Rakesh Gupta',
+      fallbackName: 'Zenith Capital',
+      location: 'INDIA',
+      fields: ['Insurance', 'Nexa', '', '2026'],
+      rating: '4.0',
+      sentiment: 'POSITIVE',
+      investAgain: 'MAYBE',
+      resolution: 'CONTACTED',
+    });
+    expect((seededContent.topRated['metrics'] as unknown[]).length).toBe(5);
+  });
+
   it('publishes the three Top Reviews on every company', () => {
     expect(seededContent.feedCount).toBe(7 * 3);
     const common = {
@@ -341,11 +420,11 @@ describe('schema and seed', () => {
     ]);
   });
 
-  it('seeds the 7 issuers from the app mock data', async () => {
+  it("holds the app's 8 issuers, with the values the cards show", async () => {
     const issuers = await rows<{ slug: string; asset_type: string }>(
       'select slug, asset_type from public.issuers order by slug',
     );
-    expect(issuers).toHaveLength(7);
+    expect(issuers).toHaveLength(8);
     expect(issuers.map((i) => i.asset_type).sort()).toEqual([
       'Bonds',
       'Bonds',
@@ -354,7 +433,28 @@ describe('schema and seed', () => {
       'Equity',
       'InvIT',
       'REIT',
+      'REIT',
     ]);
+    expect(
+      await rows(
+        `select display_order, logo_text, sentiment, min_lot_label, offer_price_label,
+                offer_size_label, lock_in_label, open_date_label, close_date_label
+         from public.issuers order by display_order`,
+      ),
+    ).toEqual([
+      ['SA', 'positive', '45 shares', '₹310- ₹325', '₹1450cr', '30-60days', '25-03-24', '29-03-24'],
+      ['NE', 'positive', '100 shares', '₹101- ₹105', '₹890cr', 'None', '02-04-24', '05-04-24'],
+      ['FT', 'neutral', '10 Bonds', '₹10,000 Fix', '₹350cr', '365days', '11-04-24', '16-04-24'],
+      ['ZL', 'negative', '60 shares', '₹210- ₹220', '₹620cr', '90days', '18-04-24', '22-04-24'],
+      ['MR', 'positive', '25 shares', '₹540- ₹565', '₹2100cr', '45days', '25-04-24', '30-04-24'],
+      ['QB', 'neutral', '35 shares', '₹415- ₹440', '₹1150cr', '30-90days', '02-05-24', '06-05-24'],
+      ['VR', 'negative', '150 shares', '₹300- ₹315', '₹1800cr', '120days', '10-05-24', '14-05-24'],
+      ['VR', 'negative', '150 shares', '₹300- ₹315', '₹1800cr', '120days', '10-05-24', '14-05-24'],
+    ].map(([logo_text, sentiment, min_lot_label, offer_price_label, offer_size_label, lock_in_label,
+      open_date_label, close_date_label], i) => ({
+      display_order: i + 1, logo_text, sentiment, min_lot_label, offer_price_label,
+      offer_size_label, lock_in_label, open_date_label, close_date_label,
+    })));
     expect(
       await one(
         `select open_date::text, close_date::text, is_listed, min_lot, price_min, price_max,

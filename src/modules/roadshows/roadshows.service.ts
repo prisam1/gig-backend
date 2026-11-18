@@ -1,5 +1,6 @@
 import type { PageMeta } from '../../lib/http';
 import { createSignedDownload, fileNameOf, type SignedDownload } from '../../lib/storage';
+import { callDb } from '../../lib/db';
 import { containsPattern, fetchPage, supabaseAdmin, unwrap } from '../../lib/supabase';
 import { HttpError } from '../../middleware/errorHandler';
 import type { Enums, Tables } from '../../types/database';
@@ -15,11 +16,33 @@ export const ROADSHOW_DOCUMENTS_BUCKET = 'roadshow-documents';
 // Response shapes
 // ---------------------------------------------------------------------------------------------
 
+/** What the app shows for a roadshow, stored as shown (20261118170000_roadshow_section_content.sql). */
+export interface RoadshowDisplay {
+  order: number;
+  companyName: string | null;
+  logoText: string;
+  verified: string | null;
+  industry: string | null;
+  avgGigReview: number | null;
+  gigRating: number | null;
+  avgScore: number | null;
+  /** The OPEN / CLOSED badge. */
+  listed: boolean;
+  /** "2 days left". */
+  closeLabel: string | null;
+  country: string | null;
+  year: number | null;
+  tags: string[];
+  callable: string | null;
+  couponRate: string | null;
+}
+
 export interface RoadshowCard {
   id: string;
   slug: string;
   title: string;
-  issuer: { id: string; name: string };
+  /** null for the app's roadshows: they present a company of their own (see `display`). */
+  issuer: { id: string; name: string } | null;
   typeOfIssue: string;
   instruments: string;
   offerPrice: number | null;
@@ -30,6 +53,7 @@ export interface RoadshowCard {
   isOpen: boolean;
   poolEnabled: boolean;
   publishedAt: string | null;
+  display: RoadshowDisplay;
 }
 
 export interface RoadshowDocumentInfo {
@@ -54,6 +78,8 @@ export interface RoadshowDetail extends RoadshowCard {
   documents: RoadshowDocumentInfo[];
   /** Whether the signed-in member is in the Power Pool; null for signed-out visitors. */
   inPool: boolean | null;
+  /** The financial summary, Ask Me Anything and Power Pool figures the app shows. */
+  content: unknown;
 }
 
 export interface FinancialYear {
@@ -136,7 +162,7 @@ export type PublishedRoadshow = Awaited<ReturnType<typeof findPublishedRoadshow>
 // ---------------------------------------------------------------------------------------------
 
 const CARD_COLUMNS =
-  'id, slug, title, type_of_issue, instruments, offer_price, currency, opens_at, closes_at, pool_enabled, published_at, issuer:issuers!inner(id, name)';
+  'id, slug, title, type_of_issue, instruments, offer_price, currency, opens_at, closes_at, pool_enabled, published_at, display_order, company_name, logo_text, verified_label, industry, avg_gig_review, gig_rating, avg_score, listed, close_label, country_label, display_year, tags, callable_label, coupon_rate_label, issuer:issuers(id, name)';
 
 type CardRow = Pick<
   Tables<'roadshows'>,
@@ -151,14 +177,29 @@ type CardRow = Pick<
   | 'closes_at'
   | 'pool_enabled'
   | 'published_at'
-> & { issuer: { id: string; name: string } };
+  | 'display_order'
+  | 'company_name'
+  | 'logo_text'
+  | 'verified_label'
+  | 'industry'
+  | 'avg_gig_review'
+  | 'gig_rating'
+  | 'avg_score'
+  | 'listed'
+  | 'close_label'
+  | 'country_label'
+  | 'display_year'
+  | 'tags'
+  | 'callable_label'
+  | 'coupon_rate_label'
+> & { issuer: { id: string; name: string } | null };
 
 function toCard(row: CardRow): RoadshowCard {
   return {
     id: row.id,
     slug: row.slug,
     title: row.title,
-    issuer: { id: row.issuer.id, name: row.issuer.name },
+    issuer: row.issuer ? { id: row.issuer.id, name: row.issuer.name } : null,
     typeOfIssue: row.type_of_issue,
     instruments: row.instruments,
     offerPrice: row.offer_price,
@@ -168,12 +209,34 @@ function toCard(row: CardRow): RoadshowCard {
     isOpen: isOpenAt(row),
     poolEnabled: row.pool_enabled,
     publishedAt: row.published_at,
+    display: {
+      order: row.display_order,
+      companyName: row.company_name,
+      logoText: row.logo_text,
+      verified: row.verified_label,
+      industry: row.industry,
+      avgGigReview: row.avg_gig_review,
+      gigRating: row.gig_rating,
+      avgScore: row.avg_score,
+      listed: row.listed,
+      closeLabel: row.close_label,
+      country: row.country_label,
+      year: row.display_year,
+      tags: row.tags,
+      callable: row.callable_label,
+      couponRate: row.coupon_rate_label,
+    },
   };
 }
 
-const roadshowOrders: Record<RoadshowSort, ['closes_at' | 'published_at', boolean]> = {
-  closing_soon: ['closes_at', true],
-  recent: ['published_at', false],
+type OrderColumn = 'closes_at' | 'published_at' | 'gig_rating' | 'avg_score';
+const roadshowOrders: Record<RoadshowSort, [OrderColumn, boolean][]> = {
+  closing_soon: [['closes_at', true]],
+  recent: [['published_at', false]],
+  display: [],
+  rating_desc: [['gig_rating', false]],
+  rating_asc: [['gig_rating', true]],
+  avg_score_desc: [['avg_score', false]],
 };
 
 export async function listRoadshows(
@@ -189,15 +252,25 @@ export async function listRoadshows(
       .eq('status', 'PUBLISHED');
     if (query.state === 'OPEN') q = q.gt('closes_at', now);
     if (query.state === 'CLOSED') q = q.lte('closes_at', now);
-    if (query.q) q = q.ilike('title', containsPattern(query.q));
+    if (query.q) {
+      const pattern = containsPattern(query.q);
+      q = q.or(`search_text.ilike.${pattern},and(search_text.is.null,title.ilike.${pattern})`);
+    }
+    if (filter.country?.length) q = q.in('country_label', filter.country);
     if (filter.poolEnabled !== undefined) q = q.eq('pool_enabled', filter.poolEnabled);
     if (filter.currency?.length) q = q.in('currency', filter.currency);
     return q;
   };
 
-  const [column, ascending] = roadshowOrders[query.sort];
   const { rows, meta } = await fetchPage(query, {
-    rows: (from, to) => build(false).order(column, { ascending }).order('id').range(from, to),
+    rows: (from, to) => {
+      let request = build(false);
+      for (const [column, ascending] of roadshowOrders[query.sort]) {
+        request = request.order(column, { ascending, nullsFirst: false });
+      }
+      // Ties keep the app's list order.
+      return request.order('display_order').order('id').range(from, to);
+    },
     count: () => build(true),
   });
   return { items: rows.map(toCard), meta };
@@ -247,6 +320,7 @@ export async function getRoadshow(id: string, user: AuthUser | undefined): Promi
       sizeBytes: d.size_bytes,
     })),
     inPool: user ? await isPoolMember(id, user) : null,
+    content: await callDb('app_roadshow_display', { p_roadshow_id: id }),
   };
 }
 

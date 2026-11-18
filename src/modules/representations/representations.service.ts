@@ -22,6 +22,7 @@ import {
   representationsRepository,
   SIGNATURE_CONSTRAINTS,
   signatureFileInvalid,
+  type FeaturedSigner,
   type Representation,
   type Signer,
   type StatusChange,
@@ -107,7 +108,8 @@ export interface MySignature {
 export interface RepresentationDetail extends RepresentationSummary {
   overview: { asks: string[]; whyItMatters: string; regulators: string[]; disclaimer: string };
   evidence: DocumentLink[];
-  signers: { total: number; recent: Signer[] };
+  /** Real signers (newest first), the listed ones, and the "+N Signers" figure. */
+  signers: { total: number; recent: Signer[]; featured: FeaturedSigner[]; more: number };
   /** The signed-in user's signature, if they signed. */
   mySignature: MySignature | null;
 }
@@ -136,7 +138,7 @@ export interface RepresentationTimeline {
 export interface SignatureReceipt {
   /** The ID shown on the receipt: GIG- followed by 9 characters. */
   signatureId: string;
-  representation: { id: string; title: string };
+  representation: { id: string; title: string; receiptTitle: string };
   signer: {
     displayMode: DisplayMode;
     /** What other investors see; null when anonymous. */
@@ -304,7 +306,11 @@ async function signatureReceipt(
   const investorType = await investorTypeOption(signature.investorType);
   return {
     signatureId: signature.signatureCode,
-    representation: { id: representation.id, title: representation.title },
+    representation: {
+      id: representation.id,
+      title: representation.title,
+      receiptTitle: representation.receiptTitle,
+    },
     signer: {
       displayMode: signature.displayMode,
       displayName: displayNameFor(signature.signerName, signature.displayMode),
@@ -362,9 +368,10 @@ export const representationsService = {
 
   async get(id: string, viewer: Member | undefined): Promise<RepresentationDetail> {
     const representation = await requireRepresentation(id);
-    const [evidence, recentSigners, mine] = await Promise.all([
+    const [evidence, recentSigners, featuredSigners, mine] = await Promise.all([
       representationsRepository.findEvidence(representation),
       representationsRepository.findSigners(representation, SIGNER_PREVIEW_LIMIT),
+      representationsRepository.findFeaturedSigners(representation),
       viewer ? representationsRepository.findSignature(viewer.userId, representation) : null,
     ]);
 
@@ -384,10 +391,15 @@ export const representationsService = {
         asks: representation.asks,
         whyItMatters: representation.whyItMatters,
         regulators: representation.regulators,
-        disclaimer: DISCLAIMER,
+        disclaimer: representation.disclaimer || DISCLAIMER,
       },
       evidence: await Promise.all(evidence.map(toDocumentLink)),
-      signers: { total: representation.signatureCount, recent: recentSigners },
+      signers: {
+        total: representation.signatureCount,
+        recent: recentSigners,
+        featured: featuredSigners,
+        more: representation.signersMore,
+      },
       mySignature,
     };
   },

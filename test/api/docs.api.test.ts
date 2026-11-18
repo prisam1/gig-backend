@@ -13,6 +13,8 @@ import { kycRouter } from '../../src/modules/kyc/kyc.routes';
 import { learnRouter } from '../../src/modules/learn/learn.routes';
 import { issuersRouter } from '../../src/modules/ratings/ratings.routes';
 import { representationsRouter } from '../../src/modules/representations/representations.routes';
+import { contentRouter } from '../../src/modules/content/content.routes';
+import { filtersRouter } from '../../src/modules/filters/filters.routes';
 import { reviewsRouter } from '../../src/modules/reviews/reviews.routes';
 import { roadshowsRouter } from '../../src/modules/roadshows/roadshows.routes';
 import { savedRouter } from '../../src/modules/saved/saved.routes';
@@ -51,6 +53,8 @@ const MOUNTS = new Map<Router, string>([
   [reviewsRouter, '/reviews'],
   [issuersRouter, '/issuers'],
   [representationsRouter, '/representations'],
+  [contentRouter, '/content'],
+  [filtersRouter, '/filters'],
   [learnRouter, '/learn'],
   [webinarsRouter, '/webinars'],
   [topRatedRouter, '/top-rated'],

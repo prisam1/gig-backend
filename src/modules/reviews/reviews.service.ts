@@ -51,6 +51,15 @@ interface ReviewCore {
   excerpt: string;
   resolutionStatus: Enums<'resolution_status'>;
   createdAt: string;
+  /** How the app shows this review when it is stored content (Top Reviews), else null. */
+  display: ReviewDisplay | null;
+}
+
+export interface ReviewDisplay {
+  fields: string[];
+  tags: string[];
+  ratingLabel: string;
+  locationLabel: string;
 }
 
 /** What Observers (and signed-out visitors) see. */
@@ -202,6 +211,7 @@ function toPublicReview(row: Views<'review_feed'>, access: 'SUMMARY' | 'FULL'): 
     excerpt: excerptOf(row.detailed_review, row.mixed_review, row.negative_description),
     resolutionStatus: required(row.resolution_status, 'resolution_status'),
     createdAt: required(row.created_at, 'created_at'),
+    display: (row.display as ReviewDisplay | null) ?? null,
   };
 
   if (access === 'SUMMARY') return { ...core, detail: 'SUMMARY' };

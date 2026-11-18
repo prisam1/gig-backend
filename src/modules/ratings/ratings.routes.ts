@@ -1,7 +1,7 @@
 import { Router } from 'express';
 import { sendData, sendPage } from '../../lib/http';
 import { readIdempotencyKey, REPLAYED_HEADER } from '../../lib/idempotency';
-import { getAuth, optionalAuth, requireAuth, requireVerifiedPrive } from '../../middleware/auth';
+import { getAuth, optionalAuth, requireAuth } from '../../middleware/auth';
 import { clientContext } from '../../middleware/requestContext';
 import { parse } from '../../middleware/validate';
 import {
@@ -32,9 +32,15 @@ issuersRouter.get('/:id/rating-summary', optionalAuth, async (req, res) => {
   sendData(res, await ratingsService.getRatingSummary(id, req.user));
 });
 
-// POST /issuers/:id/ratings — Prive (KYC verified): overall 1-5, all factor flags, exactly 3 risk
-// factors. Needs an Idempotency-Key header; returns the receipt.
-issuersRouter.post('/:id/ratings', requireAuth, requireVerifiedPrive, async (req, res) => {
+// GET /issuers/:id/document — User: 5-minute download link to the issuer's PDF.
+issuersRouter.get('/:id/document', requireAuth, async (req, res) => {
+  const { id } = parse(issuerIdParams, req.params);
+  sendData(res, await ratingsService.getDocument(id));
+});
+
+// POST /issuers/:id/ratings — User: overall 1-5, all factor flags, exactly 3 risk factors.
+// Needs an Idempotency-Key header; returns the receipt.
+issuersRouter.post('/:id/ratings', requireAuth, async (req, res) => {
   const { id } = parse(issuerIdParams, req.params);
   const idempotencyKey = readIdempotencyKey(req);
   const input = parse(submitRatingBody, req.body);

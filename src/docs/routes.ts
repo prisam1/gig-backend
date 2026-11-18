@@ -8,6 +8,7 @@ import * as files from '../modules/files/files.schemas';
 import * as kyc from '../modules/kyc/kyc.schemas';
 import * as learn from '../modules/learn/learn.schemas';
 import * as ratings from '../modules/ratings/ratings.schemas';
+import * as filters from '../modules/filters/filters.schemas';
 import * as representations from '../modules/representations/representations.schemas';
 import * as reviews from '../modules/reviews/reviews.schemas';
 import * as roadshows from '../modules/roadshows/roadshows.schemas';
@@ -228,7 +229,10 @@ export const routeDocs: RouteDoc[] = [
   r('get', '/issuers/:id/rating-summary', 'Issuers', 'Aggregate rating', 'optional', {
     params: ratings.issuerIdParams,
   }),
-  r('post', '/issuers/:id/ratings', 'Issuers', 'Rate an issuer', 'prive', {
+  r('get', '/issuers/:id/document', 'Issuers', 'Download link for the issuer PDF', 'user', {
+    params: ratings.issuerIdParams,
+  }),
+  r('post', '/issuers/:id/ratings', 'Issuers', 'Rate an issuer', 'user', {
     params: ratings.issuerIdParams,
     body: ratings.submitRatingBody,
     status: 201,
@@ -240,6 +244,10 @@ export const routeDocs: RouteDoc[] = [
     query: representations.listRepresentationsQuery,
     page: true,
   }),
+  r('get', '/filters/counts', 'Filters', 'Live counts for the filter sheet of a tab', 'public', {
+    query: filters.filterCountsQuery,
+  }),
+  r('get', '/content/:key', 'Content', 'Stored screen content (review.compare, filters.sheet, …)', 'public', {}),
   r('get', '/representations/stats', 'Representations', 'Active petitions and total signatures', 'public', {}),
   r('get', '/representations/:id', 'Representations', 'Petition overview', 'optional', {
     params: representations.representationIdParams,
@@ -298,7 +306,7 @@ export const routeDocs: RouteDoc[] = [
     '/roadshows/:id/documents/:docId',
     'Roadshows',
     '5-minute document download URL',
-    'full',
+    'user',
     { params: roadshows.documentParams },
   ),
   r('get', '/roadshows/:id/questions', 'Roadshows', 'Ask Me Anything questions', 'user', {
@@ -311,7 +319,7 @@ export const routeDocs: RouteDoc[] = [
     body: roadshows.askQuestionBody,
     status: 201,
   }),
-  r('post', '/roadshows/:id/pool', 'Roadshows', 'Join the Power Pool (1 credit)', 'prive', {
+  r('post', '/roadshows/:id/pool', 'Roadshows', 'Join the Power Pool (1 credit)', 'user', {
     params: roadshows.roadshowIdParams,
     body: roadshows.joinPoolBody,
     status: 201,

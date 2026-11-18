@@ -17,6 +17,8 @@ import { webinarsRouter } from '../modules/webinars/webinars.routes';
 import { apiRateLimit, noStore } from '../middleware/requestContext';
 import { issuersRouter } from '../modules/ratings/ratings.routes';
 import { representationsRouter } from '../modules/representations/representations.routes';
+import { contentRouter } from '../modules/content/content.routes';
+import { filtersRouter } from '../modules/filters/filters.routes';
 
 export const router = Router();
 
@@ -87,6 +89,12 @@ router.use('/issuers', issuersRouter);
 //   GET   /representations/:id/submission  download the submitted petition pack
 // ---------------------------------------------------------------------------------------------
 router.use('/representations', representationsRouter);
+
+// GET /content/:key   stored screen content: review.compare, filters.sheet, ... (Public)
+router.use('/content', contentRouter);
+
+// GET /filters/counts?section=reviews   live counts for the filter sheet (Public)
+router.use('/filters', filtersRouter);
 
 // Learn and webinars
 //   GET   /learn                         content list (PREMIUM items locked by tier)

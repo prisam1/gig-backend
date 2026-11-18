@@ -51,6 +51,15 @@ const petition: Representation = {
   trackStatus: 'CLOSING_SOON',
   isOpenForSigning: true,
   createdAt: new Date('2026-09-30T00:00:00.000Z'),
+  displayOrder: 1,
+  statusLabel: 'Open for signature',
+  closeInLabel: '6days',
+  progressDone: 60,
+  progressTotal: 19000,
+  signTitle: 'Mandatory T+1 Settlement Disclosure for Retail Investors',
+  receiptTitle: 'Mandatory T+1 Settlement\nDisclosure for Retail Investor',
+  signersMore: 9240,
+  disclaimer: 'This petition is created and supported by participating investors. GIG facilitates collection and submission.',
 };
 
 const evidence: StoredDocument = {
@@ -169,6 +178,15 @@ describe('GET /representations', () => {
       trackLabel: 'Closing Soon',
       isOpenForSigning: true,
       createdAt: '2026-09-30T00:00:00.000Z',
+      displayOrder: 1,
+      statusLabel: 'Open for signature',
+      closeInLabel: '6days',
+      progressDone: 60,
+      progressTotal: 19000,
+      signTitle: 'Mandatory T+1 Settlement Disclosure for Retail Investors',
+      receiptTitle: petition.receiptTitle,
+      signersMore: 9240,
+      disclaimer: petition.disclaimer,
     });
     expect(find).toHaveBeenCalledWith({
       page: 1,
@@ -225,6 +243,9 @@ describe('GET /representations/:id', () => {
   beforeEach(() => {
     vi.spyOn(representationsRepository, 'findById').mockResolvedValue(petition);
     vi.spyOn(representationsRepository, 'findEvidence').mockResolvedValue([evidence]);
+    vi.spyOn(representationsRepository, 'findFeaturedSigners').mockResolvedValue([
+      { displayName: 'Investor.', statusLabel: 'verified', avatarLetter: 'R' },
+    ]);
     vi.spyOn(representationsRepository, 'findSigners').mockResolvedValue([
       {
         id: 's1',
@@ -638,7 +659,11 @@ describe('POST /representations/:id/signatures: signing', () => {
 
     expect(res.body.data).toEqual({
       signatureId: saved.signatureCode,
-      representation: { id: REPRESENTATION_ID, title: 'Mandatory T+1 Settlement Disclosure' },
+      representation: {
+        id: REPRESENTATION_ID,
+        title: 'Mandatory T+1 Settlement Disclosure',
+        receiptTitle: petition.receiptTitle,
+      },
       signer: {
         displayMode: 'INITIALS',
         displayName: 'S. M.',

@@ -31,28 +31,35 @@ const roadshowRef = (overrides: Record<string, unknown> = {}) => ({
 
 const poolBody = {
   capitalInterest: 250000,
-  expectations: ['PRIORITY_ALLOTMENT', 'BETTER_ROI_IRR', 'SHORTER_LOCK_IN'],
+  expectations: ['BETTER_ALLOTMENT', 'HIGHER_ROI_IRR', 'LOWER_LOCK_IN'],
 };
 
 beforeEach(() => { fake.reset(); });
 
 describe('access rules', () => {
-  it('requires a token for financials and Full access for DD documents', async () => {
+  it('requires a token for financials and for the Download DD documents', async () => {
     expect((await request(app).get(`/api/v1/roadshows/${RS}/financials`)).status).toBe(401);
-    const res = await request(app)
-      .get(`/api/v1/roadshows/${RS}/documents/${DOC}`)
-      .set(auth('observer'));
-    expect(res.status).toBe(403);
+    expect((await request(app).get(`/api/v1/roadshows/${RS}/documents/${DOC}`)).status).toBe(401);
   });
 
-  it('lets only verified Prive members join the pool and ask questions', async () => {
+  it('lets every signed-in member join the pool, without an amount', async () => {
+    expect(
+      (await request(app).post(`/api/v1/roadshows/${RS}/pool`).send(poolBody)).status,
+    ).toBe(401);
     for (const user of ['observer', 'privePending', 'institutional'] as const) {
+      fake.reset();
+      fake.on('from:pool_members', { data: null });
+      fake.on('from:roadshows', { data: roadshowRef() });
+      fake.on('rpc:join_roadshow_pool', {
+        data: { joined_at: '2026-11-18T10:00:00Z', credits_remaining: 2 },
+      });
       const res = await request(app)
         .post(`/api/v1/roadshows/${RS}/pool`)
         .set(auth(user))
         .set('Idempotency-Key', 'key-12345678')
-        .send(poolBody);
-      expect(res.status, user).toBe(403);
+        .send({ expectations: poolBody.expectations });
+      expect(res.status, user).toBe(201);
+      expect(res.body.data).toMatchObject({ capitalInterest: null, creditsRemaining: 2 });
     }
   });
 
@@ -137,7 +144,7 @@ describe('POST /roadshows/:id/pool', () => {
 
   it('needs an Idempotency-Key and at least 3 distinct expectations', async () => {
     expect((await join(null)).status).toBe(400);
-    const res = await join('key-12345678', { ...poolBody, expectations: ['BETTER_ROI_IRR'] });
+    const res = await join('key-12345678', { ...poolBody, expectations: ['HIGHER_ROI_IRR'] });
     expect(res.status).toBe(400);
     expect(res.body.error.fields.expectations).toBe('Pick at least 3 expectations');
   });
@@ -156,7 +163,7 @@ describe('POST /roadshows/:id/pool', () => {
       roadshowId: RS,
       capitalInterest: 250000,
       currency: 'INR',
-      expectations: ['BETTER_ROI_IRR', 'SHORTER_LOCK_IN', 'PRIORITY_ALLOTMENT'],
+      expectations: ['HIGHER_ROI_IRR', 'LOWER_LOCK_IN', 'BETTER_ALLOTMENT'],
       joinedAt: '2026-10-27T10:00:00Z',
       creditsRemaining: 4,
     });
@@ -223,7 +230,7 @@ describe('GET /roadshows/:id/pool-power', () => {
   it('summarises participants, demand and the heat map', async () => {
     fake.on('from:roadshows', { data: roadshowRef() });
     const band = (n: number, members: number, capital: number) =>
-      ['BETTER_ROI_IRR', 'SHORTER_LOCK_IN'].map((expectation, i) => ({
+      ['HIGHER_ROI_IRR', 'LOWER_LOCK_IN'].map((expectation, i) => ({
         band: n,
         band_min: capital / members,
         band_max: capital / members,
@@ -233,6 +240,21 @@ describe('GET /roadshows/:id/pool-power', () => {
         votes: i === 0 ? members : 0,
       }));
     fake.on('rpc:roadshow_pool_power', { data: [...band(1, 1, 1000), ...band(2, 1, 3000)] });
+    fake.on('rpc:app_roadshow_display', {
+      data: {
+        pool: {
+          participants: 152,
+          capitalInterest: '₹14Cr',
+          higherRoiIrr: '89%',
+          lowerLockInPeriod: '87%',
+          reducedEntryExitLoad: '83%',
+          betterAllotmentPreference: '55%',
+          flexiblePaymentTerms: '14%',
+        },
+      },
+    });
+    fake.on('from:pool_members', { data: null, count: 0 });
+    fake.on('from:roadshow_improvement_votes', { data: [] });
 
     const res = await request(app).get(`/api/v1/roadshows/${RS}/pool-power`).set(auth('observer'));
 
@@ -243,7 +265,7 @@ describe('GET /roadshows/:id/pool-power', () => {
       averageCapitalInterest: 2000,
     });
     expect(res.body.data.improvements[0]).toEqual({
-      expectation: 'BETTER_ROI_IRR',
+      expectation: 'HIGHER_ROI_IRR',
       members: 2,
       percent: 100,
     });
@@ -251,6 +273,18 @@ describe('GET /roadshows/:id/pool-power', () => {
       { band: 1, minCapital: 1000, maxCapital: 1000, members: 1 },
       { band: 2, minCapital: 3000, maxCapital: 3000, members: 1 },
     ]);
+    // What the screens show: the stored figures (nobody joined in the app yet).
+    expect(res.body.data.display).toEqual({
+      participants: 152,
+      capitalInterest: '₹14Cr',
+      expectations: {
+        HIGHER_ROI_IRR: '89%',
+        LOWER_LOCK_IN: '87%',
+        REDUCED_ENTRY_EXIT_LOAD: '83%',
+        BETTER_ALLOTMENT: '55%',
+        FLEXIBLE_PAYMENT_TERMS: '14%',
+      },
+    });
   });
 });
 

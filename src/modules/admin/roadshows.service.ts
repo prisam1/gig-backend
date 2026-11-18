@@ -145,7 +145,10 @@ export async function getRoadshow(id: string) {
 
   const [issuer, financials, documents, members, pendingQuestions, pendingOffers] =
     await Promise.all([
-      supabaseAdmin.from('issuers').select('id, name').eq('id', row.issuer_id).maybeSingle(),
+      // The app's roadshows are companies of their own, without a catalog issuer.
+      row.issuer_id
+        ? supabaseAdmin.from('issuers').select('id, name').eq('id', row.issuer_id).maybeSingle()
+        : null,
       supabaseAdmin
         .from('roadshow_financials')
         .select('*')
@@ -172,7 +175,7 @@ export async function getRoadshow(id: string) {
 
   return {
     ...toRoadshow(row),
-    issuer: unwrap(issuer),
+    issuer: issuer ? unwrap(issuer) : null,
     financials: unwrap(financials).map(toFiscalYear),
     documents: unwrap(documents).map(toDocument),
     counts: {

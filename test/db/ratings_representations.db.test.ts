@@ -3,7 +3,7 @@
 
 import type { PGlite } from '@electric-sql/pglite';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DatabaseError, dbTransport, isUniqueViolationOf } from '../../src/lib/db';
+import { callDb, DatabaseError, dbTransport, isUniqueViolationOf } from '../../src/lib/db';
 import { HttpError } from '../../src/middleware/errorHandler';
 import type { ClientContext } from '../../src/middleware/requestContext';
 import {
@@ -78,6 +78,8 @@ const TABLES = {
   ratings: ['issuer_rating_factors', 'issuer_rating_risks', 'issuer_ratings', 'issuer_stats'],
   representations: [
     'representation_documents',
+    'representation_featured_signers',
+    'representation_page_stats',
     'representation_signatures',
     'representation_status_history',
     'representations',
@@ -343,8 +345,17 @@ describe('ratingsRepository issuers', () => {
 
   it('searches name or instrument, filters, sorts and pages', async () => {
     const all = await ratingsRepository.findIssuers({ page: 1, pageSize: 20, sort: 'recent' });
-    expect(all.total).toBe(7);
-    expect(all.items[0]?.slug).toBe('vanguard-realty-housing');
+    expect(all.total).toBe(8);
+    // Same opening date: the app's list order decides.
+    expect(all.items.slice(0, 2).map((i) => i.slug)).toEqual(['vanguard-realty-housing', 'vanguard-realty']);
+    const slugs = async (query: Partial<Parameters<typeof ratingsRepository.findIssuers>[0]>) =>
+      (await ratingsRepository.findIssuers({ page: 1, pageSize: 20, sort: 'display', ...query })).items.map(
+        (i) => i.display.order,
+      );
+    expect(await slugs({})).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(await slugs({ sort: 'opened_asc' })).toEqual([1, 2, 3, 4, 5, 6, 7, 8]);
+    expect(await slugs({ sort: 'lot_desc' })).toEqual([7, 8, 2, 4, 1, 6, 5, 3]);
+    expect(await slugs({ filter: { sentiment: ['negative'] } })).toEqual([4, 7, 8]);
 
     const bonds = await ratingsRepository.findIssuers({
       page: 1,
@@ -373,7 +384,7 @@ describe('ratingsRepository issuers', () => {
 
     expect(await ratingsRepository.findIssuers({ page: 9, pageSize: 20, sort: 'recent' })).toEqual({
       items: [],
-      total: 7,
+      total: 8,
     });
   });
 
@@ -544,7 +555,7 @@ describe('representation cards (effective status)', () => {
     expect((await status()).trackStatus).toBe('CLOSED');
     await db.query(
       `update app.representations
-       set opens_at = '2024-05-02T00:00:00Z', closes_at = now() + interval '9 days' where id = $1`,
+       set opens_at = '2024-05-02T00:00:00Z', closes_at = now() + interval '365 days' where id = $1`,
       [internalId],
     );
   });
@@ -554,7 +565,7 @@ describe('representation cards (effective status)', () => {
     expect(card).toMatchObject({
       trackStatus: 'SUBMITTED_TO_REGULATOR',
       isOpenForSigning: true,
-      daysLeft: 5,
+      daysLeft: 365,
     });
 
     await db.query(
@@ -566,7 +577,7 @@ describe('representation cards (effective status)', () => {
       isOpenForSigning: false,
     });
     await db.query(
-      `update app.representations set closes_at = now() + interval '5 days' where id = $1`,
+      `update app.representations set closes_at = now() + interval '365 days' where id = $1`,
       [card.internalId],
     );
   });
@@ -583,7 +594,7 @@ describe('representation cards (effective status)', () => {
     );
     expect(await representationsRepository.findById(id)).toBeNull();
     await db.query(
-      `update app.representations set opens_at = '2024-05-02T00:00:00Z', closes_at = now() + interval '5 days' where id = $1`,
+      `update app.representations set opens_at = '2024-05-02T00:00:00Z', closes_at = now() + interval '365 days' where id = $1`,
       [internalId],
     );
   });
@@ -597,23 +608,23 @@ describe('representation cards (effective status)', () => {
     // By slug: petitions 2 and 6 opened the same day, so the list order between them is a tie.
     expect(
       items
-        .map(({ slug, title, goal, signatureCount, daysLeft, trackStatus, tags }) => [
+        .map(({ slug, title, goal, signatureCount, closeInLabel, trackStatus, tags }) => [
           slug,
           title,
           goal,
           signatureCount,
-          daysLeft,
+          closeInLabel,
           trackStatus,
           tags,
         ])
         .sort((a, b) => String(a[0]).localeCompare(String(b[0]))),
     ).toEqual([
-      ['financial-disclosures-first-time-investors', 'Improve Financial Disclosures for First-Time Investors', 1500, 218, 9, 'CLOSING_SOON', ['India']],
-      ['hidden-fee-transparency', 'Standardize Hidden Fee Transparency Across', 2000, 341, 12, 'MEETING_REQUESTED', ['India']],
-      ['hidden-fee-transparency-2', 'Standardize Hidden Fee Transparency Across', 2500, 497, 5, 'MEETING_SCHEDULED', ['India']],
-      ['mandatory-t1-settlement-disclosure', 'Mandatory T+1 Settlement Disclosure', 1000, 124, 6, 'UNDER_REVIEW', ['India']],
-      ['mandatory-t1-settlement-disclosure-2', 'Mandatory T+1 Settlement Disclosure', 2500, 497, 5, 'MEETING_REQUESTED', ['India']],
-      ['retail-platform-security-standards', 'Strengthen Standards for Retail', 2500, 497, 5, 'SUBMITTED_TO_REGULATOR', ['India']],
+      ['financial-disclosures-first-time-investors', 'Improve Financial Disclosures for First-Time Investors', 1500, 218, '9days', 'CLOSING_SOON', ['India']],
+      ['hidden-fee-transparency', 'Standardize Hidden Fee Transparency Across', 2000, 341, '12days', 'MEETING_REQUESTED', ['India']],
+      ['hidden-fee-transparency-2', 'Standardize Hidden Fee Transparency Across', 2500, 497, '5days', 'MEETING_SCHEDULED', ['India']],
+      ['mandatory-t1-settlement-disclosure', 'Mandatory T+1 Settlement Disclosure', 1000, 124, '6days', 'UNDER_REVIEW', ['India']],
+      ['mandatory-t1-settlement-disclosure-2', 'Mandatory T+1 Settlement Disclosure', 2500, 497, '5days', 'MEETING_REQUESTED', ['India']],
+      ['retail-platform-security-standards', 'Strengthen Standards for Retail', 2500, 497, '5days', 'SUBMITTED_TO_REGULATOR', ['India']],
     ]);
     expect(items.every((r) => r.isOpenForSigning)).toBe(true);
     expect(items.find((r) => r.slug === OPEN)).toMatchObject({
@@ -625,6 +636,30 @@ describe('representation cards (effective status)', () => {
       whyItMatters:
         'Since the 2023 T+1 shift, retail investors have faced inconsistent disclosure practices leading to unplanned cash drag of up to 1.8% annually.',
     });
+  });
+
+  it('stores what each card and the signer list show', async () => {
+    const card = await petition(OPEN);
+    expect(card).toMatchObject({
+      displayOrder: 1,
+      statusLabel: 'Open for signature',
+      closeInLabel: '6days',
+      progressDone: 60,
+      progressTotal: 19000,
+      signTitle: 'Mandatory T+1 Settlement Disclosure for Retail Investors',
+      signersMore: 9240,
+    });
+    expect(card.receiptTitle).toBe('Mandatory T+1 Settlement\nDisclosure for Retail Investor');
+    const featured = await representationsRepository.findFeaturedSigners(card);
+    expect(featured).toHaveLength(16);
+    expect(featured[0]).toEqual({ displayName: 'Investor.', statusLabel: 'verified', avatarLetter: 'R' });
+    const progress = await rows<{ slug: string; progress_done: string; progress_total: number }>(
+      `select slug, progress_done, progress_total from app.representations
+       where deleted_at is null order by display_order`,
+    );
+    expect(progress.map((p) => [Number(p.progress_done), p.progress_total])).toEqual([
+      [60, 19000], [145, 25000], [280, 32000], [520, 40000], [520, 40000], [520, 40000],
+    ]);
   });
 
   it('adds valid signatures to the baseline count, and follows a changed baseline', async () => {
@@ -669,18 +704,26 @@ describe('representation cards (effective status)', () => {
         .findAll({ page: 1, pageSize: 20, sort: 'recent', ...query })
         .then((page) => page.items.map((r) => r.slug));
 
-    // Soonest deadline first; the three closing in 5 days tie.
-    const closingSoon = await find({ sort: 'closing_soon', filter: { openForSigning: true } });
-    expect([...closingSoon.slice(0, 3)].sort()).toEqual([
-      'hidden-fee-transparency-2',
-      'mandatory-t1-settlement-disclosure-2',
-      'retail-platform-security-standards',
-    ]);
-    expect(closingSoon.slice(3)).toEqual([
+    // The app's list order, and ties keep it.
+    expect(await find({ sort: 'display' })).toEqual([
       OPEN,
       'financial-disclosures-first-time-investors',
       'hidden-fee-transparency',
+      'retail-platform-security-standards',
+      'mandatory-t1-settlement-disclosure-2',
+      'hidden-fee-transparency-2',
     ]);
+    expect(await find({ sort: 'opened_asc' })).toEqual([
+      'hidden-fee-transparency',
+      'retail-platform-security-standards',
+      'mandatory-t1-settlement-disclosure-2',
+      'financial-disclosures-first-time-investors',
+      'hidden-fee-transparency-2',
+      OPEN,
+    ]);
+    expect(
+      (await find({ sort: 'closing_soon', filter: { openForSigning: true } })).sort(),
+    ).toHaveLength(6);
     expect(await find({ filter: { country: ['IN'], status: ['MEETING_REQUESTED'] } })).toEqual([
       'mandatory-t1-settlement-disclosure-2',
       'hidden-fee-transparency',
@@ -695,17 +738,18 @@ describe('representation cards (effective status)', () => {
   it("counts the open petitions and every petition's signatures", async () => {
     await clearSignatures();
     expect(await representationsRepository.stats()).toEqual({
-      activePetitions: 6,
-      totalSignatures: 124 + 218 + 341 + 497 * 3,
+      activePetitions: 14,
+      totalSignatures: 38200,
     });
     const { internalId } = await petition('hidden-fee-transparency');
     await db.query(
       `update app.representations set closes_at = now() - interval '1 day' where id = $1`,
       [internalId],
     );
-    expect((await representationsRepository.stats()).activePetitions).toBe(5);
+    // The stored figure, not the open count.
+    expect((await representationsRepository.stats()).activePetitions).toBe(14);
     await db.query(
-      `update app.representations set closes_at = now() + interval '12 days' where id = $1`,
+      `update app.representations set closes_at = now() + interval '365 days' where id = $1`,
       [internalId],
     );
   });
@@ -824,7 +868,7 @@ describe('representationsRepository.sign', () => {
     const closed = await dbError(sign({ representationId: id }));
     expect(closed).toMatchObject({ status: 409, code: 'REPRESENTATION_CLOSED' });
     await db.query(
-      `update app.representations set closes_at = now() + interval '12 days' where id = $1`,
+      `update app.representations set closes_at = now() + interval '365 days' where id = $1`,
       [internalId],
     );
   });
@@ -1054,5 +1098,63 @@ describe('plan conventions', () => {
     expect(
       await count(`select 1 from pg_tables where schemaname = 'public' and tablename = any ($1)`, [tables]),
     ).toBe(0);
+  });
+});
+
+// =============================================================================================
+// Filter sheet counts
+// =============================================================================================
+
+describe('filter counts', () => {
+  const counts = (section: 'reviews' | 'representations' | 'ratings' | 'roadshows') =>
+    callDb('app_filter_counts', { p_section: section });
+  const n = (value: number) => ({ value, unit: 'count' });
+  const pct = (value: number) => ({ value, unit: 'percent' });
+
+  it('counts the petitions by country and year, and shares them by resolution', async () => {
+    expect(await counts('representations')).toEqual({
+      India: n(6),
+      '2024': n(6),
+      Resolved: pct(0),
+      'In Progress': pct(83),
+      Unresolved: pct(17),
+      'Not Contacted': pct(17),
+    });
+  });
+
+  it('counts the issuers by sentiment, asset class and year', async () => {
+    expect(await counts('ratings')).toEqual({
+      Positive: n(3),
+      Neutral: n(2),
+      Negative: n(3),
+      EQ: n(3),
+      BND: n(2),
+      RE: n(2),
+      '2024': n(8),
+    });
+  });
+
+  it('counts the published roadshows by country, average score and year', async () => {
+    expect(await counts('roadshows')).toEqual({
+      India: n(5),
+      UAE: n(3),
+      Other: n(2),
+      '5': n(3),
+      '4': n(5),
+      '3': n(2),
+      '2026': n(5),
+      '2025': n(3),
+      '2024': n(2),
+    });
+  });
+
+  it('counts the companies by asset type as the cards show it, and shares resolution', async () => {
+    const reviews = await counts('reviews');
+    expect(reviews).toMatchObject({ MF: n(2), EQ: n(2), BRK: n(1), BND: n(1), INS: n(0), CRY: n(0) });
+    const shares = ['Resolved', 'In Progress', 'Unresolved', 'Not Contacted'].map(
+      (id) => reviews[id]?.value ?? 0,
+    );
+    expect(shares.every((v) => v >= 0 && v <= 100)).toBe(true);
+    expect(Object.values(reviews).every((c) => Number.isInteger(c.value))).toBe(true);
   });
 });

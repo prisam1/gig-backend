@@ -914,16 +914,17 @@ describe('credits', () => {
     const first = await changeCredits(admin.member, body, 'grant-key-0001', CTX);
     const retry = await changeCredits(admin.member, body, 'grant-key-0001', CTX);
 
+    // Members start with 3 credits.
     expect(first).toMatchObject({
       replayed: false,
-      entry: { delta: 5, balanceAfter: 5, reason: 'ADMIN_GRANT', note: 'Launch credits' },
+      entry: { delta: 5, balanceAfter: 8, reason: 'ADMIN_GRANT', note: 'Launch credits' },
     });
     expect(retry).toEqual({ ...first, replayed: true });
-    expect(await balance(member)).toBe(5);
+    expect(await balance(member)).toBe(8);
     expect(await notifications(member, 'CREDITS')).toHaveLength(1);
     expect((await auditEntries('admin.credits.granted')).at(-1)).toMatchObject({
       actor_user_id: admin.id,
-      metadata: { user: member.publicId, delta: 5, balanceAfter: 5 },
+      metadata: { user: member.publicId, delta: 5, balanceAfter: 8 },
     });
 
     await expect(
@@ -946,7 +947,7 @@ describe('credits', () => {
     await expect(
       changeCredits(
         admin.member,
-        { userId: member.publicId, delta: -4, note: 'Too many' },
+        { userId: member.publicId, delta: -7, note: 'Too many' },
         'revoke-key-002',
         CTX,
       ),
@@ -958,8 +959,9 @@ describe('credits', () => {
       CTX,
     );
 
-    expect(revoked.entry).toMatchObject({ delta: -2, balanceAfter: 1, reason: 'ADMIN_REVOKE' });
-    expect(await balance(member)).toBe(1);
+    // 3 starting credits + 3 granted - 2.
+    expect(revoked.entry).toMatchObject({ delta: -2, balanceAfter: 4, reason: 'ADMIN_REVOKE' });
+    expect(await balance(member)).toBe(4);
   });
 
   it('refuses unknown members and granting yourself credits', async () => {

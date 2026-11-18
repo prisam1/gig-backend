@@ -10,14 +10,14 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const ROOT = join(__dirname, '..', '..');
 const ALL_EXPECTATIONS = [
-  'BETTER_ROI_IRR',
-  'SHORTER_LOCK_IN',
-  'LOWER_ENTRY_LOAD',
-  'LOWER_EXIT_LOAD',
-  'PRIORITY_ALLOTMENT',
+  'HIGHER_ROI_IRR',
+  'LOWER_LOCK_IN',
+  'REDUCED_ENTRY_EXIT_LOAD',
+  'TENURE_PREFERENCE',
+  'BETTER_ALLOTMENT',
   'FLEXIBLE_PAYMENT_TERMS',
-  'DISCOUNTED_OFFER_PRICE',
-  'REGULAR_DISCLOSURES',
+  'LOWER_MINIMUM_TICKET',
+  'CASHBACK_ON_REINVESTMENT',
 ];
 
 let db: PGlite;
@@ -41,7 +41,10 @@ async function expectDbError(promise: Promise<unknown>, message: RegExp) {
   expect(error?.message).toMatch(message);
 }
 
-/** A new GIG user (app.users.public_id), optionally with credits granted. */
+/**
+ * A new GIG user (app.users.public_id) holding `credits` credits. Every member starts with
+ * STARTING_CREDITS (as the app shows); the difference is granted or revoked.
+ */
 async function newUser(credits = 0): Promise<string> {
   const id = randomUUID();
   await db.query(
@@ -50,14 +53,17 @@ async function newUser(credits = 0): Promise<string> {
      values ($1, $2, '+91', $2, 'x', now(), now())`,
     [id, id],
   );
-  if (credits > 0) await grant(id, credits);
+  await grant(id, credits - STARTING_CREDITS, credits < STARTING_CREDITS ? 'ADMIN_REVOKE' : 'ADMIN_GRANT');
   return id;
 }
 
-function grant(user: string, delta: number) {
+const STARTING_CREDITS = 3;
+
+async function grant(user: string, delta: number, reason = 'ADMIN_GRANT') {
+  if (delta === 0) return null;
   return one<{ id: number; balance_after: number }>(
-    `select * from public.apply_credit_change($1, $2, 'ADMIN_GRANT')`,
-    [user, delta],
+    `select * from public.apply_credit_change($1, $2, $3::public.credit_reason)`,
+    [user, delta, reason],
   );
 }
 
@@ -150,11 +156,44 @@ describe('schema and seed', () => {
   });
 });
 
+describe('learn content', () => {
+  it("holds the app's 6 Learn items in its order, with the figures its sorts use", async () => {
+    const items = (
+      await db.query<{ title: string; display_order: number; display_rating: number; display_avg: number }>(
+        `select title, display_order, display_rating, display_avg from public.learn_items
+         where status = 'PUBLISHED' order by display_order`,
+      )
+    ).rows;
+    expect(items.map((i) => [i.display_order, i.title, i.display_rating, i.display_avg])).toEqual([
+      [1, 'Standardize Hidden Fee Transparency Across', 4.8, 120],
+      [2, 'Understanding the New SEC Regulatory Guidelines', 4.2, 85],
+      [3, 'How to Read a Term Sheet Like a Pro', 4.9, 210],
+      [4, 'The Future of Real Estate Tokenization', 3.5, 45],
+      [5, 'Navigating Cross-Border Investment Tax Laws', 4.5, 150],
+      [6, 'Cross-Border Investment Tax Laws', 2, 20],
+    ]);
+  });
+});
+
 describe('credit ledger', () => {
+  it('gives every new member 3 starting credits, through the ledger', async () => {
+    const id = randomUUID();
+    await db.query(
+      `insert into app.users (public_id, email, phone_country_code, phone, password_hash,
+                              email_verified_at, phone_verified_at)
+       values ($1, $2, '+91', $2, 'x', now(), now())`,
+      [id, id],
+    );
+    expect(await balance(id)).toBe(3);
+    expect(
+      await one(`select delta, balance_after, reason, note from public.credit_ledger where user_id = $1`, [id]),
+    ).toEqual({ delta: 3, balance_after: 3, reason: 'ADMIN_GRANT', note: 'Starting credits' });
+  });
+
   it('appends an entry and keeps the cached balance equal to the sum of deltas', async () => {
     const user = await newUser();
-    expect((await grant(user, 5)).balance_after).toBe(5);
-    expect((await grant(user, -2)).balance_after).toBe(3);
+    expect((await grant(user, 5))?.balance_after).toBe(5);
+    expect((await grant(user, -2))?.balance_after).toBe(3);
     expect(await balance(user)).toBe(3);
     const sum = await one<{ s: number }>(
       'select sum(delta)::integer as s from public.credit_ledger where user_id = $1',
@@ -194,10 +233,10 @@ describe('join_roadshow_pool', () => {
     const roadshow = await roadshowId('meridian-green-bonds-2026');
 
     const joined = await joinPool(user, roadshow, 250000, [
-      'BETTER_ROI_IRR',
-      'SHORTER_LOCK_IN',
-      'PRIORITY_ALLOTMENT',
-      'PRIORITY_ALLOTMENT',
+      'HIGHER_ROI_IRR',
+      'LOWER_LOCK_IN',
+      'BETTER_ALLOTMENT',
+      'BETTER_ALLOTMENT',
     ]);
 
     expect(joined.credits_remaining).toBe(1);
@@ -215,9 +254,9 @@ describe('join_roadshow_pool', () => {
       [roadshow, user],
     );
     expect(votes.map((v) => v.expectation)).toEqual([
-      'BETTER_ROI_IRR',
-      'SHORTER_LOCK_IN',
-      'PRIORITY_ALLOTMENT',
+      'HIGHER_ROI_IRR',
+      'LOWER_LOCK_IN',
+      'BETTER_ALLOTMENT',
     ]);
     const notes = await rows<{ type: string; data: { roadshowId: string } }>(
       'select type, data from public.notifications where user_id = $1',
@@ -246,7 +285,7 @@ describe('join_roadshow_pool', () => {
     const user = await newUser(1);
     const roadshow = await roadshowId('meridian-green-bonds-2026');
     await expectDbError(
-      joinPool(user, roadshow, 1000, ['BETTER_ROI_IRR', 'BETTER_ROI_IRR', 'SHORTER_LOCK_IN']),
+      joinPool(user, roadshow, 1000, ['HIGHER_ROI_IRR', 'HIGHER_ROI_IRR', 'LOWER_LOCK_IN']),
       /EXPECTATIONS_INVALID/,
     );
     expect(await balance(user)).toBe(1);
@@ -281,10 +320,10 @@ describe('roadshow_pool_power', () => {
   it('splits members into capital-interest quartiles and counts votes per band', async () => {
     const roadshow = await roadshowId('quantum-biotech-pre-ipo');
     const picks = [
-      ['BETTER_ROI_IRR', 'SHORTER_LOCK_IN', 'LOWER_EXIT_LOAD'],
-      ['BETTER_ROI_IRR', 'SHORTER_LOCK_IN', 'PRIORITY_ALLOTMENT'],
-      ['BETTER_ROI_IRR', 'LOWER_ENTRY_LOAD', 'PRIORITY_ALLOTMENT'],
-      ['BETTER_ROI_IRR', 'LOWER_ENTRY_LOAD', 'REGULAR_DISCLOSURES'],
+      ['HIGHER_ROI_IRR', 'LOWER_LOCK_IN', 'TENURE_PREFERENCE'],
+      ['HIGHER_ROI_IRR', 'LOWER_LOCK_IN', 'BETTER_ALLOTMENT'],
+      ['HIGHER_ROI_IRR', 'REDUCED_ENTRY_EXIT_LOAD', 'BETTER_ALLOTMENT'],
+      ['HIGHER_ROI_IRR', 'REDUCED_ENTRY_EXIT_LOAD', 'CASHBACK_ON_REINVESTMENT'],
     ];
     for (const [i, expectations] of picks.entries()) {
       await joinPool(await newUser(1), roadshow, (i + 1) * 1000, expectations);
@@ -305,12 +344,12 @@ describe('roadshow_pool_power', () => {
     const band1 = power.filter((r) => r.band === 1);
     expect(band1[0]).toMatchObject({ band_min: 1000, band_max: 1000, band_members: 1 });
     expect(band1.filter((r) => r.votes > 0).map((r) => r.expectation)).toEqual([
-      'BETTER_ROI_IRR',
-      'SHORTER_LOCK_IN',
-      'LOWER_EXIT_LOAD',
+      'HIGHER_ROI_IRR',
+      'LOWER_LOCK_IN',
+      'TENURE_PREFERENCE',
     ]);
     const roiVotes = power
-      .filter((r) => r.expectation === 'BETTER_ROI_IRR')
+      .filter((r) => r.expectation === 'HIGHER_ROI_IRR')
       .reduce((n, r) => n + r.votes, 0);
     expect(roiVotes).toBe(4);
   });
