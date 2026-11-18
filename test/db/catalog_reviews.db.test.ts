@@ -21,6 +21,7 @@ let seededContent: {
   cards: Record<string, unknown>[];
   displays: Record<string, unknown>[];
   compare: Record<string, unknown>;
+  topRated: Record<string, unknown>;
 };
 
 async function rows<T = Record<string, unknown>>(sql: string, params: unknown[] = []) {
@@ -176,6 +177,9 @@ beforeAll(async () => {
     ),
     compare: (await one<{ value: Record<string, unknown> }>(
       `select public.app_get_content('review.compare') as value`,
+    )).value,
+    topRated: (await one<{ value: Record<string, unknown> }>(
+      `select public.app_get_content('toprated.card') as value`,
     )).value,
     stats: await rows(
       `select c.slug, s.review_count, s.score, s.positive_pct, s.neutral_pct, s.negative_pct,
@@ -367,6 +371,20 @@ describe('schema and seed', () => {
       right: { name: 'ZENITH', product: 'INSURANCE' },
       sentimentSplit: { firstProduct: { positive: '100%', negative: '65%', neutral: '35%' } },
     });
+  });
+
+  it('stores the Top Rated person line and View Details card as the app shows them', () => {
+    expect(seededContent.topRated).toMatchObject({
+      personName: 'Rakesh Gupta',
+      fallbackName: 'Zenith Capital',
+      location: 'INDIA',
+      fields: ['Insurance', 'Nexa', '', '2026'],
+      rating: '4.0',
+      sentiment: 'POSITIVE',
+      investAgain: 'MAYBE',
+      resolution: 'CONTACTED',
+    });
+    expect((seededContent.topRated['metrics'] as unknown[]).length).toBe(5);
   });
 
   it('publishes the three Top Reviews on every company', () => {

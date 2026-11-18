@@ -646,6 +646,8 @@ export const DB_FUNCTIONS = {
         location: z.string().nullable(),
         avatarBucket: z.string().nullable(),
         avatarObjectKey: z.string().nullable(),
+        aboutMe: z.string(),
+        positiveExperience: z.number(),
         followers: z.number().int(),
         following: z.number().int(),
         // The codes the user chose; the app shows its own labels for them.

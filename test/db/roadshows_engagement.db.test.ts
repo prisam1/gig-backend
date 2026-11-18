@@ -156,6 +156,25 @@ describe('schema and seed', () => {
   });
 });
 
+describe('learn content', () => {
+  it("holds the app's 6 Learn items in its order, with the figures its sorts use", async () => {
+    const items = (
+      await db.query<{ title: string; display_order: number; display_rating: number; display_avg: number }>(
+        `select title, display_order, display_rating, display_avg from public.learn_items
+         where status = 'PUBLISHED' order by display_order`,
+      )
+    ).rows;
+    expect(items.map((i) => [i.display_order, i.title, i.display_rating, i.display_avg])).toEqual([
+      [1, 'Standardize Hidden Fee Transparency Across', 4.8, 120],
+      [2, 'Understanding the New SEC Regulatory Guidelines', 4.2, 85],
+      [3, 'How to Read a Term Sheet Like a Pro', 4.9, 210],
+      [4, 'The Future of Real Estate Tokenization', 3.5, 45],
+      [5, 'Navigating Cross-Border Investment Tax Laws', 4.5, 150],
+      [6, 'Cross-Border Investment Tax Laws', 2, 20],
+    ]);
+  });
+});
+
 describe('credit ledger', () => {
   it('gives every new member 3 starting credits, through the ledger', async () => {
     const id = randomUUID();

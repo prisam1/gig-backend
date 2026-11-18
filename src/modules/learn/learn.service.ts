@@ -24,6 +24,8 @@ export interface LearnCard {
   /** PREMIUM content the viewer cannot open: verified Prive and Institutional members only. */
   locked: boolean;
   publishedAt: string | null;
+  /** What the app shows, stored as shown (20261118190000_learn_section_content.sql). */
+  display: { order: number; rating: number | null; avg: number | null };
 }
 
 export interface LearnDetail extends LearnCard {
@@ -53,15 +55,20 @@ function toCard(row: LearnRow, user: AuthUser | undefined): LearnCard {
     downloadable: row.download_path !== null,
     locked: isLocked(row, user),
     publishedAt: row.published_at,
+    display: { order: row.display_order, rating: row.display_rating, avg: row.display_avg },
   };
 }
 
-const learnOrders: Record<LearnSort, ['published_at' | 'rating_avg', boolean][]> = {
+type LearnOrderColumn = 'published_at' | 'rating_avg' | 'display_rating' | 'display_avg';
+const learnOrders: Record<LearnSort, [LearnOrderColumn, boolean][]> = {
   recent: [['published_at', false]],
   top_rated: [
     ['rating_avg', false],
     ['published_at', false],
   ],
+  display: [],
+  rating_desc: [['display_rating', false]],
+  avg_desc: [['display_avg', false]],
 };
 
 export async function listLearn(
@@ -86,9 +93,10 @@ export async function listLearn(
     rows: (from, to) => {
       let q = build(false);
       for (const [column, ascending] of learnOrders[query.sort]) {
-        q = q.order(column, { ascending });
+        q = q.order(column, { ascending, nullsFirst: false });
       }
-      return q.order('id').range(from, to);
+      // Ties keep the app's list order.
+      return q.order('display_order').order('id').range(from, to);
     },
     count: () => build(true),
   });

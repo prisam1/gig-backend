@@ -624,6 +624,9 @@ export type Database = {
           published_at: string | null;
           created_at: string;
           updated_at: string;
+          display_order: number;
+          display_rating: number | null;
+          display_avg: number | null;
         };
         Insert: {
           id?: string;

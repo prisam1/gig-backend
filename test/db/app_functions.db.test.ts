@@ -388,6 +388,11 @@ describe("sign-up in the app's order (all screens first, OTP last)", () => {
     const user = await call<{ jobProfileCode: string; preferences: { type: string; code: string }[] }>('app_get_user', userId);
     expect(user.jobProfileCode).toBe('BUSINESS_OWNER');
     expect(user).not.toHaveProperty('jobProfileLabel');
+    // New members start with the "About me" text and "Positive experience" score the app showed.
+    expect(user).toMatchObject({
+      aboutMe: 'Passionate about supporting ambitious founders and scalable business ideas.\nI believe in long-term value creation through strategic guidance, networking opportunities, and capital support.',
+      positiveExperience: 4.8,
+    });
     expect(user.preferences).toEqual([
       { type: 'INVESTMENT_FOCUS', code: 'REAL_ASSETS' },
       { type: 'INVESTMENT_SECTOR', code: 'PRIVATE_EQUITIES' },
