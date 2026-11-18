@@ -12,6 +12,13 @@ const ALICE = 'aaaaaaaa-0000-4000-8000-000000000001';
 const BOB = 'bbbbbbbb-0000-4000-8000-000000000002';
 
 let db: PGlite;
+let seededContent: {
+  stats: Record<string, unknown>[];
+  series: Record<string, unknown>[];
+  seriesCount: number;
+  feed: Record<string, unknown>[];
+  feedCount: number;
+};
 
 async function rows<T = Record<string, unknown>>(sql: string, params: unknown[] = []) {
   return (await db.query<T>(sql, params)).rows;
@@ -156,6 +163,28 @@ beforeAll(async () => {
     await db.exec(readFileSync(join(dir, file), 'utf8'));
   }
   await db.exec(readFileSync(join(ROOT, 'supabase', 'seed.sql'), 'utf8'));
+  // The Review section's content as the migrations left it, before the tests clear the reviews.
+  seededContent = {
+    stats: await rows(
+      `select c.slug, s.review_count, s.score, s.positive_pct, s.neutral_pct, s.negative_pct,
+              s.avg_transparency, s.resolved_pct, s.dominant_sentiment, s.score_change_12m
+       from public.company_stats s join public.companies c on c.id = s.company_id
+       order by c.slug`,
+    ),
+    series: await rows(
+      `select c.slug, t.range, t.metric, t.value, t.change, t.change_label, t.chart
+       from public.company_trend_series t join public.companies c on c.id = t.company_id
+       where c.slug = 'prime-fincorp' and t.range = '12M' order by t.metric`,
+    ),
+    seriesCount: (await one<{ n: number }>('select count(*)::int as n from public.company_trend_series')).n,
+    feed: await rows(
+      `select f.sentiment, f.author_name, f.product_scheme, f.avg_rating, f.reinvest_status,
+              f.resolution_status, f.appreciations, f.concerns, f.contact_statuses
+       from public.review_feed f join public.companies c on c.id = f.company_id
+       where c.slug = 'astra-mutuals' order by f.sentiment`,
+    ),
+    feedCount: (await one<{ n: number }>('select count(*)::int as n from public.review_feed')).n,
+  };
   // Reviewers are auth-module users, identified by app.users.public_id.
   await db.exec(`
     insert into app.users (public_id, email, phone_country_code, phone, password_hash,
@@ -168,12 +197,13 @@ afterAll(async () => {
   await db.close();
 });
 
-// Every test starts from the seeded catalog with no reviews.
+// Every test starts from the seeded catalog with no reviews (and none of the stored figures).
 beforeEach(async () => {
   await db.exec(`
     delete from public.review_versions; delete from public.review_attachments;
     delete from public.review_tags; delete from public.reviews;
     delete from public.company_stats; delete from public.company_trend_points;
+    delete from public.company_trend_series; delete from public.company_baseline_stats;
   `);
 });
 
@@ -185,9 +215,11 @@ describe('schema and seed', () => {
     expect(tables.map((t) => t.tablename)).toEqual(
       expect.arrayContaining([
         'companies',
+        'company_baseline_stats',
         'company_stats',
         'company_tags',
         'company_trend_points',
+        'company_trend_series',
         'issuer_tags',
         'issuers',
         'review_attachments',
@@ -205,21 +237,108 @@ describe('schema and seed', () => {
     );
   });
 
-  it('seeds the 5 companies from the app mock data, with ordered tags', async () => {
+  it("holds the app's 7 companies (in the app's order by date), with ordered tags", async () => {
     const companies = await rows<{ slug: string; asset_class: string; country: string }>(
       'select slug, asset_class, country from public.companies order by slug',
     );
     expect(companies).toEqual([
       { slug: 'astra-mutuals', asset_class: 'MF', country: 'IN' },
+      { slug: 'astra-mutuals-2', asset_class: 'MF', country: 'IN' },
       { slug: 'nexa-funds', asset_class: 'MF', country: 'IN' },
       { slug: 'prime-fincorp', asset_class: 'BND', country: 'AE' },
       { slug: 'summit-banking', asset_class: 'BRK', country: 'IN' },
       { slug: 'zenith-capital', asset_class: 'EQ', country: 'AE' },
+      { slug: 'zenith-capital-2', asset_class: 'EQ', country: 'AE' },
     ]);
     const card = await one<{ tags: string[] }>(
       `select tags from public.company_cards where slug = 'astra-mutuals'`,
     );
     expect(card.tags).toEqual(['Large CAP Stocks', 'ETF', 'IPO']);
+  });
+
+  it("holds each company's figures exactly as the app shows them", () => {
+    expect(seededContent.stats).toHaveLength(7);
+    expect(seededContent.stats[0]).toEqual({
+      slug: 'astra-mutuals',
+      review_count: 278,
+      score: 4.6,
+      positive_pct: 72,
+      neutral_pct: 18,
+      negative_pct: 10,
+      avg_transparency: 4.5,
+      resolved_pct: 85,
+      dominant_sentiment: 'Positive',
+      score_change_12m: 0.3,
+    });
+  });
+
+  it('holds the trend panels (value, signed change, label, curve) for every range and metric', () => {
+    expect(seededContent.seriesCount).toBe(7 * 3 * 2);
+    expect(seededContent.series).toEqual([
+      {
+        slug: 'prime-fincorp',
+        range: '12M',
+        metric: 'OVERALL_SATISFACTION',
+        value: 3.7,
+        // The curve falls, so the change is negative although the label carries no sign.
+        change: -0.8,
+        change_label: '0.8 vs 12M ago',
+        chart: [
+          { x: 0, y: 30 },
+          { x: 40, y: 45 },
+          { x: 80, y: 60 },
+          { x: 120, y: 75 },
+          { x: 156, y: 95 },
+        ],
+      },
+      {
+        slug: 'prime-fincorp',
+        range: '12M',
+        metric: 'POSITIVE_SENTIMENT',
+        value: 25,
+        change: -15,
+        change_label: '15pp vs 12M ago',
+        chart: [
+          { x: 0, y: 40 },
+          { x: 50, y: 60 },
+          { x: 100, y: 75 },
+          { x: 156, y: 95 },
+        ],
+      },
+    ]);
+  });
+
+  it('publishes the three Top Reviews on every company', () => {
+    expect(seededContent.feedCount).toBe(7 * 3);
+    const common = {
+      author_name: 'Shreya Mehta',
+      product_scheme: 'Insurance',
+      avg_rating: 2.6,
+      reinvest_status: 'MAYBE',
+      resolution_status: 'CONTACTED',
+    };
+    expect(seededContent.feed).toEqual([
+      {
+        ...common,
+        sentiment: 'Positive',
+        appreciations: [
+          'DIGITAL_EXPERIENCE',
+          'EASE_OF_ONBOARDING',
+          'ETHICAL_CONDUCT',
+          'TRANSPARENT_COMMUNICATION',
+        ],
+        concerns: [],
+        contact_statuses: [],
+      },
+      { ...common, sentiment: 'Neutral', appreciations: [], concerns: [], contact_statuses: [] },
+      {
+        ...common,
+        sentiment: 'Negative',
+        appreciations: [],
+        concerns: ['DELAY_IN_RESPONSE'],
+        contact_statuses: ['CONTACTED_NO_RESPONSE'],
+      },
+    ]);
   });
 
   it('seeds the 7 issuers from the app mock data', async () => {
@@ -490,6 +609,49 @@ describe('review evidence', () => {
 });
 
 describe('company stats', () => {
+  it("adds published reviews to the company's baseline (the app's figures)", async () => {
+    const astra = await companyId('astra-mutuals');
+    // 9 reviews averaging 4 on every metric, all positive and resolved.
+    await db.query(
+      `insert into public.company_baseline_stats (
+         company_id, review_count, score_sum, transparency_sum, responsiveness_sum,
+         ease_of_process_sum, trustworthiness_sum, overall_sum, positive_count, neutral_count,
+         negative_count, resolved_count, in_progress_count, unresolved_count, not_contacted_count,
+         dominant_sentiment, dominant_resolution, score_change_12m)
+       values ($1, 9, 36, 36, 36, 36, 36, 36, 9, 0, 0, 9, 0, 0, 0, 'Positive', 'RESOLVED', 0.3)`,
+      [astra],
+    );
+    await submit({
+      company: astra,
+      sentiment: 'Neutral',
+      mixed: 'Some parts were fine, some not.',
+      metrics: [5, 5, 5, 5, 5],
+      resolution: 'NOT_CONTACTED',
+    });
+    await publishAll();
+
+    expect(
+      await one(
+        `select review_count, score, avg_transparency, positive_pct, neutral_pct, resolved_pct,
+                not_contacted_pct, dominant_sentiment, dominant_resolution, score_change_12m
+         from public.company_stats where company_id = $1`,
+        [astra],
+      ),
+    ).toEqual({
+      review_count: 10,
+      score: 4.1,
+      avg_transparency: 4.1,
+      positive_pct: 90,
+      neutral_pct: 10,
+      resolved_pct: 90,
+      not_contacted_pct: 10,
+      // As given by the app, not recomputed.
+      dominant_sentiment: 'Positive',
+      dominant_resolution: 'RESOLVED',
+      score_change_12m: 0.3,
+    });
+  });
+
   it('ignores reviews until they are published', async () => {
     const astra = await companyId('astra-mutuals');
     await submit({ company: astra });
@@ -721,13 +883,20 @@ describe('search_companies (list filters)', () => {
   });
 
   it('returns every company without filters', async () => {
-    expect(await names('')).toHaveLength(5);
+    expect(await names('')).toHaveLength(7);
   });
 
   it('searches company names and tags', async () => {
-    expect(await names(`p_q => 'astra'`)).toEqual(['Astra Mutuals']);
+    // The app lists Astra Mutuals and Zenith Capital twice.
+    expect(await names(`p_q => 'astra'`)).toEqual(['Astra Mutuals', 'Astra Mutuals']);
     expect(await names(`p_q => 'bonds'`)).toEqual(['Prime Fincorp']);
-    expect(await names(`p_q => 'ETF'`)).toEqual(['Astra Mutuals', 'Nexa Funds', 'Zenith Capital']);
+    expect(await names(`p_q => 'ETF'`)).toEqual([
+      'Astra Mutuals',
+      'Astra Mutuals',
+      'Nexa Funds',
+      'Zenith Capital',
+      'Zenith Capital',
+    ]);
   });
 
   it('filters by sentiment, asset class, resolution, score and country', async () => {
@@ -739,7 +908,11 @@ describe('search_companies (list filters)', () => {
     expect(await names(`p_resolutions => '{RESOLVED}'`)).toEqual(['Astra Mutuals']);
     expect(await names(`p_scores => '{5}'`)).toEqual(['Astra Mutuals']);
     expect(await names(`p_scores => '{2}'`)).toEqual(['Zenith Capital']);
-    expect(await names(`p_countries => '{AE}'`)).toEqual(['Prime Fincorp', 'Zenith Capital']);
+    expect(await names(`p_countries => '{AE}'`)).toEqual([
+      'Prime Fincorp',
+      'Zenith Capital',
+      'Zenith Capital',
+    ]);
   });
 
   it('filters by investment status and year of published reviews', async () => {

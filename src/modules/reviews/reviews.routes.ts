@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { parse, sendData } from '../../lib/http';
-import { authUser, requireAuth, requireVerifiedPrive } from '../../middleware/auth';
+import { authUser, requireAuth } from '../../middleware/auth';
 import {
   idempotencyHeaders,
   reviewIdParams,
@@ -11,9 +11,9 @@ import { submitReview, updateResolution } from './reviews.service';
 
 export const reviewsRouter = Router();
 
-// Prive (KYC verified): submit the 6-step review. Returns the receipt.
+// Any signed-in member (as in the app): submit the 6-step review. Returns the receipt.
 // Needs an Idempotency-Key header; a retry with the same key and body returns the same review.
-reviewsRouter.post('/', requireAuth, requireVerifiedPrive, async (req, res) => {
+reviewsRouter.post('/', requireAuth, async (req, res) => {
   const { 'Idempotency-Key': key } = parse(idempotencyHeaders, {
     'Idempotency-Key': req.get('Idempotency-Key'),
   });
@@ -23,8 +23,8 @@ reviewsRouter.post('/', requireAuth, requireVerifiedPrive, async (req, res) => {
   sendData(res, receipt, 201);
 });
 
-// Prive (KYC verified), reviewer only: update resolution status and follow-up note.
-reviewsRouter.patch('/:id/resolution', requireAuth, requireVerifiedPrive, async (req, res) => {
+// The reviewer only: update resolution status and follow-up note.
+reviewsRouter.patch('/:id/resolution', requireAuth, async (req, res) => {
   const { id } = parse(reviewIdParams, req.params);
   const body = parse(updateResolutionBody, req.body);
   sendData(res, await updateResolution(authUser(req), id, body));

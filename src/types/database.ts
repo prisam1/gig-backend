@@ -506,6 +506,44 @@ export type Database = {
           },
         ];
       };
+      company_trend_series: {
+        Row: {
+          company_id: string;
+          range: string;
+          metric: string;
+          value: number;
+          change: number;
+          change_label: string;
+          chart: Json;
+        };
+        Insert: {
+          company_id: string;
+          range: string;
+          metric: string;
+          value: number;
+          change: number;
+          change_label: string;
+          chart: Json;
+        };
+        Update: {
+          company_id?: string;
+          range?: string;
+          metric?: string;
+          value?: number;
+          change?: number;
+          change_label?: string;
+          chart?: Json;
+        };
+        Relationships: [
+          {
+            foreignKeyName: 'company_trend_series_company_id_fkey';
+            columns: ['company_id'];
+            isOneToOne: false;
+            referencedRelation: 'companies';
+            referencedColumns: ['id'];
+          },
+        ];
+      };
       credit_ledger: {
         Row: {
           id: number;
@@ -1310,6 +1348,7 @@ export type Database = {
           p_display_mode: Database['public']['Enums']['display_mode'];
           p_allow_contact: boolean;
           p_declarations_version: string;
+          p_document_types?: string[];
         };
         Returns: {
           id: string;

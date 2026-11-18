@@ -221,15 +221,10 @@ describe('GET /api/v1/companies/:id', () => {
     expect(chainArgs(fake.callsTo('from:company_cards')[0], 'eq')).toEqual(['id', COMPANY_A]);
   });
 
-  it.each(['observer', 'privePending'] as const)('gives %s the summary only', async (user) => {
-    const res = await request(app)
-      .get(`/api/v1/companies/${COMPANY_A}`)
-      .set(auth(user))
-      .expect(200);
-    expect(res.body.data).toMatchObject({ access: 'SUMMARY', analytics: null });
-  });
-
-  it.each(['prive', 'institutional'] as const)('gives %s full analytics', async (user) => {
+  // As in the app: every signed-in member sees the company's full details.
+  it.each(['observer', 'privePending', 'prive', 'institutional'] as const)(
+    'gives %s full analytics',
+    async (user) => {
     const res = await request(app)
       .get(`/api/v1/companies/${COMPANY_A}`)
       .set(auth(user))
@@ -244,7 +239,8 @@ describe('GET /api/v1/companies/:id', () => {
         lastReviewAt: '2026-10-20T00:00:00Z',
       },
     });
-  });
+    },
+  );
 
   it('returns 404 for an unknown company', async () => {
     fake.on('from:company_cards', { data: null });
@@ -273,7 +269,7 @@ describe('GET /api/v1/companies/compare', () => {
     expect(res.body.error.code).toBe('UNAUTHENTICATED');
   });
 
-  it('returns companies in the requested order, without lens for an Observer', async () => {
+  it('returns companies in the requested order, with lens and 12-month change, to an Observer', async () => {
     fake.on('from:company_cards', { data: rows });
     const res = await request(app)
       .get(`/api/v1/companies/compare?ids=${COMPANY_B},${COMPANY_A}`)
@@ -298,8 +294,8 @@ describe('GET /api/v1/companies/compare', () => {
         trustworthiness: 4.4,
         overallSatisfaction: 4.5,
       },
-      resolutionLens: null,
-      scoreChange12m: null,
+      resolutionLens: { resolved: 50, inProgress: 25, unresolved: 16.67, notContacted: 8.33 },
+      scoreChange12m: 0.4,
     });
     expect(allChainArgs(fake.callsTo('from:company_cards')[0], 'in')).toEqual([
       ['id', [COMPANY_B, COMPANY_A]],
@@ -343,6 +339,8 @@ describe('GET /api/v1/companies/:id/trends', () => {
     vi.useFakeTimers({ toFake: ['Date'] });
     vi.setSystemTime(new Date('2026-10-15T12:00:00Z'));
     companyExists(true);
+    // No stored trend panel: the series are computed from the monthly points.
+    fake.on('from:company_trend_series', { data: [] });
     // One review in Sept 2025 (overall 2, negative) and one in Oct 2026 (overall 5, positive).
     fake.on('from:company_trend_points', {
       data: [
@@ -357,14 +355,35 @@ describe('GET /api/v1/companies/:id/trends', () => {
     expect((await request(app).get(url)).status).toBe(401);
   });
 
-  it.each(['observer', 'privePending'] as const)('is not available to %s', async (user) => {
-    const res = await request(app).get(url).set(auth(user));
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('FORBIDDEN');
+  it('serves the stored trend panel (the app content) as it is', async () => {
+    const chart = [
+      { x: 0, y: 95 },
+      { x: 156, y: 14 },
+    ];
+    fake.on('from:company_trend_series', {
+      data: [
+        { metric: 'OVERALL_SATISFACTION', value: 4.6, change: 0.3, change_label: '0.3 vs 12M ago', chart },
+        { metric: 'POSITIVE_SENTIMENT', value: 72, change: 5, change_label: '5pp vs 12M ago', chart },
+      ],
+    });
+    fake.on('from:company_stats', { data: { review_count: 278 } });
+
+    const res = await request(app).get(url).set(auth('observer')).expect(200);
+    expect(res.body.data).toEqual({
+      range: '12M',
+      reviewCount: 278,
+      overallSatisfaction: { value: 4.6, change: 0.3, changeLabel: '0.3 vs 12M ago', points: [], chart },
+      positiveSentiment: { value: 72, change: 5, changeLabel: '5pp vs 12M ago', points: [], chart },
+    });
+    expect(allChainArgs(fake.callsTo('from:company_trend_series')[0], 'eq')).toEqual([
+      ['company_id', COMPANY_A],
+      ['range', '12M'],
+    ]);
+    expect(fake.callsTo('from:company_trend_points')).toHaveLength(0);
   });
 
   it('computes the 12-month series and change vs 12 months ago', async () => {
-    const res = await request(app).get(url).set(auth('prive')).expect(200);
+    const res = await request(app).get(url).set(auth('observer')).expect(200);
     const { data } = res.body;
 
     expect(data.range).toBe('12M');
@@ -372,7 +391,12 @@ describe('GET /api/v1/companies/:id/trends', () => {
     expect(data.overallSatisfaction.points).toHaveLength(12);
     expect(data.overallSatisfaction.points[0]).toEqual({ month: '2025-11', value: 2 });
     expect(data.overallSatisfaction.points.at(-1)).toEqual({ month: '2026-10', value: 3.5 });
-    expect(data.overallSatisfaction).toMatchObject({ value: 3.5, change: 1.5 });
+    expect(data.overallSatisfaction).toMatchObject({
+      value: 3.5,
+      change: 1.5,
+      changeLabel: null,
+      chart: null,
+    });
     expect(data.positiveSentiment).toMatchObject({ value: 50, change: 50 });
   });
 
@@ -435,8 +459,8 @@ describe('GET /api/v1/companies/:id/reviews', () => {
     });
   });
 
-  it('shows signed-out visitors and Observers a summary only', async () => {
-    for (const headers of [{}, auth('observer')]) {
+  it('shows signed-out visitors a summary only', async () => {
+    for (const headers of [{}]) {
       const res = await request(app).get(url).set(headers).expect(200);
       const [first, second] = res.body.data;
       expect(first).toEqual({
@@ -461,8 +485,8 @@ describe('GET /api/v1/companies/:id/reviews', () => {
     }
   });
 
-  it('shows full reviews to verified Prive and Institutional members', async () => {
-    for (const user of ['prive', 'institutional'] as const) {
+  it('shows full reviews to every signed-in member', async () => {
+    for (const user of ['observer', 'privePending', 'prive', 'institutional'] as const) {
       const res = await request(app).get(url).set(auth(user)).expect(200);
       expect(res.body.data[1]).toMatchObject({
         detail: 'FULL',

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { parse, sendData, sendPage } from '../../lib/http';
-import { authUser, optionalAuth, requireAuth, requireFullAccess } from '../../middleware/auth';
+import { authUser, optionalAuth, requireAuth } from '../../middleware/auth';
 import { listCompanyReviewsQuery } from '../reviews/reviews.schemas';
 import { listCompanyReviews } from '../reviews/reviews.service';
 import { companyIdParams, compareQuery, listCompaniesQuery, trendsQuery } from './catalog.schemas';
@@ -22,20 +22,20 @@ companiesRouter.get('/compare', requireAuth, async (req, res) => {
   sendData(res, await compareCompanies(ids, authUser(req)));
 });
 
-// GET /companies/:id — Public: header, sentiment split, scorecard (Prive: full analytics).
+// GET /companies/:id — Public: header, sentiment split, scorecard (signed in: full analytics).
 companiesRouter.get('/:id', optionalAuth, async (req, res) => {
   const { id } = parse(companyIdParams, req.params);
   sendData(res, await getCompany(id, req.user));
 });
 
-// GET /companies/:id/trends?range=12M|24M|ALL — verified Prive / Institutional.
-companiesRouter.get('/:id/trends', requireAuth, requireFullAccess, async (req, res) => {
+// GET /companies/:id/trends?range=12M|24M|ALL — any signed-in member.
+companiesRouter.get('/:id/trends', requireAuth, async (req, res) => {
   const { id } = parse(companyIdParams, req.params);
   const { range } = parse(trendsQuery, req.query);
   sendData(res, await getCompanyTrends(id, range));
 });
 
-// GET /companies/:id/reviews — Public: Observer gets summaries; Prive / Inst. get full reviews.
+// GET /companies/:id/reviews — Public: summaries without a token; signed in: full reviews.
 companiesRouter.get('/:id/reviews', optionalAuth, async (req, res) => {
   const { id } = parse(companyIdParams, req.params);
   const query = parse(listCompanyReviewsQuery, req.query);

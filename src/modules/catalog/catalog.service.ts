@@ -51,6 +51,7 @@ export interface CompanyCard {
   createdAt: string;
 }
 
+/** Signed-in members only; null otherwise. */
 export interface CompanyAnalytics {
   resolutionLens: ResolutionLens;
   reviewsLast30Days: number;
@@ -63,7 +64,7 @@ export type AccessLevel = 'SUMMARY' | 'FULL';
 export interface CompanyDetail extends CompanyCard {
   access: AccessLevel;
   scorecard: Scorecard;
-  /** Verified Prive and Institutional members only; null otherwise. */
+  /** Signed-in members only; null otherwise. */
   analytics: CompanyAnalytics | null;
 }
 
@@ -75,18 +76,22 @@ export interface CompanyComparison {
   rating: number;
   sentimentSplit: SentimentSplit;
   scorecard: Scorecard;
-  /** Verified Prive and Institutional members only; null otherwise. */
   resolutionLens: ResolutionLens | null;
-  /** Change in average overall satisfaction vs 12 months ago. Full access only. */
+  /** Change in average overall satisfaction vs 12 months ago. */
   scoreChange12m: number | null;
 }
 
 export interface TrendSeries {
-  /** Latest cumulative value, null when there are no reviews yet. */
+  /** Latest value, null when there are no reviews yet. */
   value: number | null;
   /** Change vs the start of the range (12M/24M ago, or the first month for ALL). */
   change: number | null;
+  /** The change as the app words it ("0.3 vs 12M ago"); null when the series is computed. */
+  changeLabel: string | null;
+  /** Monthly cumulative values; empty when the series is stored content (see `chart`). */
   points: { month: string; value: number | null }[];
+  /** The curve as the app's chart points; null when the series is computed (use `points`). */
+  chart: { x: number; y: number }[] | null;
 }
 
 export interface CompanyTrends {
@@ -152,8 +157,12 @@ function toResolutionLens(row: CompanyCardRow): ResolutionLens {
   };
 }
 
+/**
+ * Company details, analytics, trends and full reviews: every signed-in member sees them all, as
+ * in the app's Review screens. Without a token only the summary is returned.
+ */
 export function accessLevel(user: AuthUser | undefined): AccessLevel {
-  return user?.hasFullAccess ? 'FULL' : 'SUMMARY';
+  return user ? 'FULL' : 'SUMMARY';
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -334,8 +343,52 @@ function monthsBetween(start: string, end: string): string[] {
 
 const round = (n: number, digits: number) => Number(n.toFixed(digits));
 
+const SERIES_METRICS = {
+  overallSatisfaction: 'OVERALL_SATISFACTION',
+  positiveSentiment: 'POSITIVE_SENTIMENT',
+} as const;
+
+/** The trend panel stored as content for this company and range, or null if there is none. */
+async function storedTrends(id: string, range: TrendRange): Promise<CompanyTrends | null> {
+  const { data, error } = await supabaseAdmin
+    .from('company_trend_series')
+    .select('metric, value, change, change_label, chart')
+    .eq('company_id', id)
+    .eq('range', range);
+  if (error) throw error;
+
+  const byMetric = new Map(data.map((row) => [row.metric, row]));
+  const toSeries = (metric: string): TrendSeries | null => {
+    const row = byMetric.get(metric);
+    if (!row) return null;
+    return {
+      value: row.value,
+      change: row.change,
+      changeLabel: row.change_label,
+      points: [],
+      chart: row.chart as { x: number; y: number }[],
+    };
+  };
+  const overallSatisfaction = toSeries(SERIES_METRICS.overallSatisfaction);
+  const positiveSentiment = toSeries(SERIES_METRICS.positiveSentiment);
+  if (!overallSatisfaction || !positiveSentiment) return null;
+
+  const { data: stats, error: statsError } = await supabaseAdmin
+    .from('company_stats')
+    .select('review_count')
+    .eq('company_id', id)
+    .maybeSingle();
+  if (statsError) throw statsError;
+
+  return { range, reviewCount: stats?.review_count ?? 0, overallSatisfaction, positiveSentiment };
+}
+
 export async function getCompanyTrends(id: string, range: TrendRange): Promise<CompanyTrends> {
   await assertCompanyExists(id);
+
+  // The app's trend panels are stored content; companies without them get computed trends.
+  const stored = await storedTrends(id, range);
+  if (stored) return stored;
 
   const { data, error } = await supabaseAdmin
     .from('company_trend_points')
@@ -393,7 +446,9 @@ export async function getCompanyTrends(id: string, range: TrendRange): Promise<C
     return {
       value,
       change: value !== null && start !== null ? round(value - start, digits) : null,
+      changeLabel: null,
       points: pts,
+      chart: null,
     };
   };
 

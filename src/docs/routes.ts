@@ -198,7 +198,7 @@ export const routeDocs: RouteDoc[] = [
   r('get', '/companies/:id', 'Companies', 'Company header, sentiment and scorecard', 'optional', {
     params: catalog.companyIdParams,
   }),
-  r('get', '/companies/:id/trends', 'Companies', '12M / 24M / ALL trends', 'full', {
+  r('get', '/companies/:id/trends', 'Companies', '12M / 24M / ALL trends', 'user', {
     params: catalog.companyIdParams,
     query: catalog.trendsQuery,
   }),
@@ -207,12 +207,12 @@ export const routeDocs: RouteDoc[] = [
     query: reviews.listCompanyReviewsQuery,
     page: true,
   }),
-  r('post', '/reviews', 'Reviews', 'Submit the 6-step review', 'prive', {
+  r('post', '/reviews', 'Reviews', 'Submit the 6-step review', 'user', {
     body: reviews.submitReviewBody,
     status: 201,
     idempotent: true,
   }),
-  r('patch', '/reviews/:id/resolution', 'Reviews', 'Update resolution status', 'prive', {
+  r('patch', '/reviews/:id/resolution', 'Reviews', 'Update resolution status', 'user', {
     params: reviews.reviewIdParams,
     body: reviews.updateResolutionBody,
   }),

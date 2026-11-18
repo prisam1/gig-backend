@@ -17,7 +17,7 @@ import {
   type UpdateResolutionInput,
 } from './reviews.schemas';
 
-type ReviewTagType = 'APPRECIATION' | 'CONCERN' | 'CONTACT_STATUS';
+type ReviewTagType = 'APPRECIATION' | 'CONCERN' | 'CONTACT_STATUS' | 'DOCUMENT_TYPE';
 
 // ---------------------------------------------------------------------------------------------
 // Response shapes
@@ -113,6 +113,8 @@ export interface ReviewReceipt {
   appreciations: string[];
   concerns: string[];
   contactStatus: string[];
+  /** Supporting document types the reviewer said they have (Negative reviews). */
+  documents: string[];
   /** Objects in the review-evidence bucket. */
   evidence: { path: string; docType: string; fileName: string }[];
   metrics: ReviewMetrics;
@@ -274,6 +276,7 @@ function sentimentFields(input: SubmitReviewInput) {
         appreciations: [...input.appreciations],
         concerns: [] as string[],
         contactStatus: [] as string[],
+        documents: [] as string[],
       };
     case 'Neutral':
       return {
@@ -284,6 +287,7 @@ function sentimentFields(input: SubmitReviewInput) {
         appreciations: [] as string[],
         concerns: [] as string[],
         contactStatus: [] as string[],
+        documents: [] as string[],
       };
     case 'Negative':
       return {
@@ -294,6 +298,7 @@ function sentimentFields(input: SubmitReviewInput) {
         appreciations: [] as string[],
         concerns: [...input.concerns],
         contactStatus: [...input.contactStatus],
+        documents: [...input.documents],
       };
     default: {
       const unreachable: never = input;
@@ -428,6 +433,7 @@ export async function submitReview(
       p_display_mode: input.displayMode,
       p_allow_contact: input.declarations.allowContact,
       p_declarations_version: DECLARATIONS_VERSION,
+      p_document_types: s.documents,
     })
     .single();
 
@@ -581,6 +587,7 @@ async function findOwnReview(user: AuthUser, reviewId: string): Promise<ReviewRe
     appreciations: tagsOf(row.review_tags, 'APPRECIATION'),
     concerns: tagsOf(row.review_tags, 'CONCERN'),
     contactStatus: tagsOf(row.review_tags, 'CONTACT_STATUS'),
+    documents: tagsOf(row.review_tags, 'DOCUMENT_TYPE'),
     evidence: row.review_attachments.map((a) => ({
       path: a.storage_path,
       docType: a.doc_type,

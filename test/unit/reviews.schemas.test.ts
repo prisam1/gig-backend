@@ -53,6 +53,7 @@ const negative = {
   concerns: ['DELAY_IN_RESPONSE'],
   contactStatus: ['CONTACTED_NO_RESPONSE'],
   negativeDescription: 'Redemption took 21 days to settle.',
+  documents: ['STATEMENT'],
   evidence: [{ path: FILE_PATH, docType: 'STATEMENT' }],
   resolutionStatus: 'CLOSED_UNRESOLVED',
 };
@@ -181,8 +182,21 @@ describe('submit review: steps 2-3 (sentiment and experience)', () => {
     expect(failures(rest)).toContain('negativeDescription');
   });
 
-  it('negative needs 1-5 supporting documents', () => {
-    expect(failures({ ...negative, evidence: [] })).toContain('evidence');
+  it('negative needs at least one supporting document type (as the app asks)', () => {
+    expect(failures({ ...negative, documents: [] })).toContain('documents');
+    const { documents: _omit, ...withoutDocuments } = negative;
+    expect(failures(withoutDocuments)).toContain('documents');
+    for (const code of EVIDENCE_TYPE_CODES) {
+      expect(failures({ ...negative, documents: [code] }), code).toEqual([]);
+    }
+    expect(failures({ ...negative, documents: [...EVIDENCE_TYPE_CODES] })).toEqual([]);
+    expect(failures({ ...negative, documents: ['PHOTO'] })).toContain('documents.0');
+  });
+
+  it('negative files are optional, at most 5', () => {
+    expect(failures({ ...negative, evidence: [] })).toEqual([]);
+    const { evidence: _omit, ...withoutFiles } = negative;
+    expect(failures(withoutFiles)).toEqual([]);
     const six = Array.from({ length: 6 }, (_, i) => ({
       path: `${USER_ID}/doc-${i}.pdf`,
       docType: 'EMAIL',

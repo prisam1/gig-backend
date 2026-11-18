@@ -224,12 +224,17 @@ The account only exists once both email and phone are verified. A pending sign-u
 | Method | Path                              | Access | Purpose                                                                                                                          |
 | ------ | --------------------------------- | ------ | -------------------------------------------------------------------------------------------------------------------------------- |
 | GET    | `/companies`                      | Public | Company list with search, sort and filters (see below)                                                                           |
-| GET    | `/companies/compare?ids=a,b`      | User   | 2-4 companies side by side ("across"). Resolution lens and 12-month change for Full only                                         |
-| GET    | `/companies/:id`                  | Public | Header, sentiment split, 5-metric scorecard. `analytics` (resolution lens, momentum) for Full only                               |
-| GET    | `/companies/:id/trends?range=12M` | Full   | Monthly overall-satisfaction and positive-sentiment series. `range` is `12M`, `24M` or `ALL`                                     |
+| GET    | `/companies/compare?ids=a,b`      | User   | 2-4 companies side by side ("across"), with resolution lens and 12-month change                                                  |
+| GET    | `/companies/:id`                  | Public | Header, sentiment split, 5-metric scorecard. `analytics` (resolution lens, momentum) when signed in                              |
+| GET    | `/companies/:id/trends?range=12M` | User   | Trend panel: overall satisfaction and positive sentiment. `range` is `12M`, `24M` or `ALL` (see below)                           |
 | GET    | `/companies/:id/reviews`          | Public | Published reviews (see below)                                                                                                    |
-| POST   | `/reviews`                        | Prive  | Submit a review. Needs `Idempotency-Key`. Returns the full receipt (`receiptNo`, reviewer, company, status `PENDING_MODERATION`) |
-| PATCH  | `/reviews/:id/resolution`         | Prive  | Reviewer only: `resolutionStatus` and `followUpNote` (omit to keep it, `null` to clear it)                                       |
+| POST   | `/reviews`                        | User   | Submit a review. Needs `Idempotency-Key`. Returns the full receipt (`receiptNo`, reviewer, company, status `PENDING_MODERATION`) |
+| PATCH  | `/reviews/:id/resolution`         | User   | Reviewer only: `resolutionStatus` and `followUpNote` (omit to keep it, `null` to clear it)                                       |
+
+The Review section follows the app: every signed-in member sees full company details, trends and full reviews, and can write a review. The app's content (its companies, their figures, trend panels and the Top Reviews) is in migration `20261118090000_review_section_content.sql`:
+
+- **Figures** (review count, rating, sentiment split, scorecard, resolution lens) are stored per company as a baseline (`company_baseline_stats`); published reviews are added to it, so a company the app shows with 278 reviews shows 279 after one more is published.
+- **Trend panels** (value, change, the app's change label and curve) are stored in `company_trend_series` and returned with `changeLabel` and `chart`. Companies without a stored panel get trends computed from their reviews (`points`, monthly).
 
 **`GET /companies`**
 
@@ -239,7 +244,7 @@ The account only exists once both email and phone are verified. A pending sign-u
 
 **`GET /companies/:id/reviews`**
 
-- Each review has `detail: "SUMMARY"` for Observers and signed-out visitors, or `detail: "FULL"` for Full members.
+- Each review has `detail: "SUMMARY"` for signed-out visitors, or `detail: "FULL"` when signed in.
 - `sort`: `recent`, `oldest`, `highest` or `lowest`.
 - Filters: `sentiment`, `resolution`, `assetClass`, `investedStatus`, `year`.
 
@@ -253,7 +258,7 @@ New reviews stay `PENDING_MODERATION` and do not count towards public numbers un
 | --------- | --------------------------------------------------------------------------------------------------- |
 | Positive  | `appreciations` (1+), `detailedReview` (10-800 chars), `reinvestStatus` (`YES`, `MAYBE`, `NO`)      |
 | Neutral   | `mixedReview` and `detailedReview` (10-800 chars each)                                              |
-| Negative  | `concerns` (1+), `contactStatus` (1+), `negativeDescription` (10-800 chars), `evidence` (1-5 files) |
+| Negative  | `concerns` (1+), `contactStatus` (1+), `negativeDescription` (10-800 chars), `documents` (1+ of `EMAIL`, `STATEMENT`, `POLICY_DOCUMENT`, `SCREENSHOT`); `evidence` files are optional (0-5) |
 
 `investmentYear` is a year or `"OLDER"`.
 
@@ -276,7 +281,7 @@ Idempotency-Key: 7d0f6c2e-1b7a-4f0e-9a51-3f1c2b9e8a10
   "concerns": ["DELAY_IN_RESPONSE"],
   "contactStatus": ["CONTACTED_NO_RESPONSE"],
   "negativeDescription": "Redemption took 21 days …",
-  "evidence": [{ "path": "<your user id>/statement.pdf", "docType": "STATEMENT" }],
+  "documents": ["STATEMENT"],
   "metrics": { "transparency": 2, "responsiveness": 1, "easeOfProcess": 2, "trustworthiness": 2, "overallSatisfaction": 2 },
   "resolutionStatus": "CLOSED_UNRESOLVED",
   "displayMode": "INITIALS",

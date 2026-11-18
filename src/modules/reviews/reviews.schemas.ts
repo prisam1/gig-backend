@@ -158,10 +158,13 @@ const negativeReview = baseReview.extend({
     .max(5),
   negativeDescription: reviewText('Description'),
   detailedReview: reviewText('Review').optional(),
-  evidence: z
-    .array(evidenceItem)
-    .min(1, { message: 'Attach at least one supporting document' })
-    .max(5),
+  /** The supporting document types the reviewer has (the app's "Supporting documents" step). */
+  documents: z
+    .array(option(EVIDENCE_TYPE_CODES))
+    .min(1, { message: 'Select at least one supporting document' })
+    .max(EVIDENCE_TYPE_CODES.length),
+  /** Uploaded files are optional: the app collects the document types without files. */
+  evidence: z.array(evidenceItem).max(5).default([]),
 });
 
 export const submitReviewBody = z.discriminatedUnion('sentiment', [
