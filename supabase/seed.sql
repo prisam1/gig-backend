@@ -1,24 +1,6 @@
--- Development seed: the companies and issuers from the mobile app's mock data (src/data.ts).
-
-insert into public.companies (slug, name, asset_class, country, description, verified) values
-  ('astra-mutuals', 'Astra Mutuals', 'MF', 'IN', 'Mutual fund house offering equity and index schemes.', true),
-  ('zenith-capital', 'Zenith Capital', 'EQ', 'AE', 'Equity and IPO investment platform.', true),
-  ('nexa-funds', 'Nexa Funds', 'MF', 'IN', 'Mutual fund and SIP provider.', true),
-  ('summit-banking', 'Summit Banking', 'BRK', 'IN', 'Broking and trading platform.', false),
-  ('prime-fincorp', 'Prime Fincorp', 'BND', 'AE', 'Corporate bonds and sukuk issuer.', false)
-on conflict (slug) do nothing;
-
-insert into public.company_tags (company_id, tag, sort_order)
-select c.id, t.tag, t.sort_order
-from public.companies c
-join (values
-  ('astra-mutuals', 'Large CAP Stocks', 1), ('astra-mutuals', 'ETF', 2), ('astra-mutuals', 'IPO', 3),
-  ('zenith-capital', 'ETF', 1), ('zenith-capital', 'IPO', 2),
-  ('nexa-funds', 'ETF', 1), ('nexa-funds', 'Large CAP Stocks', 2), ('nexa-funds', 'IPO', 3),
-  ('summit-banking', 'Safe', 1), ('summit-banking', 'Liquid', 2), ('summit-banking', 'IPO', 3),
-  ('prime-fincorp', 'Corporate Bonds', 1), ('prime-fincorp', 'High Yield', 2), ('prime-fincorp', 'IPO', 3)
-) as t (slug, tag, sort_order) on t.slug = c.slug
-on conflict do nothing;
+-- Development seed: the issuers and other content from the mobile app's mock data (src/data.ts).
+-- The Review section's companies, figures, trends and reviews are not here: they are content the
+-- app shows and live in migration 20261118090000_review_section_content.sql.
 
 -- Amounts in INR; offer sizes converted from crore (1 cr = 10,000,000).
 insert into public.issuers (

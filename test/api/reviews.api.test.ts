@@ -105,17 +105,17 @@ describe('POST /api/v1/reviews: access', () => {
     expect(res.body.error.message).toBe('Invalid or expired access token');
   });
 
-  it.each(['observer', 'institutional'] as const)('is not open to %s members', async (user) => {
-    const res = await submit(positiveBody, user);
-    expect(res.status).toBe(403);
-    expect(res.body.error).toEqual({ code: 'FORBIDDEN', message: 'Prive membership required' });
-  });
-
-  it('tells a Prive member without approved KYC to finish KYC', async () => {
-    const res = await submit(positiveBody, 'privePending');
-    expect(res.status).toBe(403);
-    expect(res.body.error).toEqual({ code: 'KYC_REQUIRED', message: 'KYC verification required' });
-  });
+  // As in the app: every signed-in member can write a review.
+  it.each(['observer', 'privePending', 'prive', 'institutional'] as const)(
+    'is open to %s members',
+    async (user) => {
+      primeSubmission();
+      await submit(positiveBody, user).expect(201);
+      expect(fake.callsTo('rpc:submit_review')[0]?.args[0]).toMatchObject({
+        p_user_id: TEST_USERS[user].id,
+      });
+    },
+  );
 });
 
 describe('POST /api/v1/reviews: Idempotency-Key', () => {
@@ -365,7 +365,22 @@ describe('POST /api/v1/reviews: success', () => {
       p_display_mode: 'INITIALS',
       p_allow_contact: false,
       p_declarations_version: '2026-10',
+      p_document_types: [],
     });
+  });
+
+  it('creates a negative review with document types and no files (as the app sends it)', async () => {
+    primeSubmission({ review: { review_attachments: [] } });
+    const { evidence: _omit, ...withoutFiles } = negativeBody;
+    const res = await submit(withoutFiles).expect(201);
+
+    expect(res.body.data).toMatchObject({ documents: ['EMAIL', 'STATEMENT'], evidence: [] });
+    expect(fake.callsTo('rpc:submit_review')[0]?.args[0]).toMatchObject({
+      p_document_types: ['STATEMENT', 'EMAIL'],
+      p_evidence_paths: [],
+      p_evidence_doc_types: [],
+    });
+    expect(fake.callsTo('exists:review-evidence')).toHaveLength(0);
   });
 
   it('creates a negative review with evidence', async () => {
@@ -437,17 +452,14 @@ describe('PATCH /api/v1/reviews/:id/resolution', () => {
     },
   };
 
-  it('requires sign-in and verified Prive membership', async () => {
+  it('requires sign-in; any signed-in reviewer may update their own review', async () => {
     expect((await request(app).patch(url).send({ resolutionStatus: 'RESOLVED' })).status).toBe(401);
-    expect(
-      (await request(app).patch(url).set(auth('observer')).send({ resolutionStatus: 'RESOLVED' }))
-        .status,
-    ).toBe(403);
-    const pending = await request(app)
+    fake.on('rpc:update_review_resolution', updated);
+    await request(app)
       .patch(url)
-      .set(auth('privePending'))
-      .send({ resolutionStatus: 'RESOLVED' });
-    expect(pending.body.error.code).toBe('KYC_REQUIRED');
+      .set(auth('observer'))
+      .send({ resolutionStatus: 'RESOLVED' })
+      .expect(200);
   });
 
   it('updates status and note and returns the result', async () => {

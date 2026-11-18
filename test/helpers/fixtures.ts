@@ -121,6 +121,8 @@ export function ownReviewRow(overrides: Record<string, unknown> = {}) {
       { tag_type: 'CONTACT_STATUS', code: 'CONTACTED_NO_RESPONSE' },
       { tag_type: 'CONCERN', code: 'MIS_SELLING' },
       { tag_type: 'CONCERN', code: 'DELAY_IN_RESPONSE' },
+      { tag_type: 'DOCUMENT_TYPE', code: 'STATEMENT' },
+      { tag_type: 'DOCUMENT_TYPE', code: 'EMAIL' },
     ],
     review_attachments: [{ storage_path: EVIDENCE_PATH, doc_type: 'STATEMENT' }],
     review_versions: [
@@ -174,6 +176,7 @@ export const negativeBody = {
   concerns: ['DELAY_IN_RESPONSE'],
   contactStatus: ['CONTACTED_NO_RESPONSE'],
   negativeDescription: 'Redemption took 21 days to settle.',
+  documents: ['STATEMENT', 'EMAIL'],
   evidence: [{ path: EVIDENCE_PATH, docType: 'STATEMENT' }],
   metrics: { ...metrics, overallSatisfaction: 2 },
   resolutionStatus: 'CLOSED_UNRESOLVED',
