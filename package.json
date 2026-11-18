@@ -10,14 +10,15 @@
     "dev": "nodemon --watch src --watch .env --ext ts,env --exec \"tsx --env-file-if-exists=.env src/server.ts\"",
     "build": "tsc -p tsconfig.build.json",
     "start": "node dist/server.js",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p test",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p test && tsc -p scripts",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
     "db:link": "supabase link --project-ref enkokznzruhyldqdpbwg",
     "db:migrate": "supabase db push --linked",
-    "db:seed": "supabase db push --linked --include-seed"
+    "db:seed": "supabase db push --linked --include-seed",
+    "seed:representation-evidence": "tsx --env-file-if-exists=.env scripts/seed-representation-evidence.ts"
   },
   "dependencies": {
     "@node-rs/argon2": "^2.2.2",

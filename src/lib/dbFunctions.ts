@@ -748,6 +748,8 @@ export const DB_FUNCTIONS = {
       p_statuses: z.array(z.enum(REPRESENTATION_TRACK_STATUSES)).nullable(),
       p_countries: z.array(z.enum(MARKET_COUNTRIES)).nullable(),
       p_open: z.boolean().nullable(),
+      p_years: z.array(z.number().int()).nullable(),
+      p_years_before: z.number().int().nullable(),
       p_sort: z.string(),
       p_limit: z.number().int(),
       p_offset: z.number().int(),
@@ -755,6 +757,10 @@ export const DB_FUNCTIONS = {
     page(representation),
   ),
   app_find_representation: fn(args({ p_id: uuid }), representation.nullable()),
+  app_representation_stats: fn(
+    args({}),
+    z.object({ activePetitions: z.number().int(), totalSignatures: z.number().int() }),
+  ),
   app_representation_signers: fn(
     args({ p_representation_id: internalId, p_limit: z.number().int() }),
     z.array(
@@ -1236,6 +1242,7 @@ export const READ_ONLY_DB_FUNCTIONS: ReadonlySet<DbFunction> = new Set<DbFunctio
   'app_representation_history',
   'app_representation_signature',
   'app_representation_signers',
+  'app_representation_stats',
   'app_representation_submission_pack',
   'app_reset_lookup',
   'app_signature_by_idempotency_key',

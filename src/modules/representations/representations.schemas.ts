@@ -11,6 +11,11 @@ export const representationIdParams = z.strictObject({ id: z.uuid('Invalid repre
 export const REPRESENTATION_SORTS = ['closing_soon', 'recent', 'most_signed', 'progress'] as const;
 export type RepresentationSort = (typeof REPRESENTATION_SORTS)[number];
 
+/** The year a petition opened: `2024`, or `before_2021` for any year before 2021. */
+const yearCode = z
+  .string()
+  .regex(/^(\d{4}|before_\d{4})$/, { message: 'Use a year (2024) or before_YYYY' });
+
 export const listRepresentationsQuery = z.object({
   ...pagination,
   /** Matches title, summary or tags. */
@@ -24,6 +29,7 @@ export const listRepresentationsQuery = z.object({
         .enum(['true', 'false'])
         .transform((value) => value === 'true')
         .optional(),
+      year: csv(yearCode).optional(),
     })
     .optional(),
 });

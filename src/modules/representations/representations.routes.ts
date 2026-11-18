@@ -1,13 +1,7 @@
 import { Router } from 'express';
 import { sendData, sendPage } from '../../lib/http';
 import { readIdempotencyKey, REPLAYED_HEADER } from '../../lib/idempotency';
-import {
-  getAuth,
-  optionalAuth,
-  requireAuth,
-  requireFullAccess,
-  requireVerifiedPrive,
-} from '../../middleware/auth';
+import { getAuth, optionalAuth, requireAuth, requireFullAccess } from '../../middleware/auth';
 import { clientContext } from '../../middleware/requestContext';
 import { parse } from '../../middleware/validate';
 import {
@@ -25,6 +19,11 @@ representationsRouter.get('/', async (req, res) => {
     parse(listRepresentationsQuery, req.query),
   );
   sendPage(res, items, meta);
+});
+
+// GET /representations/stats — Public: petitions open for signing and the total signature count.
+representationsRouter.get('/stats', async (_req, res) => {
+  sendData(res, await representationsService.stats());
 });
 
 // GET /representations/:id — Public: overview, evidence, signers; plus your own signature and its
@@ -47,13 +46,13 @@ representationsRouter.get('/:id/submission', requireAuth, requireFullAccess, asy
   sendData(res, await representationsService.submissionPack(id));
 });
 
-// POST /representations/:id/signatures — Prive (KYC verified): sign with a display choice, an
-// optional investor type, a signature file and both consents. Needs an Idempotency-Key header;
-// returns the signature ID (GIG-XXXXXXXXX) and a link to the receipt PDF.
+// POST /representations/:id/signatures — User: sign with a display choice, an optional investor
+// type, a signature file and both consents, until the petition's closing date. Every signature
+// counts; only Prive signatures count as votes. Needs an Idempotency-Key header; returns the
+// signature ID (GIG-XXXXXXXXX) and a link to the receipt PDF.
 representationsRouter.post(
   '/:id/signatures',
   requireAuth,
-  requireVerifiedPrive,
   async (req, res) => {
     const { id } = parse(representationIdParams, req.params);
     const idempotencyKey = readIdempotencyKey(req);

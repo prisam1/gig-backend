@@ -240,6 +240,7 @@ export const routeDocs: RouteDoc[] = [
     query: representations.listRepresentationsQuery,
     page: true,
   }),
+  r('get', '/representations/stats', 'Representations', 'Active petitions and total signatures', 'public', {}),
   r('get', '/representations/:id', 'Representations', 'Petition overview', 'optional', {
     params: representations.representationIdParams,
   }),
@@ -254,7 +255,7 @@ export const routeDocs: RouteDoc[] = [
     'full',
     { params: representations.representationIdParams },
   ),
-  r('post', '/representations/:id/signatures', 'Representations', 'Sign a petition', 'prive', {
+  r('post', '/representations/:id/signatures', 'Representations', 'Sign a petition', 'user', {
     params: representations.representationIdParams,
     body: representations.signRepresentationBody,
     status: 201,
